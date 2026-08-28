@@ -28,17 +28,6 @@ export const mokaEnhancer: PlatformEnhancer = {
     'textarea[name*="desc"]': 'experiences.0.description',
     'textarea[name*="self"]': 'basics.selfEvaluation',
   },
-  async onBeforePlan(resume) {
-    if (resume.educations && resume.educations.length > 1) {
-      await autoExpandHeuristicSections(['教育', '学历'], resume.educations.length);
-    }
-    if (resume.experiences && resume.experiences.length > 1) {
-      await autoExpandHeuristicSections(['工作', '实习'], resume.experiences.length);
-    }
-    if (resume.projects && resume.projects.length > 1) {
-      await autoExpandHeuristicSections(['项目'], resume.projects.length);
-    }
-  },
 };
 
 export const beisenEnhancer: PlatformEnhancer = {

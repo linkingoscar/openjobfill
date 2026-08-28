@@ -63,21 +63,60 @@ export class SectionEngine {
 
   /**
    * 统计页面当前已渲染的指定模块卡片数量
+   * 策略：先定位模块的 Section Root 容器，再统计 Root 内部包含表单输入的重复卡片/行
    */
   private countExistingSectionCards(keywords: string[]): number {
-    const cardSelectors = [
-      '.card, .form-card, .section-card, .list-item, .dynamic-row, .repeater-item',
-      '[class*="card"], [class*="item-wrapper"], [class*="section-item"]',
-      '.el-card, .ant-card, .semi-card',
-    ];
-
-    const cards = Array.from(document.querySelectorAll<HTMLElement>(cardSelectors.join(','))).filter((c) => {
-      if (!isElementVisible(c)) return false;
-      const text = (c.textContent || '').toLowerCase();
+    // 1. 定位模块标题节点
+    const titleCandidates = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'h1, h2, h3, h4, h5, h6, .section-title, .title, legend, [class*="title"], [class*="header"], .ant-form-item-label'
+      )
+    ).filter((el) => {
+      if (!isElementVisible(el)) return false;
+      const text = (el.textContent || '').trim().toLowerCase();
       return keywords.some((k) => text.includes(k.toLowerCase()));
     });
 
-    return Math.max(1, cards.length);
+    if (titleCandidates.length === 0) {
+      return 1;
+    }
+
+    const titleEl = titleCandidates[0];
+
+    // 2. 定位 Section Root 容器
+    const sectionRoot =
+      titleEl.closest<HTMLElement>(
+        'section, fieldset, .form-section, [class*="section"], [class*="block"], .el-card, .ant-card, form'
+      ) || titleEl.parentElement;
+
+    if (!sectionRoot) {
+      return 1;
+    }
+
+    // 3. 在 Section Root 内部查找具有表单输入控件的卡片/行节点
+    const cardSelectors = [
+      '.card, .form-card, .section-card, .list-item, .dynamic-row, .repeater-item, [class*="card"], [class*="item-wrapper"], [class*="item_wrapper"]',
+      '.el-card, .ant-card, .semi-card, [class*="repeater"]',
+    ];
+
+    const childCards = Array.from(sectionRoot.querySelectorAll<HTMLElement>(cardSelectors.join(','))).filter(
+      (c) => {
+        if (!isElementVisible(c)) return false;
+        // 必须自身包含 input/textarea/select，避免命中空的父级或装饰性 card
+        const hasInputs = c.querySelector('input, textarea, select, [contenteditable="true"]');
+        return !!hasInputs;
+      }
+    );
+
+    if (childCards.length > 0) {
+      // 过滤掉嵌套包含关系的父卡片，只保留最具体的叶子卡片
+      const leafCards = childCards.filter(
+        (card) => !childCards.some((other) => other !== card && card.contains(other))
+      );
+      return Math.max(1, leafCards.length);
+    }
+
+    return 1;
   }
 }
 

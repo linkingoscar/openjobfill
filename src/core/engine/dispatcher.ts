@@ -140,30 +140,36 @@ export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolea
     }
   }
 
-  if (el instanceof HTMLInputElement && el.type === 'radio') {
-    return setNativeRadioChecked(el, true);
-  }
+  // 严格匹配失败：严禁盲点传入的 radio，直接返回 false 转入 RemainingTask
   return false;
 }
 
 /**
- * 模拟对复选框 (Checkbox) 的勾选 (严格布尔值解析)
+ * 严格三态布尔值解析 (Explicit Yes -> true, Explicit No -> false, Ambiguous/Unknown -> null)
+ */
+export function parseBoolean(checkedOrVal: any): boolean | null {
+  if (typeof checkedOrVal === 'boolean') return checkedOrVal;
+  if (checkedOrVal === undefined || checkedOrVal === null) return null;
+  const s = String(checkedOrVal).trim().toLowerCase();
+  if (['是', 'yes', 'y', 'true', '1', 'checked', '同意', '接受', '正确'].includes(s)) {
+    return true;
+  }
+  if (['否', 'no', 'n', 'false', '0', '不同意', '拒绝', '错误', '无'].includes(s)) {
+    return false;
+  }
+  return null; // 模糊词（如“不确定”、“视情况而定”）返回 null
+}
+
+/**
+ * 模拟对复选框 (Checkbox) 的勾选 (严格三态布尔值解析)
  */
 export function setNativeCheckboxChecked(checkboxEl: HTMLInputElement, checkedOrVal: boolean | string | number): boolean {
   if (!checkboxEl) return false;
 
-  let targetChecked = false;
-  if (typeof checkedOrVal === 'boolean') {
-    targetChecked = checkedOrVal;
-  } else {
-    const s = String(checkedOrVal).trim().toLowerCase();
-    if (['是', 'yes', 'y', 'true', '1', 'checked', '同意', '接受'].includes(s)) {
-      targetChecked = true;
-    } else if (['否', 'no', 'n', 'false', '0', '不同意', '拒绝'].includes(s)) {
-      targetChecked = false;
-    } else {
-      targetChecked = Boolean(checkedOrVal);
-    }
+  const targetChecked = parseBoolean(checkedOrVal);
+  if (targetChecked === null) {
+    console.warn(`[OpenJobFill] Checkbox value "${checkedOrVal}" is ambiguous, refusing to guess.`);
+    return false; // 拒绝盲猜，触发验证失败转入待办
   }
 
   if (checkboxEl.checked !== targetChecked) {

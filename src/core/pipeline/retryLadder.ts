@@ -112,13 +112,6 @@ export class RetryLadder {
               return setRadioGroupValue(field.element, String(val));
             },
           },
-          {
-            name: 'Direct Radio Option Click Fallback',
-            execute: (field) => {
-              simulateClick(field.element);
-              return true;
-            },
-          },
         ];
 
       case 'checkbox':

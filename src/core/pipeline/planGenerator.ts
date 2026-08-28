@@ -21,6 +21,14 @@ function getValueByPath(obj: any, path: string): any {
   return curr;
 }
 
+export function hasUsableValue(val: any): boolean {
+  if (val === undefined || val === null) return false;
+  if (typeof val === 'string') {
+    return val.trim().length > 0;
+  }
+  return true;
+}
+
 export class PlanGenerator {
   /**
    * 基于页面字段列表、简历数据与平台增强器，生成两阶段 FillPlan
@@ -79,7 +87,7 @@ export class PlanGenerator {
 
       if (customMatch) {
         const val = getValueByPath(resume, customMatch.resumeKey);
-        if (val !== undefined && val !== null && String(val).trim() !== '') {
+        if (hasUsableValue(val)) {
           items.push({
             id: `plan_${field.id}`,
             field,
@@ -107,7 +115,7 @@ export class PlanGenerator {
               targetKey = targetKey.replace('.0.', `.${field.section.index}.`);
             }
             const val = getValueByPath(resume, targetKey);
-            if (val !== undefined && val !== null && String(val).trim() !== '') {
+            if (hasUsableValue(val)) {
               items.push({
                 id: `plan_${field.id}`,
                 field,
@@ -134,7 +142,7 @@ export class PlanGenerator {
       // 4. 检查问答库 (Q&A Bank)
       if (resume.qaBank && resume.qaBank.length > 0 && (field.type === 'textarea' || field.type === 'text')) {
         const qaMatch = this.matchQABank(field, resume.qaBank, matchedSemanticKeys);
-        if (qaMatch) {
+        if (qaMatch && hasUsableValue(qaMatch.item.answer)) {
           items.push({
             id: `plan_${field.id}`,
             field,
@@ -154,7 +162,7 @@ export class PlanGenerator {
 
       // 5. 通用启发式与语义字典匹配
       const semanticMatch = this.matchSemanticDictionary(field, resume, matchedSemanticKeys);
-      if (semanticMatch && semanticMatch.confidence >= 0.65 && semanticMatch.targetValue !== undefined) {
+      if (semanticMatch && semanticMatch.confidence >= 0.65 && hasUsableValue(semanticMatch.targetValue)) {
         items.push({
           id: `plan_${field.id}`,
           field,
@@ -292,7 +300,7 @@ export class PlanGenerator {
 
     if (bestKey && highestScore >= 0.6) {
       const val = getValueByPath(resume, bestKey);
-      if (val !== undefined && val !== null) {
+      if (hasUsableValue(val)) {
         return {
           resumeKey: bestKey,
           name: bestName,

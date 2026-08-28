@@ -21,15 +21,33 @@ const OPTION_SELECTORS = [
 ];
 
 /**
- * 动态等待下拉菜单或选项在 DOM 中渲染并可见
+ * 动态等待下拉菜单或选项在 DOM 中渲染并可见 (支持 aria-controls / aria-owns 作用域精准隔离)
  */
-async function waitForDropdownCandidates(timeoutMs = 800): Promise<HTMLElement[]> {
+async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 800): Promise<HTMLElement[]> {
   const startTime = Date.now();
+
+  // 1. 尝试从 triggerEl 或内部 input 提取关联的 popup ID
+  const popupId =
+    triggerEl?.getAttribute('aria-controls') ||
+    triggerEl?.getAttribute('aria-owns') ||
+    triggerEl?.querySelector('input')?.getAttribute('aria-controls') ||
+    triggerEl?.querySelector('input')?.getAttribute('aria-owns') ||
+    null;
 
   while (Date.now() - startTime < timeoutMs) {
     const candidates: HTMLElement[] = [];
+
+    // 优先在关联的 popup 作用域内查找
+    let searchRoot: ParentNode = document;
+    if (popupId) {
+      const popupEl = document.getElementById(popupId) || document.querySelector(`[id="${popupId}"]`);
+      if (popupEl) {
+        searchRoot = popupEl;
+      }
+    }
+
     for (const selector of OPTION_SELECTORS) {
-      const found = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      const found = Array.from(searchRoot.querySelectorAll<HTMLElement>(selector));
       for (const el of found) {
         if (isElementVisible(el)) {
           candidates.push(el);
@@ -110,8 +128,8 @@ async function trySelectCustomOptionOnce(
     simulateClick(triggerEl);
   }
 
-  // 4. 动态等待 Portal 选项列表渲染挂载到 document.body
-  const candidateElements = await waitForDropdownCandidates(700);
+  // 4. 动态等待 Portal 选项列表渲染挂载到 DOM (优先在 trigger 关联作用域查找)
+  const candidateElements = await waitForDropdownCandidates(triggerEl, 700);
   if (candidateElements.length === 0) {
     return false;
   }

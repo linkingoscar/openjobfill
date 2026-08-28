@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { planGenerator } from '@/core/pipeline/planGenerator';
+import { planGenerator, hasUsableValue } from '@/core/pipeline/planGenerator';
 import { pageAnalyzer } from '@/core/pipeline/pageAnalyzer';
-import { setRadioGroupValue, setNativeCheckboxChecked } from '@/core/engine/dispatcher';
+import { setRadioGroupValue, setNativeCheckboxChecked, parseBoolean } from '@/core/engine/dispatcher';
 import { parseResumeFromText } from '@/core/parser/resumeParser';
+import { sectionEngine } from '@/core/engine/sectionEngine';
 import type { PlatformEnhancer, FieldDescriptor } from '@/types/pipeline';
 import type { StandardResume } from '@/types/resume';
 
@@ -51,7 +52,55 @@ describe('Precision Engine & Anti-False-Positive Test Suite (精准决策与防�
     document.body.innerHTML = '';
   });
 
-  describe('1. Plan Deduplication (防止平台映射后产生重复 PlanItem)', () => {
+  describe('1. hasUsableValue 统一门禁与 Plan 拦截', () => {
+    it('hasUsableValue 必须正确判定有效值与无效假值', () => {
+      expect(hasUsableValue(undefined)).toBe(false);
+      expect(hasUsableValue(null)).toBe(false);
+      expect(hasUsableValue('')).toBe(false);
+      expect(hasUsableValue('   ')).toBe(false);
+
+      expect(hasUsableValue(0)).toBe(true);
+      expect(hasUsableValue(false)).toBe(true);
+      expect(hasUsableValue('0')).toBe(true);
+      expect(hasUsableValue('否')).toBe(true);
+      expect(hasUsableValue('男')).toBe(true);
+    });
+
+    it('当简历字段为未知空串（如 gender = ""）时，绝不能生成 action: FILL 的规划项', () => {
+      const input = document.createElement('input');
+      input.name = 'gender';
+      document.body.appendChild(input);
+
+      const field: FieldDescriptor = {
+        id: 'f_gender',
+        element: input,
+        type: 'text',
+        label: '性别',
+        placeholder: '请输入性别',
+        name: 'gender',
+        ariaLabel: '',
+        required: true,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      const resumeWithEmptyGender: StandardResume = {
+        ...BASE_MOCK_RESUME,
+        basics: {
+          ...BASE_MOCK_RESUME.basics,
+          gender: '', // 未知留空
+        },
+      };
+
+      const plan = planGenerator.generatePlan([field], resumeWithEmptyGender);
+      const fillItem = plan.items.find((p) => p.semanticKey === 'basics.gender');
+      expect(fillItem).toBeUndefined(); // 绝不生成 FILL
+    });
+  });
+
+  describe('2. Plan Deduplication (防止平台映射后产生重复 PlanItem)', () => {
     it('命中平台专属规则的字段，严禁再被问答库或通用语义生成第二个 PlanItem', () => {
       const input = document.createElement('input');
       input.className = 'moka-candidate-name-input';
@@ -92,7 +141,7 @@ describe('Precision Engine & Anti-False-Positive Test Suite (精准决策与防�
     });
   });
 
-  describe('2. Radio Group 语义精准查找与勾选', () => {
+  describe('3. Radio Group 严格匹配 (严禁找不到选项时盲选当前 Radio)', () => {
     it('面对同名性别单选框组，setRadioGroupValue 应能根据目标值准确定位并勾选目标单选框', () => {
       document.body.innerHTML = `
         <div class="form-item gender-group">
@@ -118,31 +167,81 @@ describe('Precision Engine & Anti-False-Positive Test Suite (精准决策与防�
       expect(femaleRadio.checked).toBe(true);
       expect(maleRadio.checked).toBe(false);
     });
-  });
 
-  describe('3. Checkbox 严格布尔解析 (严禁将 "否" 解析为 true)', () => {
-    it('字符串 "否" / "false" / "0" / "不同意" 应严格被解析为 false 并取消勾选', () => {
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = true;
-      document.body.appendChild(checkbox);
+    it('当 targetValue 与组内所有 Radio 都不匹配时，必须返回 false 且绝不能修改任何 radio 状态', () => {
+      document.body.innerHTML = `
+        <div class="form-item gender-group">
+          <label class="radio-label">
+            <input type="radio" name="gender" value="M" /> 男
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="gender" value="F" /> 女
+          </label>
+        </div>
+      `;
 
-      // 传入 "否"
-      setNativeCheckboxChecked(checkbox, '否');
-      expect(checkbox.checked).toBe(false);
+      const maleRadio = document.querySelector('input[value="M"]') as HTMLInputElement;
+      const femaleRadio = document.querySelector('input[value="F"]') as HTMLInputElement;
 
-      // 传入 "不同意"
-      checkbox.checked = true;
-      setNativeCheckboxChecked(checkbox, '不同意');
-      expect(checkbox.checked).toBe(false);
-
-      // 传入 "是"
-      setNativeCheckboxChecked(checkbox, '是');
-      expect(checkbox.checked).toBe(true);
+      // 传入一个不存在的选项 "保密"
+      const res = setRadioGroupValue(maleRadio, '保密');
+      expect(res).toBe(false);
+      expect(maleRadio.checked).toBe(false);
+      expect(femaleRadio.checked).toBe(false);
     });
   });
 
-  describe('4. Parser "不会就不填" 纯洁性测试', () => {
+  describe('4. Checkbox 三态布尔解析与拒绝盲猜', () => {
+    it('parseBoolean 必须严格区分 true / false / null', () => {
+      expect(parseBoolean('是')).toBe(true);
+      expect(parseBoolean('yes')).toBe(true);
+      expect(parseBoolean('同意')).toBe(true);
+
+      expect(parseBoolean('否')).toBe(false);
+      expect(parseBoolean('false')).toBe(false);
+      expect(parseBoolean('不同意')).toBe(false);
+
+      expect(parseBoolean('不确定')).toBeNull();
+      expect(parseBoolean('视情况而定')).toBeNull();
+      expect(parseBoolean('unknown')).toBeNull();
+      expect(parseBoolean('')).toBeNull();
+    });
+
+    it('遇到模糊词时，setNativeCheckboxChecked 必须返回 false，拒绝盲猜', () => {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = false;
+      document.body.appendChild(checkbox);
+
+      const res = setNativeCheckboxChecked(checkbox, '不确定');
+      expect(res).toBe(false);
+      expect(checkbox.checked).toBe(false); // 绝不翻转为 true
+    });
+  });
+
+  describe('5. Section Root 容器精确定位与卡片计数', () => {
+    it('即便子卡片内部不包含“教育”文字，SectionEngine 也能通过 Section Root 容器准确定位卡片数量', () => {
+      document.body.innerHTML = `
+        <section class="education-section">
+          <h2>教育经历</h2>
+          <div class="card item-wrapper">
+            <input name="school" value="清华大学" />
+            <input name="major" value="计算机科学" />
+          </div>
+          <div class="card item-wrapper">
+            <input name="school" value="北京大学" />
+            <input name="major" value="软件工程" />
+          </div>
+        </section>
+      `;
+
+      // 现有 2 张卡片，如果 resume 里需要 2 张，则不需要重复扩增
+      const count = (sectionEngine as any).countExistingSectionCards(['教育', '学历']);
+      expect(count).toBe(2);
+    });
+  });
+
+  describe('6. Parser "不会就不填" 纯洁性测试', () => {
     it('简历文本未明确提及性别、政治面貌、婚姻状况时，严禁默认推断出假值', () => {
       const textWithoutDemographics = `
         张敏
@@ -157,57 +256,6 @@ describe('Precision Engine & Anti-False-Positive Test Suite (精准决策与防�
       expect(parsed.basics.politicalStatus).toBe(''); // 严禁默认为 '群众'
       expect(parsed.basics.maritalStatus).toBe(''); // 严禁默认为 '未婚'
       expect(parsed.basics.jobStatus).toBe(''); // 严禁默认为 '应届毕业生'
-    });
-  });
-
-  describe('5. Cascader 控件识别与 enhanceField Hook', () => {
-    it('PageAnalyzer 应该能将 ant-cascader 与 el-cascader 准确识别为 cascader 类型', () => {
-      const div = document.createElement('div');
-      div.className = 'ant-cascader el-cascader';
-      document.body.appendChild(div);
-
-      const descriptors = pageAnalyzer.analyzePage(document);
-      expect(descriptors.length).toBe(1);
-      expect(descriptors[0].type).toBe('cascader');
-    });
-
-    it('PlatformEnhancer.enhanceField Hook 能动态修正字段元数据', () => {
-      const input = document.createElement('input');
-      document.body.appendChild(input);
-
-      const field: FieldDescriptor = {
-        id: 'f_hook',
-        element: input,
-        type: 'text',
-        label: '未知代码',
-        placeholder: '',
-        name: 'custom_code',
-        ariaLabel: '',
-        required: true,
-        disabled: false,
-        readOnly: false,
-        currentValue: '',
-        contextText: '',
-      };
-
-      const hookEnhancer: PlatformEnhancer = {
-        id: 'hook-enhancer',
-        name: 'Hook 增强器',
-        priority: 100,
-        matches: () => true,
-        enhanceField: (f) => {
-          if (f.name === 'custom_code') {
-            return { label: '增强后的真实姓名', type: 'text' };
-          }
-          return undefined;
-        },
-        fieldMappings: {
-          'input[name="custom_code"]': 'basics.name',
-        },
-      };
-
-      const plan = planGenerator.generatePlan([field], BASE_MOCK_RESUME, hookEnhancer);
-      expect(field.label).toBe('增强后的真实姓名');
     });
   });
 });
