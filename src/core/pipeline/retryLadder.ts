@@ -1,6 +1,6 @@
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
 import { setNativeValue, setNativeRadioChecked, setRadioGroupValue, setNativeCheckboxChecked, simulateClick } from '../engine/dispatcher';
-import { selectCustomOption } from '../engine/selector';
+import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 import { locationResolver } from '../resolvers/locationResolver';
 import { dateEngine } from '../resolvers/dateEngine';
@@ -37,8 +37,25 @@ export class RetryLadder {
           },
         ];
 
-      case 'select':
       case 'cascader':
+        return [
+          {
+            name: 'Hierarchical Cascader Multi-Level Step Driver',
+            execute: async (field, val) => {
+              const stringVal = String(val);
+              // 如果是包含省市区或者连字符的多级路径
+              return await selectCascaderOptions(field.element, stringVal);
+            },
+          },
+          {
+            name: 'Fallback to Single Select Option Finder',
+            execute: async (field, val) => {
+              return await selectCustomOption(field.element, String(val));
+            },
+          },
+        ];
+
+      case 'select':
         return [
           {
             name: 'Option/Location Resolver + Custom UI Selection',

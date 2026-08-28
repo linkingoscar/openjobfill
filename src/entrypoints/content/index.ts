@@ -80,10 +80,25 @@ export default defineContentScript({
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
         console.log('[OpenJobFill] 检测到网申步骤/SPA路由变化:', lastUrl);
+        if (vm && vm.notifyStepChange) {
+          vm.notifyStepChange(lastUrl);
+        }
       }
     };
     window.addEventListener('popstate', handleStepChange);
     window.addEventListener('hashchange', handleStepChange);
+
+    // 拦截 pushState / replaceState 以精准捕获无刷新单页步骤切换
+    const originalPushState = history.pushState;
+    history.pushState = function (...args) {
+      originalPushState.apply(this, args);
+      handleStepChange();
+    };
+    const originalReplaceState = history.replaceState;
+    history.replaceState = function (...args) {
+      originalReplaceState.apply(this, args);
+      handleStepChange();
+    };
 
     // 监听来自 Background / Popup 的指令
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

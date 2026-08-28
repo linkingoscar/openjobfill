@@ -42,12 +42,40 @@ import type { JobApplicationRecord } from '@/types/tracker';
 
 const isFilling = ref(false);
 const isDrawerOpen = ref(false);
-const drawerTab = ref<'logs' | 'clipboard' | 'jdMatch'>('logs');
+const drawerTab = ref<'logs' | 'review' | 'clipboard' | 'jdMatch'>('logs');
 const currentAdapterName = ref('');
 const fillResult = ref<FillResult | null>(null);
 const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
+
+// 多步向导与待办核对提示
+const stepNotification = ref({ show: false, text: '' });
+
+const handleFocusTaskElement = (task: any) => {
+  if (task.element) {
+    task.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (typeof task.element.focus === 'function') {
+      task.element.focus();
+    }
+    // 触发临时闪烁高亮动画
+    task.element.style.outline = '3px solid #f59e0b';
+    task.element.style.outlineOffset = '2px';
+    setTimeout(() => {
+      if (task.element) task.element.style.outline = '';
+    }, 2000);
+  }
+};
+
+const notifyStepChange = (newUrl: string) => {
+  stepNotification.value = {
+    show: true,
+    text: '💡 检测到网申已进入新步骤，点击可一键规划并填充当前页'
+  };
+  setTimeout(() => {
+    stepNotification.value.show = false;
+  }, 8000);
+};
 
 // 岗位 JD 分析与荧光笔状态
 const jdAnalysis = ref<JDAnalysisResult | null>(null);
@@ -400,6 +428,7 @@ const handleOpenOptions = () => {
 
 defineExpose({
   handleQuickFill,
+  notifyStepChange,
 });
 </script>
 
@@ -545,6 +574,27 @@ defineExpose({
             <span>一键填表</span>
           </button>
           <button
+            id="drawer-tab-review"
+            role="tab"
+            type="button"
+            :aria-selected="drawerTab === 'review'"
+            aria-controls="drawer-panel-review"
+            @click="drawerTab = 'review'"
+            :class="[
+              'flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500 relative',
+              drawerTab === 'review' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+            ]"
+          >
+            <AlertTriangle class="w-3.5 h-3.5" aria-hidden="true" />
+            <span>待办核对</span>
+            <span 
+              v-if="fillResult?.remainingTasks && fillResult.remainingTasks.length > 0"
+              class="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold"
+            >
+              {{ fillResult.remainingTasks.length }}
+            </span>
+          </button>
+          <button
             id="drawer-tab-jd"
             role="tab"
             type="button"
@@ -660,6 +710,52 @@ defineExpose({
               <span>{{ isFilling ? '正在填写...' : '一键自动填写本页 (Alt+Shift+F)' }}</span>
             </button>
           </footer>
+        </div>
+
+        <!-- TAB: 待办与核对 (Review) -->
+        <div 
+          id="drawer-panel-review"
+          role="tabpanel"
+          aria-labelledby="drawer-tab-review"
+          v-if="drawerTab === 'review'" 
+          class="flex-1 flex flex-col min-h-0 overflow-hidden"
+        >
+          <div class="p-3 bg-amber-50/70 border-b border-amber-100 flex items-center justify-between">
+            <div class="flex items-center gap-1.5 text-amber-900 font-bold">
+              <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span>需人工确认 / 待办清单 ({{ fillResult?.remainingTasks?.length || 0 }})</span>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
+            <div v-if="!fillResult || !fillResult.remainingTasks || fillResult.remainingTasks.length === 0" class="text-center py-10 text-slate-400">
+              <CheckCircle class="w-10 h-10 mx-auto text-emerald-500/40 mb-2" />
+              <p class="font-bold text-slate-600">当前没有需要人工确认的待办项</p>
+              <p class="text-[11px] mt-1 text-slate-400">点击“一键填表”后，未匹配的必填项将在此展示并支持一键定位</p>
+            </div>
+
+            <div 
+              v-for="task in fillResult?.remainingTasks || []" 
+              :key="task.id"
+              class="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/30 hover:bg-amber-50 transition flex items-start justify-between gap-2"
+            >
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span v-if="task.required" class="px-1 py-0.2 bg-red-100 text-red-700 rounded text-[10px] font-bold">必填</span>
+                  <span class="font-bold text-slate-800 text-xs truncate">{{ task.label }}</span>
+                </div>
+                <p class="text-[11px] text-amber-800/80 mt-1 font-medium">{{ task.reason }}</p>
+              </div>
+              <button
+                type="button"
+                @click="handleFocusTaskElement(task)"
+                class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition flex-shrink-0 shadow-xs"
+                title="在网页中滚动并高亮定位此输入框"
+              >
+                定位
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- TAB 2: 岗位 JD 匹配度分析 -->
@@ -875,6 +971,25 @@ defineExpose({
             </button>
           </footer>
         </div>
+      </div>
+    </transition>
+
+    <!-- Step Change Mini Notification Toast -->
+    <transition
+      enter-active-class="transition duration-300 ease-out transform"
+      enter-from-class="-translate-y-2 opacity-0"
+      enter-to-class="translate-y-0 opacity-100"
+      leave-active-class="transition duration-200 ease-in transform"
+      leave-from-class="translate-y-0 opacity-100"
+      leave-to-class="-translate-y-2 opacity-0"
+    >
+      <div 
+        v-if="stepNotification.show"
+        @click="handleQuickFill"
+        class="cursor-pointer max-w-[220px] bg-slate-900/95 text-white text-xs px-3 py-2 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-center gap-2 hover:bg-blue-900 transition mb-1"
+      >
+        <Sparkles class="w-4 h-4 text-amber-400 flex-shrink-0 animate-bounce" />
+        <span class="text-[11px] font-medium leading-tight">{{ stepNotification.text }}</span>
       </div>
     </transition>
 

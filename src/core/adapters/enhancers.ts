@@ -89,7 +89,7 @@ export const feishuEnhancer: PlatformEnhancer = {
 
 export const workdayEnhancer: PlatformEnhancer = {
   id: 'workday-enhancer',
-  name: 'Workday 招聘系统增强器',
+  name: 'Workday 国际招聘系统增强器',
   priority: 90,
   matches: (url: string) => {
     return (
@@ -99,13 +99,23 @@ export const workdayEnhancer: PlatformEnhancer = {
     );
   },
   fieldMappings: {
-    '[data-automation-id="legalNameSection_firstName"] input': 'basics.name',
-    '[data-automation-id="phone-number"] input': 'basics.phone',
-    '[data-automation-id="email"] input': 'basics.email',
+    '[data-automation-id="legalNameSection_firstName"] input, [data-automation-id="firstName"] input': 'basics.firstName',
+    '[data-automation-id="legalNameSection_lastName"] input, [data-automation-id="lastName"] input': 'basics.lastName',
+    '[data-automation-id="preferredNameSection_firstName"] input': 'basics.preferredName',
+    '[data-automation-id="phone-number"] input, [data-automation-id="phone-number"]': 'basics.phone',
+    '[data-automation-id="email"] input, [data-automation-id="email"]': 'basics.email',
+    '[data-automation-id="addressSection_countryRegion"]': 'basics.country',
+    '[data-automation-id="addressSection_postalCode"] input': 'basics.postalCode',
+    '[data-automation-id="addressSection_addressLine1"] input': 'basics.addressLine1',
     '[data-automation-id="addressSection_city"] input': 'basics.currentLocation.city',
     '[data-automation-id="school"] input': 'educations.0.schoolName',
+    '[data-automation-id="degree"]': 'educations.0.degree',
+    '[data-automation-id="field-of-study"] input': 'educations.0.major',
     '[data-automation-id="company"] input': 'experiences.0.company',
     '[data-automation-id="jobTitle"] input': 'experiences.0.title',
+    '[data-automation-id="startDate"] input': 'experiences.0.startDate',
+    '[data-automation-id="endDate"] input': 'experiences.0.endDate',
+    '[data-automation-id="description"] textarea': 'experiences.0.description',
   },
 };
 

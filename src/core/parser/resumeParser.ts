@@ -104,17 +104,49 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
     resume.basics.expectedRole = roleMatch[1].trim();
   }
 
-  // 10. 提取姓名 (通常位于文档前 5 行，且为 2-4 字纯中文，排除“简历/个人信息”等噪音词)
-  const namePatternMatch = text.match(/(?:姓\s*名)[：:\s]*([\u4e00-\u9fa5]{2,4})/);
+  // 10. 提取姓名 (支持中英文姓名与文档首部提取)
+  const namePatternMatch = text.match(/(?:姓\s*名|Name|Full\s*Name)[：:\s]*([a-zA-Z\u4e00-\u9fa5\s]{2,25})/i);
   if (namePatternMatch) {
-    resume.basics.name = namePatternMatch[1];
+    resume.basics.name = namePatternMatch[1].trim();
   } else {
     for (let i = 0; i < Math.min(lines.length, 5); i++) {
-      const line = lines[i].replace(/[^\u4e00-\u9fa5]/g, '');
-      const noisyWords = ['个人简历', '求职简历', '简历', '个人信息', '基本信息', '求职意向'];
-      if (line.length >= 2 && line.length <= 4 && !noisyWords.some(w => line.includes(w))) {
-        resume.basics.name = line;
+      const rawLine = lines[i].trim();
+      const noisyWords = ['个人简历', '求职简历', '简历', '个人信息', '基本信息', '求职意向', 'resume', 'curriculum vitae', 'cv'];
+      if (noisyWords.some(w => rawLine.toLowerCase().includes(w))) {
+        continue;
+      }
+      
+      // 纯中文 2-4 字姓名
+      const chineseOnly = rawLine.replace(/[^\u4e00-\u9fa5]/g, '');
+      if (chineseOnly.length >= 2 && chineseOnly.length <= 4 && chineseOnly === rawLine) {
+        resume.basics.name = chineseOnly;
         break;
+      }
+
+      // 英文姓名 (如 "Johnathan Smith" 或 "Alex Ferguson")
+      if (/^[A-Za-z]+(?:\s+[A-Za-z]+){1,2}$/.test(rawLine) && rawLine.length <= 30) {
+        resume.basics.name = rawLine;
+        break;
+      }
+    }
+  }
+
+  // 10.1 智能中英文姓名拆分 (firstName / lastName)
+  if (resume.basics.name) {
+    const rawName = resume.basics.name.trim();
+    if (/\s+/.test(rawName)) {
+      const parts = rawName.split(/\s+/);
+      resume.basics.firstName = parts[0];
+      resume.basics.lastName = parts.slice(1).join(' ');
+    } else if (/^[\u4e00-\u9fa5]{2,4}$/.test(rawName)) {
+      const compoundSurnames = ['欧阳', '诸葛', '司马', '上官', '东方', '独孤', '南宫', '皇甫', '公孙', '令狐', '钟离', '慕容', '夏侯', '尉迟'];
+      const matchedCompound = compoundSurnames.find(s => rawName.startsWith(s));
+      if (matchedCompound) {
+        resume.basics.lastName = matchedCompound;
+        resume.basics.firstName = rawName.slice(matchedCompound.length);
+      } else {
+        resume.basics.lastName = rawName.slice(0, 1);
+        resume.basics.firstName = rawName.slice(1);
       }
     }
   }

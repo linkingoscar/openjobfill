@@ -98,25 +98,40 @@ export interface CustomQABankItem {
 
 export interface ResumeBasics {
   name: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  preferredName?: string;
   gender?: '男' | '女' | '其他' | '';
   birthDate: string; // YYYY-MM-DD
   age?: number;
   phone: string;
   email: string;
   avatarUrl?: string;
-  idCardType: '身份证' | '护照' | '港澳台通行证' | '其他';
+  idCardType?: '身份证' | '护照' | '港澳台通行证' | '其他' | '';
   idCardNumber: string;
   politicalStatus?: '中共党员' | '中共预备党员' | '共青团员' | '群众' | '民主党派' | '其他' | '';
-  ethnicity: string; // 汉族, 满族, 回族 等
+  ethnicity?: string; // 汉族, 满族, 回族 等
   maritalStatus?: '未婚' | '已婚' | '保密' | '';
   height?: string; // 身高 cm
   weight?: string; // 体重 kg
-  healthStatus?: '健康' | '良好' | '一般';
+  healthStatus?: '健康' | '良好' | '一般' | '';
   
   // 地理位置
+  country?: string; // 国家/地区代码或名称，如 "China", "United States", "CN", "US"
+  state?: string; // 州 / 省
+  postalCode?: string; // 邮政编码 / Zip Code
+  addressLine1?: string; // 街道地址第一行
+  addressLine2?: string; // 街道地址第二行
   nativePlace?: LocationInfo; // 籍贯 (省-市-区)
   currentLocation?: LocationInfo; // 现居住地 (省-市-区)
   hukouLocation?: LocationInfo; // 户口所在地
+  
+  // 国际网申与合规属性 (Workday / Taleo / Greenhouse)
+  workAuthorization?: 'US_CITIZEN' | 'PERMANENT_RESIDENT' | 'NEED_SPONSORSHIP' | 'OPT_STEM' | 'OTHER' | string;
+  visaSponsorship?: boolean; // 是否需要签证赞助 (Will you require sponsorship?)
+  veteranStatus?: string; // 退伍军人状态
+  disabilityStatus?: string; // 残障状态
   
   // 求职意向
   workingYears: number; // 工作年限 (0 为应届生)
