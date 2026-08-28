@@ -50,6 +50,10 @@ function isExtensionEnv(): boolean {
 }
 
 export const trackerStorage = {
+  async getAllApplications(): Promise<JobApplicationRecord[]> {
+    return this.getApplications();
+  },
+
   async getApplications(): Promise<JobApplicationRecord[]> {
     if (isExtensionEnv()) {
       return new Promise((resolve) => {

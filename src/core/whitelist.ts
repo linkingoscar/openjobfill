@@ -147,7 +147,7 @@ function hasATSComponentSignals(): boolean {
 // ==========================================
 const STORAGE_KEY_CUSTOM_DOMAINS = 'openjobfill_custom_domains';
 
-async function getCustomDomains(): Promise<string[]> {
+export async function getCustomDomains(): Promise<string[]> {
   if (typeof chrome !== 'undefined' && !!chrome.runtime?.id && chrome.storage?.local) {
     return new Promise((resolve) => {
       try {

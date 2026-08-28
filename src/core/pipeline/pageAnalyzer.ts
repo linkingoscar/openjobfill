@@ -9,19 +9,37 @@ export class PageAnalyzer {
     const descriptors: FieldDescriptor[] = [];
     const visitedElements = new Set<HTMLElement>();
 
-    // 1. 扫描所有原生 input / textarea / select
-    const nativeInputs = Array.from(
-      container.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
-    );
+    // 0. 收集主容器及所有可访问的同源 iframe 页面
+    const documentsToScan: (Document | HTMLElement)[] = [container];
+    try {
+      const iframes = Array.from(container.querySelectorAll<HTMLIFrameElement>('iframe, frame'));
+      for (const iframe of iframes) {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (iframeDoc && iframeDoc.body) {
+            documentsToScan.push(iframeDoc);
+          }
+        } catch {
+          // 跨域 iframe (SecurityError) 静默忽略
+        }
+      }
+    } catch {}
 
-    // 2. 扫描自定义下拉框 / Combobox / Cascader 容器
-    const customComponents = Array.from(
-      container.querySelectorAll<HTMLElement>(
-        '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]'
-      )
-    );
+    const allCandidateElements: HTMLElement[] = [];
 
-    const allCandidateElements = [...nativeInputs, ...customComponents];
+    for (const targetDoc of documentsToScan) {
+      try {
+        const nativeInputs = Array.from(
+          targetDoc.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
+        );
+        const customComponents = Array.from(
+          targetDoc.querySelectorAll<HTMLElement>(
+            '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]'
+          )
+        );
+        allCandidateElements.push(...nativeInputs, ...customComponents);
+      } catch {}
+    }
 
     let fieldCounter = 0;
     for (const el of allCandidateElements) {

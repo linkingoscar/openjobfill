@@ -111,6 +111,11 @@ const loadResumes = async () => {
   currentResume.value = JSON.parse(JSON.stringify(active));
 };
 
+const handleDataRestored = async () => {
+  await loadResumes();
+  await loadCustomDomains();
+};
+
 onMounted(() => {
   loadResumes();
   loadCustomDomains();
@@ -495,6 +500,8 @@ const handleImportJson = (e: Event) => {
             :domain-save-success="domainSaveSuccess"
             @add-domain="handleAddDomain"
             @remove-domain="handleRemoveDomain"
+            @data-restored="handleDataRestored"
+            @show-toast="(type, text) => showToast(type, text)"
           />
         </div>
       </main>
