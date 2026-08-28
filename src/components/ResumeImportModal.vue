@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { extractTextFromFile } from '@/core/parser/textExtractor';
 import { parseResumeFromText } from '@/core/parser/resumeParser';
 import type { StandardResume } from '@/types/resume';
@@ -14,7 +14,10 @@ import {
   User,
   GraduationCap,
   Briefcase,
-  FolderGit2
+  FolderGit2,
+  Activity,
+  AlertTriangle,
+  HelpCircle
 } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -28,6 +31,53 @@ const rawText = ref('');
 const fileName = ref('');
 const parsedResume = ref<StandardResume | null>(null);
 const errorMessage = ref('');
+
+const healthReport = computed(() => {
+  if (!parsedResume.value) return null;
+  const r = parsedResume.value;
+  
+  let identifiedCount = 0;
+  if (r.basics.name) identifiedCount++;
+  if (r.basics.phone) identifiedCount++;
+  if (r.basics.email) identifiedCount++;
+  if (r.basics.gender) identifiedCount++;
+  if (r.basics.birthDate) identifiedCount++;
+  if (r.basics.politicalStatus) identifiedCount++;
+  if (r.basics.expectedRole) identifiedCount++;
+  if (r.basics.currentLocation?.city) identifiedCount++;
+  if (r.basics.nativePlace?.city) identifiedCount++;
+  if (r.basics.selfEvaluation) identifiedCount++;
+  identifiedCount += (r.educations?.length || 0) * 3;
+  identifiedCount += (r.experiences?.length || 0) * 3;
+  identifiedCount += (r.projects?.length || 0) * 2;
+  identifiedCount += (r.skills?.length || 0);
+
+  const missingItems: string[] = [];
+  if (!r.basics.gender) missingItems.push('性别');
+  if (!r.basics.nativePlace?.city && !r.basics.nativePlace?.province) missingItems.push('籍贯 / 生源地');
+  if (!r.basics.hukouLocation?.city && !r.basics.hukouLocation?.province) missingItems.push('户口所在地');
+  if (!r.basics.availableTime) missingItems.push('到岗时间');
+  if (!r.basics.maritalStatus) missingItems.push('婚姻状况');
+  if (!r.basics.height) missingItems.push('身高');
+  if (!r.basics.expectedSalaryMin) missingItems.push('期望薪资');
+  if (!r.certificates || r.certificates.length === 0) missingItems.push('CET-4/6 英语成绩或证书');
+  if (!r.basics.idCardNumber) missingItems.push('身份证号');
+
+  const warnings: string[] = [];
+  r.educations?.forEach((edu, i) => {
+    if (!edu.endDate) warnings.push(`第 ${i + 1} 段教育缺少毕业年月`);
+    if (!edu.major) warnings.push(`第 ${i + 1} 段教育缺少专业`);
+  });
+  r.experiences?.forEach((exp, i) => {
+    if (!exp.startDate || !exp.endDate) warnings.push(`第 ${i + 1} 段经历起止时间不完整`);
+  });
+
+  return {
+    identifiedCount,
+    missingItems,
+    warnings,
+  };
+});
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
@@ -253,20 +303,54 @@ const handleConfirmImport = () => {
           <span>{{ errorMessage }}</span>
         </div>
 
-        <!-- Parsed Result Preview -->
-        <div v-if="parsedResume" class="space-y-4 animate-fade-in">
-          <div class="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs">
-            <div class="flex items-center gap-2 font-bold">
-              <CheckCircle2 class="w-4 h-4 text-emerald-600" aria-hidden="true" />
-              <span>简历解析成功！已提取结构化字段如下：</span>
+        <!-- Parsed Result Preview & Health Check -->
+        <div v-if="parsedResume && healthReport" class="space-y-4 animate-fade-in">
+          <!-- Health Check Diagnostic Banner -->
+          <div class="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Activity class="w-4 h-4 text-blue-600" />
+                <span class="font-bold text-slate-900 text-xs">简历解析体检报告</span>
+                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[11px]">
+                  已识别 {{ healthReport.identifiedCount }} 项字段
+                </span>
+              </div>
+              <button
+                type="button"
+                @click="parsedResume = null"
+                class="text-xs text-slate-500 hover:text-slate-900 underline font-medium focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+              >
+                重新上传
+              </button>
             </div>
-            <button
-              type="button"
-              @click="parsedResume = null"
-              class="text-xs text-slate-600 hover:text-slate-900 underline font-medium focus-visible:ring-2 focus-visible:ring-emerald-500 rounded"
-            >
-              重新上传
-            </button>
+
+            <!-- Missing High-frequency Items -->
+            <div v-if="healthReport.missingItems.length > 0" class="space-y-1.5">
+              <div class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                <AlertCircle class="w-3.5 h-3.5 text-amber-500" />
+                <span>建议在网申前补全的高频缺失项 ({{ healthReport.missingItems.length }} 项):</span>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="item in healthReport.missingItems"
+                  :key="item"
+                  class="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/80 rounded-lg text-[11px] font-medium"
+                >
+                  ○ {{ item }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Warnings -->
+            <div v-if="healthReport.warnings.length > 0" class="space-y-1">
+              <div class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                <AlertTriangle class="w-3.5 h-3.5 text-amber-600" />
+                <span>建议核对项:</span>
+              </div>
+              <ul class="text-[11px] text-slate-500 list-disc list-inside space-y-0.5">
+                <li v-for="(warn, i) in healthReport.warnings" :key="i">{{ warn }}</li>
+              </ul>
+            </div>
           </div>
 
           <div class="grid grid-cols-2 gap-4 text-xs">
@@ -341,7 +425,7 @@ const handleConfirmImport = () => {
             @click="handleConfirmImport"
             class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-500/25 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            <span>确认导入为新简历</span>
+            <span>导入并补全资料</span>
             <ArrowRight class="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         </div>

@@ -96,4 +96,31 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
 
     expect(() => parseResumeFromText('~~~$$$### 123456 !!! ???')).not.toThrow();
   });
+
+  it('技能熟练度仅在原文明确写明时才提取，未写明时保持空值拒绝盲猜', () => {
+    const text = `
+      张三
+      【专业技能】
+      Java(精通)、Python、C++(熟练)、TypeScript
+    `;
+    const resume = parseResumeFromText(text);
+    const java = resume.skills.find(s => s.name === 'Java');
+    const python = resume.skills.find(s => s.name === 'Python');
+    const cpp = resume.skills.find(s => s.name === 'C++');
+
+    expect(java?.level).toBe('精通');
+    expect(python?.level).toBeUndefined(); // 必须为 undefined/未声明，严禁盲猜默认“熟练”
+    expect(cpp?.level).toBe('熟练');
+  });
+
+  it('纯实习经历不应被错误推算为社招在职，jobStatus 保持干净未填写', () => {
+    const text = `
+      学生小李
+      【工作经历】
+      2023.06 - 2023.09 某大厂 实习生
+      2024.03 - 2024.07 某独角兽 前端实习
+    `;
+    const resume = parseResumeFromText(text);
+    expect(resume.basics.jobStatus || '').toBe(''); // 绝不被推断为 '在职-考虑机会'
+  });
 });

@@ -23,6 +23,140 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 // 严格配置 PDF.js 本地 Worker 脚本路径
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+export interface PdfLayoutItem {
+  str: string;
+  x: number;
+  y: number; // PDF.js Y from bottom (higher = top)
+  width: number;
+  height: number;
+}
+
+/**
+ * 将空间散落的 PDF 文本块按 Y 坐标聚类成行，单行内按 X 坐标从左到右拼接
+ */
+export function clusterLinesToString(items: PdfLayoutItem[], lineTolerance = 4): string {
+  if (items.length === 0) return '';
+
+  // PDF.js 的 Y 轴是从页面底部向上增长，因此从上到下阅读需要按 Y 降序排序
+  const sorted = [...items].sort((a, b) => {
+    const dy = b.y - a.y;
+    if (Math.abs(dy) > lineTolerance) {
+      return dy;
+    }
+    return a.x - b.x;
+  });
+
+  const lines: PdfLayoutItem[][] = [];
+  let currentLine: PdfLayoutItem[] = [];
+  let currentY: number | null = null;
+
+  for (const item of sorted) {
+    if (currentY === null) {
+      currentLine.push(item);
+      currentY = item.y;
+    } else if (Math.abs(item.y - currentY) <= lineTolerance) {
+      currentLine.push(item);
+    } else {
+      lines.push(currentLine);
+      currentLine = [item];
+      currentY = item.y;
+    }
+  }
+
+  if (currentLine.length > 0) {
+    lines.push(currentLine);
+  }
+
+  // 对每一行内部按 X 从小到大排序，并智能添加空格或中文字符直连
+  const resultLines = lines.map((line) => {
+    line.sort((a, b) => a.x - b.x);
+    let lineStr = '';
+    for (let i = 0; i < line.length; i++) {
+      const item = line[i];
+      if (i > 0) {
+        const prev = line[i - 1];
+        const gap = item.x - (prev.x + prev.width);
+        if (gap > 8 || (gap > 2 && (/[a-zA-Z0-9]$/.test(prev.str) || /^[a-zA-Z0-9]/.test(item.str)))) {
+          lineStr += ' ';
+        }
+      }
+      lineStr += item.str;
+    }
+    return lineStr.trim();
+  });
+
+  return resultLines.filter(Boolean).join('\n');
+}
+
+/**
+ * 空间坐标与两栏重排恢复引擎
+ */
+export function reconstructPdfLayout(rawItems: any[], viewportWidth?: number): string {
+  const items: PdfLayoutItem[] = [];
+  
+  for (const it of rawItems) {
+    if (!it.str || typeof it.str !== 'string' || !it.str.trim()) continue;
+    const transform = it.transform || [1, 0, 0, 1, 0, 0];
+    items.push({
+      str: it.str,
+      x: transform[4],
+      y: transform[5],
+      width: it.width || 0,
+      height: it.height || Math.abs(transform[0]) || 12,
+    });
+  }
+
+  if (items.length === 0) return '';
+
+  // 1. 自动计算页面边界
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const item of items) {
+    if (item.x < minX) minX = item.x;
+    if (item.x + item.width > maxX) maxX = item.x + item.width;
+    if (item.y < minY) minY = item.y;
+    if (item.y > maxY) maxY = item.y;
+  }
+
+  const pageWidth = viewportWidth || (maxX - minX);
+  const midX = minX + pageWidth * 0.38; // 左右两栏分割参考线 (35%~45% 处)
+
+  // 2. 检测是否存在明显的双栏排版结构
+  let leftCount = 0;
+  let rightCount = 0;
+  let spanningCount = 0;
+
+  for (const item of items) {
+    const itemRight = item.x + item.width;
+    if (itemRight <= midX + 20) {
+      leftCount++;
+    } else if (item.x >= midX - 20) {
+      rightCount++;
+    } else {
+      spanningCount++;
+    }
+  }
+
+  const isTwoColumn = leftCount >= 8 && rightCount >= 8 && spanningCount < (leftCount + rightCount) * 0.3;
+
+  if (isTwoColumn) {
+    // 双栏布局：左栏与右栏分别 Y-聚类排版，最后按 左栏 -> 右栏 依次拼接
+    const leftItems = items.filter((it) => it.x + it.width <= midX + 20);
+    const rightItems = items.filter((it) => it.x > midX - 20);
+
+    const leftText = clusterLinesToString(leftItems);
+    const rightText = clusterLinesToString(rightItems);
+
+    return [leftText, rightText].filter(Boolean).join('\n\n');
+  }
+
+  // 3. 单栏布局
+  return clusterLinesToString(items);
+}
+
 /**
  * 从 PDF 文件中提取各页面文本并拼接
  */
@@ -40,27 +174,14 @@ export async function extractTextFromPdf(file: File | ArrayBuffer): Promise<stri
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 1.0 });
     const textContent = await page.getTextContent();
     
-    // 按行/项合并文本
-    let lastY: number | null = null;
-    let pageStr = '';
-
-    for (const item of textContent.items as any[]) {
-      if (!item.str) continue;
-      
-      // 如果垂直坐标变化明显，插入换行符保持简历排版结构
-      if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
-        pageStr += '\n';
-      } else if (pageStr.length > 0 && !pageStr.endsWith(' ') && !pageStr.endsWith('\n')) {
-        pageStr += ' ';
-      }
-
-      pageStr += item.str;
-      lastY = item.transform[5];
+    // 使用空间坐标与双栏聚类引擎重组文本流
+    const pageStr = reconstructPdfLayout(textContent.items, viewport.width);
+    if (pageStr) {
+      pageTexts.push(pageStr);
     }
-
-    pageTexts.push(pageStr);
   }
 
   return pageTexts.join('\n\n');

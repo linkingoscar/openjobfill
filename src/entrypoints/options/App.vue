@@ -10,6 +10,7 @@ import Toast, { type ToastMessage } from './components/Toast.vue';
 import ConfirmModal from './components/ConfirmModal.vue';
 import ResumeSidebar from './components/ResumeSidebar.vue';
 import BasicsTab from './components/BasicsTab.vue';
+import ApplicationExtraTab from './components/ApplicationExtraTab.vue';
 import EducationTab from './components/EducationTab.vue';
 import ExperienceTab from './components/ExperienceTab.vue';
 import ProjectTab from './components/ProjectTab.vue';
@@ -31,12 +32,13 @@ import {
   Settings,
   Sparkles,
   Sliders,
-  TrendingUp
+  TrendingUp,
+  ShieldCheck
 } from 'lucide-vue-next';
 
 const resumes = ref<StandardResume[]>([]);
 const currentResume = ref<StandardResume>(JSON.parse(JSON.stringify(DEFAULT_RESUME)));
-const activeTab = ref<'basics' | 'education' | 'experience' | 'projects' | 'qa' | 'tracker' | 'customRules' | 'settings'>('basics');
+const activeTab = ref<'basics' | 'appExtra' | 'education' | 'experience' | 'projects' | 'qa' | 'tracker' | 'customRules' | 'settings'>('basics');
 const saveSuccess = ref(false);
 
 // Toast 状态管理
@@ -307,6 +309,18 @@ const handleImportJson = (e: Event) => {
               <span>基本信息</span>
             </button>
             <button
+              id="tab-app-extra"
+              role="tab"
+              type="button"
+              :aria-selected="activeTab === 'appExtra'"
+              aria-controls="panel-app-extra"
+              @click="activeTab = 'appExtra'"
+              :class="['px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-blue-500 whitespace-nowrap', activeTab === 'appExtra' ? 'bg-white text-blue-600 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900']"
+            >
+              <ShieldCheck class="w-3.5 h-3.5" aria-hidden="true" />
+              <span>网申常用信息</span>
+            </button>
+            <button
               id="tab-education"
               role="tab"
               type="button"
@@ -405,6 +419,15 @@ const handleImportJson = (e: Event) => {
           v-if="activeTab === 'basics'"
         >
           <BasicsTab :resume="currentResume" />
+        </div>
+
+        <div 
+          id="panel-app-extra" 
+          role="tabpanel" 
+          aria-labelledby="tab-app-extra" 
+          v-if="activeTab === 'appExtra'"
+        >
+          <ApplicationExtraTab :resume="currentResume" />
         </div>
 
         <div 

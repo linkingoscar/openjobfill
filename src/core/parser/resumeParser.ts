@@ -207,11 +207,21 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
         .map(s => s.replace(/^[-*•\d.]+\s*/, '').trim())
         .filter(s => s.length > 1 && s.length < 30);
       
-      resume.skills = skillNames.map((name, i) => ({
-        id: 'skill-' + i + '-' + Date.now(),
-        name,
-        level: '熟练',
-      }));
+      resume.skills = skillNames.map((name, i) => {
+        let level: '精通' | '熟练' | '熟悉' | '了解' | undefined = undefined;
+        if (/精通|master/i.test(name)) level = '精通';
+        else if (/熟练|proficient/i.test(name)) level = '熟练';
+        else if (/熟悉|familiar/i.test(name)) level = '熟悉';
+        else if (/了解|basic/i.test(name)) level = '了解';
+
+        const cleanName = name.replace(/[(（](精通|熟练|熟悉|了解|master|proficient)[)）]/i, '').trim();
+
+        return {
+          id: 'skill-' + i + '-' + Date.now(),
+          name: cleanName || name,
+          level,
+        };
+      });
     } else if (sec.type === 'summary') {
       resume.basics.selfEvaluation = sec.content.join('\n').trim();
     }
@@ -224,16 +234,13 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   if (resume.experiences.length > 0) {
     resume.experiences.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     
-    // 自动计算工龄 (Earliest Start Date 到当前年份)
-    const startYears = resume.experiences.map(e => parseInt(e.startDate?.slice(0, 4) || '0')).filter(y => y > 1990);
+    // 计算全职工作年限 (排除纯实习，且绝不盲推 jobStatus)
+    const fulltimeExp = resume.experiences.filter(e => e.jobType !== '实习');
+    const startYears = fulltimeExp.map(e => parseInt(e.startDate?.slice(0, 4) || '0')).filter(y => y > 1990);
     if (startYears.length > 0) {
       const earliestYear = Math.min(...startYears);
       const currentYear = new Date().getFullYear();
-      const years = Math.max(0, currentYear - earliestYear);
-      resume.basics.workingYears = years;
-      if (years > 0) {
-        resume.basics.jobStatus = '在职-考虑机会';
-      }
+      resume.basics.workingYears = Math.max(0, currentYear - earliestYear);
     }
   }
   if (resume.projects.length > 0) {
