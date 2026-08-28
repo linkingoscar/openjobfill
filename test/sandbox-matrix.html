@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenJobFill 进阶拟态与受控状态穿透测试矩阵 (Advanced Sandbox Matrix)</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f1f5f9;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --success: #10b981;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 32px 16px; }
+    .container { max-width: 1080px; margin: 0 auto; }
+    
+    header { background: #fff; padding: 24px 32px; border-radius: 16px; margin-bottom: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+    h1 { margin: 0 0 8px 0; font-size: 24px; color: var(--primary); display: flex; align-items: center; gap: 8px; }
+    .desc { color: var(--text-muted); font-size: 14px; margin: 0; }
+
+    .grid-layout { display: grid; grid-template-columns: 2fr 1.2fr; gap: 24px; }
+    @media (max-width: 960px) { .grid-layout { grid-template-columns: 1fr; } }
+
+    .card { background: var(--card-bg); border-radius: 16px; padding: 28px; box-shadow: 0 4px 16px rgba(0,0,0,0.04); margin-bottom: 24px; }
+    h2 { font-size: 17px; margin: 0 0 20px 0; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-row { display: flex; gap: 16px; margin-bottom: 16px; }
+    .form-col { flex: 1; display: flex; flex-direction: column; }
+    label { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+    label .req { color: var(--danger); }
+    
+    input[type="text"], input[type="email"], input[type="tel"], input[type="date"], select, textarea {
+      width: 100%; padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+    
+    .radio-group { display: flex; gap: 16px; align-items: center; height: 42px; }
+    .btn-add { background: #eff6ff; color: var(--primary); border: 1.5px dashed #bfdbfe; padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-add:hover { background: #dbeafe; }
+
+    .section-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; position: relative; }
+    
+    /* 拟态受控状态监视面板 */
+    .state-panel { background: #0f172a; color: #38bdf8; border-radius: 16px; padding: 24px; font-family: monospace; font-size: 12px; height: fit-content; position: sticky; top: 24px; }
+    .state-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 12px; }
+    .badge-status { background: #059669; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-all; max-height: 480px; overflow-y: auto; }
+
+    .btn-submit { background: var(--primary); color: #fff; border: none; padding: 14px; font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: background 0.2s; margin-top: 10px; }
+    .btn-submit:hover { background: var(--primary-hover); }
+
+    .negative-box { border-left: 4px solid var(--danger); background: #fef2f2; padding: 14px; border-radius: 8px; margin-top: 16px; }
+    .iframe-container { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 12px; background: #fafafa; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>🎯 OpenJobFill 拟态受控状态穿透与全矩阵测试沙盒</h1>
+    <p class="desc">模拟现代 SPA (React 18 / Vue 3) 受控组件的内部状态捕获机制、时序多卡片增行、负样本消歧以及嵌套 Iframe 穿透场景。</p>
+  </header>
+
+  <div class="grid-layout">
+    <!-- 左侧：测试表单 -->
+    <main>
+      <form id="matrixForm" onsubmit="event.preventDefault(); handleFormSubmit();">
+        
+        <!-- 1. 基础信息受控域 -->
+        <div class="card">
+          <h2>一、 个人基本信息 (受控状态劫持测试)</h2>
+          
+          <div class="form-row">
+            <div class="form-col">
+              <label>真实中文姓名 <span class="req">*</span></label>
+              <input type="text" id="ctrl_name" name="name" placeholder="请输入姓名" oninput="syncState('basics.name', this.value)" />
+            </div>
+            <div class="form-col">
+              <label>性别 <span class="req">*</span></label>
+              <div class="radio-group">
+                <label><input type="radio" name="gender" value="男" onchange="syncState('basics.gender', '男')" /> 男</label>
+                <label><input type="radio" name="gender" value="女" onchange="syncState('basics.gender', '女')" /> 女</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label>联系手机号 <span class="req">*</span></label>
+              <input type="tel" id="ctrl_phone" name="phone" placeholder="11位手机号" oninput="syncState('basics.phone', this.value)" />
+            </div>
+            <div class="form-col">
+              <label>电子邮箱 <span class="req">*</span></label>
+              <input type="email" id="ctrl_email" name="email" placeholder="example@mail.com" oninput="syncState('basics.email', this.value)" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label>身份证号码 (18位)</label>
+              <input type="text" id="ctrl_idcard" name="idCard" placeholder="身份证号" oninput="syncState('basics.idCardNumber', this.value)" />
+            </div>
+            <div class="form-col">
+              <label>政治面貌</label>
+              <select id="ctrl_pol" name="politicalStatus" onchange="syncState('basics.politicalStatus', this.value)">
+                <option value="">请选择</option>
+                <option value="群众">群众</option>
+                <option value="共青团员">共青团员</option>
+                <option value="中共预备党员">中共预备党员</option>
+                <option value="中共党员">中共党员</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label>籍贯 / 生源地</label>
+              <input type="text" id="ctrl_native" name="nativePlace" placeholder="如：山东省青岛市" oninput="syncState('basics.nativePlace', this.value)" />
+            </div>
+            <div class="form-col">
+              <label>现居城市</label>
+              <input type="text" id="ctrl_city" name="currentCity" placeholder="如：北京市海淀区" oninput="syncState('basics.currentLocation', this.value)" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 多段教育背景 -->
+        <div class="card">
+          <h2>
+            <span>二、 教育背景经历 (多卡片动态增行测试)</span>
+            <button type="button" class="btn-add" onclick="addEduCard()">+ 添加教育卡片</button>
+          </h2>
+          
+          <div id="edu-container">
+            <div class="section-box education-item" data-section="education">
+              <div class="form-row">
+                <div class="form-col">
+                  <label>就读大学全称 (第1段) <span class="req">*</span></label>
+                  <input type="text" name="edu_school_0" placeholder="学校名称" oninput="syncArrayState('educations', 0, 'schoolName', this.value)" />
+                </div>
+                <div class="form-col">
+                  <label>学历层次</label>
+                  <select name="edu_degree_0" onchange="syncArrayState('educations', 0, 'degree', this.value)">
+                    <option value="">请选择</option>
+                    <option value="本科">本科</option>
+                    <option value="硕士">硕士</option>
+                    <option value="博士">博士</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-col">
+                  <label>所学专业名称 <span class="req">*</span></label>
+                  <input type="text" name="edu_major_0" placeholder="专业名称" oninput="syncArrayState('educations', 0, 'major', this.value)" />
+                </div>
+                <div class="form-col">
+                  <label>GPA 成绩绩点</label>
+                  <input type="text" name="edu_gpa_0" placeholder="3.8/4.0" oninput="syncArrayState('educations', 0, 'gpa', this.value)" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 负样本对抗消歧区域 -->
+        <div class="card">
+          <h2>三、 负样本对抗上下文 (消歧拦截测试)</h2>
+          <div class="negative-box">
+            <p style="margin: 0 0 10px 0; font-size: 13px; color: #b91c1c; font-weight: bold;">⚠️ 负样本陷阱区：插件应精准拦截，绝对不能将求职者本人姓名/电话填入以下输入框！</p>
+            <div class="form-row">
+              <div class="form-col">
+                <label>紧急联系人姓名 (严禁误填)</label>
+                <input type="text" name="emergency_name" placeholder="请输入紧急联系人姓名" oninput="syncState('emergency.name', this.value)" />
+              </div>
+              <div class="form-col">
+                <label>紧急联系人电话 (严禁误填)</label>
+                <input type="tel" name="emergency_phone" placeholder="紧急联系人电话" oninput="syncState('emergency.phone', this.value)" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 问答库与自我评价 -->
+        <div class="card">
+          <h2>四、 开放问答与自我评价 (Q&A 优先级测试)</h2>
+          <div class="form-group">
+            <label>自我评价 / 个人优势</label>
+            <textarea name="selfEvaluation" rows="3" placeholder="请简要描述您的个人优势..." oninput="syncState('basics.selfEvaluation', this.value)"></textarea>
+          </div>
+          <div class="form-group">
+            <label>未来的职业规划与目标抱负？</label>
+            <textarea name="qaCareer" rows="3" placeholder="3-5年职业规划..." oninput="syncState('qa.career', this.value)"></textarea>
+          </div>
+
+          <button type="submit" class="btn-submit">🚀 触发表单提交（校验受控 State 完整性）</button>
+        </div>
+
+      </form>
+    </main>
+
+    <!-- 右侧：内部受控状态监控面板 -->
+    <aside>
+      <div class="state-panel">
+        <div class="state-header">
+          <span>⚡ SPA 响应式状态流 (Reactive State)</span>
+          <span class="badge-status" id="syncStatus">实时同步中</span>
+        </div>
+        <pre id="stateViewer">{}</pre>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+  // 模拟 SPA / React 18 / Vue 3 的集中受控响应式状态
+  const reactiveAppState = {
+    basics: {
+      name: '',
+      gender: '',
+      phone: '',
+      email: '',
+      idCardNumber: '',
+      politicalStatus: '',
+      nativePlace: '',
+      currentLocation: '',
+      selfEvaluation: '',
+    },
+    educations: [
+      { schoolName: '', degree: '', major: '', gpa: '' }
+    ],
+    emergency: {
+      name: '',
+      phone: ''
+    },
+    qa: {
+      career: ''
+    }
+  };
+
+  function updateViewer() {
+    document.getElementById('stateViewer').textContent = JSON.stringify(reactiveAppState, null, 2);
+  }
+
+  function syncState(path, value) {
+    const parts = path.split('.');
+    let curr = reactiveAppState;
+    for (let i = 0; i < parts.length - 1; i++) {
+      curr = curr[parts[i]];
+    }
+    curr[parts[parts.length - 1]] = value;
+    updateViewer();
+  }
+
+  function syncArrayState(arrayName, index, field, value) {
+    if (!reactiveAppState[arrayName][index]) {
+      reactiveAppState[arrayName][index] = {};
+    }
+    reactiveAppState[arrayName][index][field] = value;
+    updateViewer();
+  }
+
+  let eduIdx = 1;
+  function addEduCard() {
+    eduIdx++;
+    const container = document.getElementById('edu-container');
+    const div = document.createElement('div');
+    div.className = 'section-box education-item';
+    div.setAttribute('data-section', 'education');
+    const currentIdx = eduIdx - 1;
+    div.innerHTML = `
+      <div class="form-row">
+        <div class="form-col">
+          <label>就读大学全称 (第${eduIdx}段) <span class="req">*</span></label>
+          <input type="text" name="edu_school_${currentIdx}" placeholder="学校名称" oninput="syncArrayState('educations', ${currentIdx}, 'schoolName', this.value)" />
+        </div>
+        <div class="form-col">
+          <label>学历层次</label>
+          <select name="edu_degree_${currentIdx}" onchange="syncArrayState('educations', ${currentIdx}, 'degree', this.value)">
+            <option value="">请选择</option>
+            <option value="本科">本科</option>
+            <option value="硕士">硕士</option>
+            <option value="博士">博士</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-col">
+          <label>所学专业名称 <span class="req">*</span></label>
+          <input type="text" name="edu_major_${currentIdx}" placeholder="专业名称" oninput="syncArrayState('educations', ${currentIdx}, 'major', this.value)" />
+        </div>
+        <div class="form-col">
+          <label>GPA 成绩绩点</label>
+          <input type="text" name="edu_gpa_${currentIdx}" placeholder="3.8/4.0" oninput="syncArrayState('educations', ${currentIdx}, 'gpa', this.value)" />
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+    reactiveAppState.educations.push({ schoolName: '', degree: '', major: '', gpa: '' });
+    updateViewer();
+  }
+
+  function handleFormSubmit() {
+    alert('表单校验成功！受控状态数据已完整捕获：\n\n' + JSON.stringify(reactiveAppState, null, 2));
+  }
+
+  updateViewer();
+</script>
+
+</body>
+</html>

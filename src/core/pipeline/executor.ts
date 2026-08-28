@@ -1,0 +1,156 @@
+import type { FillPlan, FillPlanItem, PipelineExecutionResult, RemainingTaskItem } from '../../types/pipeline';
+import type { FillLogItem } from '../../types/adapter';
+import { retryLadder } from './retryLadder';
+import { verifier } from './verifier';
+import { decorateElement } from '../engine/badgeDecorator';
+import { sleep } from '../../utils/dom';
+
+export class PipelineExecutor {
+  /**
+   * 调度执行 FillPlan，执行 Write -> Read-Back -> Verify -> Retry 闭环
+   */
+  async executePlan(plan: FillPlan): Promise<PipelineExecutionResult> {
+    const startTime = Date.now();
+    const logs: FillLogItem[] = [];
+    const remainingTasks: RemainingTaskItem[] = [];
+
+    let filledCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    let verifiedCount = 0;
+
+    for (const item of plan.items) {
+      const field = item.field;
+      const label = field.label || field.placeholder || field.name || '未命名输入框';
+
+      // 1. 跳过项
+      if (item.action === 'SKIP') {
+        skippedCount++;
+        logs.push({
+          status: 'skipped',
+          label,
+          field: item.semanticKey || '',
+          value: '',
+          message: item.reason || '跳过',
+        });
+        continue;
+      }
+
+      // 2. 需人工处理项 (NEEDS_USER)
+      if (item.action === 'NEEDS_USER') {
+        failedCount++;
+        remainingTasks.push({
+          id: item.id,
+          label,
+          type: field.type,
+          required: field.required,
+          reason: item.reason || '需人工核对填入',
+          element: field.element,
+        });
+
+        decorateElement(field.element, {
+          status: 'warning',
+          label: `[需人工] ${label}`,
+          value: '',
+        });
+
+        logs.push({
+          status: 'skipped',
+          label,
+          field: item.semanticKey || '',
+          value: '',
+          message: item.reason || '需人工填入',
+        });
+        continue;
+      }
+
+      // 3. 执行填表 (FILL) 并进行读回验证 (Read-Back)
+      const strategies = retryLadder.getStrategiesForType(item.driverType);
+      let isSuccess = false;
+      let actualReadValue: any = null;
+
+      for (const strategy of strategies) {
+        try {
+          await strategy.execute(field, item.targetValue);
+          
+          // 等待 DOM / Vue / React 受控状态响应
+          await sleep(50);
+
+          // 读回验证 (Read-Back)
+          actualReadValue = await verifier.readBack(field, item.driverType);
+          const isEquivalent = verifier.isSemanticEquivalent(
+            actualReadValue,
+            item.targetValue,
+            item.driverType
+          );
+
+          if (isEquivalent) {
+            isSuccess = true;
+            verifiedCount++;
+            break;
+          } else {
+            console.warn(
+              `[OpenJobFill Pipeline] Read-back check mismatch on [${label}]: expected "${item.targetValue}", read "${actualReadValue}". Retrying with next strategy...`
+            );
+          }
+        } catch (err) {
+          console.warn(`[OpenJobFill Pipeline] Strategy "${strategy.name}" threw error on [${label}]:`, err);
+        }
+      }
+
+      if (isSuccess) {
+        filledCount++;
+        logs.push({
+          status: 'success',
+          label,
+          field: item.semanticKey || '',
+          value: String(item.targetValue),
+        });
+
+        decorateElement(field.element, {
+          status: 'success',
+          label,
+          value: String(item.targetValue),
+        });
+      } else {
+        failedCount++;
+        remainingTasks.push({
+          id: item.id,
+          label,
+          type: field.type,
+          required: field.required,
+          reason: `写入验证未通过 (期望值: ${item.targetValue})`,
+          element: field.element,
+        });
+
+        decorateElement(field.element, {
+          status: 'warning',
+          label: `[验证未通过] ${label}`,
+          value: String(item.targetValue),
+        });
+
+        logs.push({
+          status: 'failed',
+          label,
+          field: item.semanticKey || '',
+          value: String(item.targetValue),
+          message: `读回验证失败 (实际渲染: "${actualReadValue}")`,
+        });
+      }
+    }
+
+    return {
+      success: filledCount > 0,
+      filledCount,
+      skippedCount,
+      failedCount,
+      verifiedCount,
+      logs,
+      remainingTasks,
+      durationMs: Date.now() - startTime,
+      plan,
+    };
+  }
+}
+
+export const pipelineExecutor = new PipelineExecutor();

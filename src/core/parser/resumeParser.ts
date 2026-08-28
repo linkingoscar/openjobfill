@@ -93,7 +93,7 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
     resume.basics.nativePlace = { province: '', city: loc };
   }
 
-  const currentLocMatch = text.match(/(?:现居住地|目前所在地|常住城市|现居|所在地)[：:\s]*([\u4e00-\u9fa5]{2,12})/);
+  const currentLocMatch = text.match(/(?:现居住地|现居地|目前所在地|常住城市|现居|所在地)[：:\s]*([\u4e00-\u9fa5]{2,12})/);
   if (currentLocMatch) {
     resume.basics.currentLocation = { province: '', city: currentLocMatch[1] };
   }
@@ -223,7 +223,7 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
 /** 规范化日期字符串为 YYYY-MM 或 YYYY-MM-DD */
 function normalizeDateString(raw: string): string {
   if (!raw) return '';
-  const digits = raw.replace(/[年月\./]/g, '-').replace(/日/g, '').split('-').filter(Boolean);
+  const digits = raw.replace(/[年月\./日]/g, '-').split('-').filter(Boolean);
   if (digits.length >= 3) {
     return `${digits[0].padStart(4, '20')}-${digits[1].padStart(2, '0')}-${digits[2].padStart(2, '0')}`;
   } else if (digits.length === 2) {
@@ -236,7 +236,7 @@ function normalizeDateString(raw: string): string {
 
 /** 提取日期起止范围 (如 "2020.09 - 2024.06" 或 "2020-09 至 至今") */
 function extractDateRange(text: string): { startDate: string; endDate: string } {
-  const dateRegex = /(\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?)\s*(?:[-~–—至到]|to)\s*(\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?|至今|目前|现在|present)/i;
+  const dateRegex = /(\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?)\s*(?:[-~–—至到]|to)\s*(\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?|至今|目前|现在|present)/i;
   const match = text.match(dateRegex);
   if (match) {
     return {
@@ -274,7 +274,10 @@ function parseEducationSection(lines: string[]): EducationExperience[] {
         endDate: dates.endDate,
       };
 
-      const parts = line.split(/[\s|·,\t]+/);
+      const cleanEduLine = line
+        .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, '')
+        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, '');
+      const parts = cleanEduLine.split(/[\s|·,\t]+/).filter(Boolean);
       for (const p of parts) {
         if (schoolKeywords.some(kw => p.includes(kw))) {
           currentEdu.schoolName = p.trim();
@@ -354,7 +357,10 @@ function parseExperienceSection(lines: string[]): WorkExperience[] {
         endDate: dates.endDate,
       };
 
-      const tokens = line.replace(dates.startDate, '').replace(dates.endDate, '').split(/[\s|·,\t]+/);
+      const cleanExpLine = line
+        .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, '')
+        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, '');
+      const tokens = cleanExpLine.split(/[\s|·,\t]+/).filter(Boolean);
       for (const t of tokens) {
         if (hasCompanySignal && (!currentExp.company || currentExp.company.length < t.length)) {
           currentExp.company = t.trim();
@@ -415,10 +421,14 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
         endDate: dates.endDate,
       };
 
-      const cleanTitleLine = line.replace(/^[#*`\s【】[\]\-]+/g, '').replace(/[*`【】[\]]/g, '');
-      const tokens = cleanTitleLine.replace(dates.startDate, '').replace(dates.endDate, '').split(/[\s|·,\t]+/);
+      const cleanTitleLine = line
+        .replace(/^[#*`\s【】[\]\-]+/g, '')
+        .replace(/[*`【】[\]]/g, '')
+        .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, '')
+        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, '');
+      const tokens = cleanTitleLine.split(/[\s|·,\t]+/).filter(Boolean);
       for (const t of tokens) {
-        if (!currentProj.projectName && t.length > 2 && !/项目|经历|时间|职责|业绩/.test(t)) {
+        if (!currentProj.projectName && t.length > 2 && !/^(?:项目|经历|时间|职责|业绩)/.test(t) && !/^\d+$/.test(t)) {
           currentProj.projectName = t.trim();
         }
       }

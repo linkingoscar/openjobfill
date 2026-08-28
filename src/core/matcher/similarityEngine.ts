@@ -90,27 +90,27 @@ export function jaccardBigramSimilarity(s1: string, s2: string): number {
  * 常见中文表单生僻/复合字段同义词知识库
  */
 export const FORM_FIELD_SYNONYM_GRAPH: Record<string, string[]> = {
-  'basics.name': ['姓名', '中文姓名', '真实姓名', '申请人姓名', '您的姓名', '应聘者姓名', 'name', 'applicant name', 'full name'],
-  'basics.phone': ['手机号码', '联系电话', '手机', '电话', '移动电话', '联系方式', '常用手机号', 'phone', 'mobile', 'cellphone'],
-  'basics.email': ['电子邮箱', '邮箱地址', 'email', 'e-mail', 'mail', '个人邮箱', '常用邮箱'],
-  'basics.idCardNumber': ['身份证号', '证件号码', '身份证号码', '大陆身份证', '证件号', 'id number', 'id card', 'id card no'],
-  'basics.birthDate': ['出生日期', '出生年月', '生日', '生于', 'birth date', 'birthday', 'dob'],
+  'basics.name': ['姓名', '中文姓名', '真实姓名', '申请人姓名', '您的姓名', '应聘者姓名', 'applicant name', 'full name', 'candidate name', 'your name', 'name'],
+  'basics.phone': ['手机号码', '联系电话', '手机', '电话', '移动电话', '联系方式', '常用手机号', '常用联系电话', 'phone', 'mobile', 'cellphone', 'mobile phone'],
+  'basics.email': ['电子邮箱', '邮箱地址', 'email', 'e-mail', 'mail', '个人邮箱', '常用邮箱', '常用电子邮箱', 'e-mail address', 'email address'],
+  'basics.idCardNumber': ['身份证号', '证件号码', '身份证号码', '大陆身份证', '证件号', '居民身份证号码', 'id number', 'id card', 'id card no'],
+  'basics.birthDate': ['出生日期', '出生年月', '生日', '生于', '出生年月日', 'birth date', 'birthday', 'dob'],
   'basics.gender': ['性别', '生理性别', '男/女', 'gender', 'sex'],
   'basics.politicalStatus': ['政治面貌', '政治面貌(中共党员/预备党员/共青团员/群众)', '党派', 'political status', 'party affiliation'],
-  'basics.ethnicity': ['民族', '国籍民族', '族别', 'ethnicity', 'nationality'],
+  'basics.ethnicity': ['民族', '国籍民族', '族别', '民族类别', 'ethnicity', 'nationality'],
   'basics.maritalStatus': ['婚姻状况', '婚否', '已婚/未婚', 'marital status'],
-  'basics.nativePlace.city': ['籍贯', '生源地', '户籍所在地', '祖籍', '户口所在地', '出生地', 'native place', 'origin'],
-  'basics.currentLocation.city': ['现居城市', '目前所在地', '现居住地', '常住城市', '常住地址', '居住城市', 'current location', 'city'],
-  'basics.expectedRole': ['期望职位', '求职意向', '意向岗位', '目标职位', '申请职位', '应聘岗位', 'target role', 'expected position'],
-  'basics.expectedSalaryMin': ['期望薪资', '期望薪酬', '薪酬诉求', '期望月薪', '税前期望薪资', '期望待遇', 'expected salary', 'salary expectation'],
-  'basics.selfEvaluation': ['自我评价', '个人优势', '关于我', '个人总结', '亮点介绍', '优势自述', 'self evaluation', 'personal summary'],
-  'educations.0.schoolName': ['毕业院校', '最高学历学校', '就读大学', '毕业学校', '学校全称', '大学名称', 'school', 'university', 'college'],
-  'educations.0.major': ['所学专业', '专业名称', '主修专业', '专业', 'major', 'discipline'],
-  'educations.0.degree': ['学历层次', '最高学历', '学位', '学历', '文化程度', 'degree', 'education level'],
-  'educations.0.gpa': ['gpa', '平均绩点', '成绩排名', '绩点', '专业排名', 'grade point average'],
-  'experiences.0.company': ['公司名称', '就职单位', '实习单位', '工作单位', '雇主名称', '企业名称', 'company', 'employer', 'organization'],
-  'experiences.0.title': ['职位名称', '担任职务', '岗位名称', '工作岗位', 'job title', 'position', 'role'],
-  'projects.0.projectName': ['项目名称', '主要项目', '核心项目', '项目标题', 'project name', 'project title'],
+  'basics.nativePlace.city': ['籍贯', '生源地', '户籍所在地', '祖籍', '户口所在地', '出生地', '生源地所在省市', 'native place', 'origin'],
+  'basics.currentLocation.city': ['现居城市', '目前所在地', '现居住地', '常住城市', '常住地址', '居住城市', '目前常住城市', 'current location', 'city'],
+  'basics.expectedRole': ['期望职位', '求职意向', '意向岗位', '目标职位', '申请职位', '应聘岗位', '意向应聘岗位', 'target role', 'expected position', 'target position'],
+  'basics.expectedSalaryMin': ['期望薪资', '期望薪酬', '薪酬诉求', '期望月薪', '税前期望薪资', '税前期望月薪', '期望待遇', 'expected salary', 'salary expectation'],
+  'basics.selfEvaluation': ['自我评价', '个人优势', '关于我', '个人总结', '亮点介绍', '优势自述', '自我评价与核心优势自述', 'self evaluation', 'personal summary'],
+  'educations.0.schoolName': ['毕业院校', '最高学历学校', '就读大学', '就读学校', '本科学校', '最高学历就读大学全称', '本科就读学校', '毕业学校', '学校全称', '大学名称', 'school', 'university', 'college', 'school name', 'university / college'],
+  'educations.0.major': ['所学专业', '专业名称', '主修专业', '主修学科专业', '专业', 'major', 'discipline', 'academic major'],
+  'educations.0.degree': ['学历层次', '最高学历', '学位', '最高学历学位', '学历', '文化程度', 'degree', 'education level', 'highest degree'],
+  'educations.0.gpa': ['gpa', '平均绩点', '成绩排名', '绩点', '专业排名', '平均学分绩点', 'grade point average', 'grade point average (gpa)'],
+  'experiences.0.company': ['公司名称', '就职单位', '实习单位', '工作单位', '雇主名称', '企业名称', '就职企业', '前雇主', '最近就职企业全称', '前雇主/实习单位名称', 'company', 'employer', 'organization', 'company name', 'employer name', 'company / employer name'],
+  'experiences.0.title': ['职位名称', '担任职务', '岗位名称', '工作岗位', '担任职位', 'job title', 'position', 'role', 'job title / position'],
+  'projects.0.projectName': ['项目名称', '主要项目', '核心项目', '项目标题', '主要核心项目名称', 'project name', 'project title', 'project name / title'],
 };
 
 /**
@@ -121,14 +121,23 @@ export function calculateSemanticSimilarity(inputLabel: string, resumeKey: strin
   if (!inputLabel || !resumeKey) return 0.0;
 
   const synonyms = FORM_FIELD_SYNONYM_GRAPH[resumeKey] || [];
-  const cleanInput = inputLabel.toLowerCase().replace(/[:：*_\-\s]/g, '');
+  const cleanInput = inputLabel.toLowerCase().replace(/[:：*_\-\s()（）【】\[\]/]/g, '');
 
   let maxScore = 0.0;
 
   // 1. 直接全词或包含匹配 (权重最高)
   for (const syn of synonyms) {
-    const cleanSyn = syn.toLowerCase().replace(/[:：*_\-\s]/g, '');
+    const cleanSyn = syn.toLowerCase().replace(/[:：*_\-\s()（）【】\[\]/]/g, '');
     if (cleanInput === cleanSyn) return 1.0;
+    
+    // 如果是包含匹配，排除像 "name" / "title" / "city" 这类泛词导致在 "Company Name" / "Project Name" 上的误伤
+    const isGenericShortWord = ['name', 'title', 'city', 'phone', 'mail'].includes(cleanSyn);
+    const hasConflictingEntity = /company|project|school|university|employer|企业|公司|项目|学校|大学/.test(cleanInput);
+
+    if (resumeKey === 'basics.name' && isGenericShortWord && hasConflictingEntity) {
+      continue; // 跳过误判为候选人姓名
+    }
+
     if (cleanInput.includes(cleanSyn) || cleanSyn.includes(cleanInput)) {
       maxScore = Math.max(maxScore, 0.95);
     }
@@ -136,8 +145,9 @@ export function calculateSemanticSimilarity(inputLabel: string, resumeKey: strin
 
   // 2. 混合计算 Bigram Jaccard + Levenshtein 相似度
   for (const syn of synonyms) {
-    const jaccard = jaccardBigramSimilarity(cleanInput, syn);
-    const lev = levenshteinSimilarity(cleanInput, syn);
+    const cleanSyn = syn.toLowerCase().replace(/[:：*_\-\s()（）【】\[\]/]/g, '');
+    const jaccard = jaccardBigramSimilarity(cleanInput, cleanSyn);
+    const lev = levenshteinSimilarity(cleanInput, cleanSyn);
     const hybrid = jaccard * 0.6 + lev * 0.4;
     maxScore = Math.max(maxScore, hybrid);
   }

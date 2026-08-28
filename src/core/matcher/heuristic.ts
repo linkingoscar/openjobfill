@@ -18,8 +18,8 @@ export interface MatchedFieldResult {
  */
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
-  'basics.phone': ['紧急联系人', '证明人', '推荐人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference'],
-  'basics.email': ['紧急联系人', '推荐人', 'emergency', 'reference'],
+  'basics.phone': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference'],
+  'basics.email': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference'],
 };
 
 /**
@@ -27,23 +27,23 @@ const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
  */
 export function calculateTextMatchScore(rawText: string, keywords: string[]): number {
   if (!rawText || !keywords || keywords.length === 0) return 0;
-  const normalized = rawText.toLowerCase().replace(/[:：*※\s_\-]/g, '');
+  const normalized = rawText.toLowerCase().replace(/[:：*※\s_\-()（）【】\[\]·•]/g, '');
 
+  let maxScore = 0;
   for (const kw of keywords) {
     const cleanKw = kw.toLowerCase().replace(/[\s_\-]/g, '');
     if (!cleanKw) continue;
     if (normalized === cleanKw) {
-      return 1.0; // 完全匹配
+      return 1.0; // 完全匹配直接返回最大分 1.0
     }
     if (normalized.startsWith(cleanKw) || normalized.endsWith(cleanKw)) {
-      return 0.9;
-    }
-    if (normalized.includes(cleanKw) || cleanKw.includes(normalized)) {
-      return 0.75;
+      maxScore = Math.max(maxScore, 0.9);
+    } else if (normalized.includes(cleanKw) || cleanKw.includes(normalized)) {
+      maxScore = Math.max(maxScore, 0.75);
     }
   }
 
-  return 0;
+  return maxScore;
 }
 
 /**

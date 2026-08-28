@@ -1,112 +1,70 @@
 import type { StandardResume } from '../../types/resume';
-import type { FillResult, FillLogItem } from '../../types/adapter';
-import { getAdapterForUrl } from '../adapters';
-import { genericAdapter } from '../adapters/generic';
+import type { FillResult } from '../../types/adapter';
+import type { PipelineExecutionResult } from '../../types/pipeline';
+import { pageAnalyzer } from '../pipeline/pageAnalyzer';
+import { planGenerator } from '../pipeline/planGenerator';
+import { pipelineExecutor } from '../pipeline/executor';
+import { getEnhancerForUrl } from '../adapters/enhancers';
 import { ruleStorage } from '../storage/ruleStorage';
-import { setNativeValue } from './dispatcher';
-import { selectCustomOption } from './selector';
-import { decorateElement, scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
-
-function getValueByPath(obj: any, path: string): any {
-  if (!obj || !path) return undefined;
-  const parts = path.split('.');
-  let curr = obj;
-  for (const part of parts) {
-    if (curr === null || curr === undefined) return undefined;
-    curr = curr[part];
-  }
-  return curr;
-}
+import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 
 export class FormFillerEngine {
   /**
-   * 执行一键填表
+   * 执行新一代两阶段决策与执行管道 (Page Analyzer -> Plan -> Execute with Read-Back Verification)
    */
   async fill(resume: StandardResume): Promise<FillResult> {
-    const currentUrl = window.location.href;
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     const startTime = Date.now();
-    const customLogs: FillLogItem[] = [];
-    let customFilledCount = 0;
 
-    // 1. 优先检查并执行用户自定义网站规则 (短板 5)
-    const customRule = await ruleStorage.findMatchingRuleForUrl(currentUrl);
-    if (customRule && customRule.fields && customRule.fields.length > 0) {
-      console.log(`[OpenJobFill] Executing custom site rule: ${customRule.name}`);
-      for (const field of customRule.fields) {
-        const val = getValueByPath(resume, field.resumeKey);
-        if (val !== undefined && val !== null && String(val).trim() !== '') {
-          const strVal = String(val);
-          const elements = Array.from(document.querySelectorAll<HTMLElement>(field.selector));
-          for (const el of elements) {
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-              setNativeValue(el, strVal);
-              customFilledCount++;
-              const label = field.description || field.resumeKey;
-              customLogs.push({
-                status: 'success',
-                label: `[自定义规则] ${label}`,
-                field: field.resumeKey,
-                value: strVal
-              });
-              decorateElement(el, {
-                status: 'success',
-                label,
-                value: strVal
-              });
-            } else if (el instanceof HTMLSelectElement || el.classList.contains('select') || el.getAttribute('role') === 'combobox') {
-              await selectCustomOption(el, strVal);
-              customFilledCount++;
-              const label = field.description || field.resumeKey;
-              customLogs.push({
-                status: 'success',
-                label: `[自定义规则] ${label}`,
-                field: field.resumeKey,
-                value: strVal
-              });
-              decorateElement(el, {
-                status: 'success',
-                label,
-                value: strVal
-              });
-            }
-          }
-        }
+    // 1. 获取当前页面匹配的平台增强器 (Platform Enhancer)
+    const enhancer = getEnhancerForUrl(currentUrl);
+    if (enhancer) {
+      console.log(`[OpenJobFill Pipeline] Matched Platform Enhancer: ${enhancer.name} (${enhancer.id})`);
+      if (enhancer.onBeforePlan) {
+        await enhancer.onBeforePlan(resume);
       }
     }
 
-    // 2. 调度专属平台适配器或通用启发式适配器
-    const adapter = getAdapterForUrl(currentUrl);
-    console.log(`[OpenJobFill] Running autofill with adapter: ${adapter.name} (${adapter.id})`);
+    // 2. 加载用户针对当前站点的自定义规则
+    const customRule = await ruleStorage.findMatchingRuleForUrl(currentUrl);
+    const customFieldRules = customRule ? customRule.fields : [];
 
-    if (adapter.onInit) {
-      await adapter.onInit();
-    }
+    // 3. 阶段一：页面全要素深度扫描 (Page Analyzer)
+    const descriptors = pageAnalyzer.analyzePage(document);
+    console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
-    let result: FillResult;
-    if (adapter.customFill) {
-      result = await adapter.customFill(resume);
-    } else {
-      result = await genericAdapter.customFill!(resume);
-    }
+    // 4. 阶段二：生成全局填表规划 (Fill Plan)
+    const plan = planGenerator.generatePlan(descriptors, resume, enhancer, customFieldRules);
+    console.log(
+      `[OpenJobFill Pipeline] FillPlan generated: ${plan.highConfidenceCount} to fill, ${plan.needsUserCount} need user, ${plan.skipCount} skipped.`
+    );
 
-    // 合并自定义规则的填表日志与计数
-    result.filledCount += customFilledCount;
-    result.logs = [...customLogs, ...result.logs];
+    // 5. 阶段三：执行规划与写后读回验证 (Execution with Read-Back & Retry Ladder)
+    const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan);
 
-    // 3. 触发全页面必填项缺失扫描与简历附件上传区高亮
+    // 6. 必填缺失与附件区域扫描
     try {
       const missingCount = scanMissingRequiredFields();
       const dropzoneCount = scanAttachmentDropzones();
       if (missingCount > 0 || dropzoneCount > 0) {
-        console.log(`[OpenJobFill] Detected ${missingCount} missing required fields, ${dropzoneCount} upload dropzones.`);
+        console.log(`[OpenJobFill Pipeline] Detected ${missingCount} missing required fields, ${dropzoneCount} upload dropzones.`);
       }
     } catch (e) {
-      console.warn('[OpenJobFill] scanMissingRequiredFields/scanAttachmentDropzones error:', e);
+      console.warn('[OpenJobFill Pipeline] scanMissingRequiredFields error:', e);
     }
 
-    return result;
+    const durationMs = Date.now() - startTime;
+
+    return {
+      success: executionResult.filledCount > 0,
+      adapterName: enhancer ? enhancer.name : '智能通用决策引擎 (Pipeline v2)',
+      filledCount: executionResult.filledCount,
+      skippedCount: executionResult.skippedCount,
+      failedCount: executionResult.failedCount,
+      logs: executionResult.logs,
+      durationMs,
+    };
   }
 }
 
 export const formFillerEngine = new FormFillerEngine();
-
