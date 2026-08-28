@@ -62,7 +62,7 @@ export interface ProjectExperience {
 export interface LanguageProficiency {
   id: string;
   language: string; // 英语, 日语, 德语 等
-  proficiency: '一般' | '良好' | '熟练' | '精通' | '母语';
+  proficiency?: '一般' | '良好' | '熟练' | '精通' | '母语' | '';
   certificateName?: string; // CET-4, CET-6, IELTS, TOEFL
   score?: string; // 如 600, 7.5
 }

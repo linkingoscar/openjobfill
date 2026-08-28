@@ -1,5 +1,5 @@
 /**
- * DOM 辅助操作工具库 (增强 Iframe 穿透与层级遍历)
+ * DOM 辅助操作工具库 (增强 Iframe 穿透与跨 Window 环境兼容)
  */
 
 export function sleep(ms: number): Promise<void> {
@@ -7,12 +7,47 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 检查元素是否在视口可见且未隐藏
+ * 安全获取 DOM 元素所属的 Window 上下文 (兼容主 Window 与同源 iframe)
+ */
+export function getElementWindow(el: Element | null | undefined): Window {
+  return (el?.ownerDocument?.defaultView) || (typeof window !== 'undefined' ? window : ({} as Window));
+}
+
+/**
+ * 跨 Window 实例安全的 HTMLInputElement 检查 (杜绝 iframe input instanceof 失败)
+ */
+export function isInputElement(el: unknown): el is HTMLInputElement {
+  if (!el || typeof el !== 'object') return false;
+  const win = getElementWindow(el as Element) as any;
+  return (typeof win.HTMLInputElement !== 'undefined' && el instanceof win.HTMLInputElement) || (el as Element).tagName === 'INPUT';
+}
+
+/**
+ * 跨 Window 实例安全的 HTMLTextAreaElement 检查
+ */
+export function isTextAreaElement(el: unknown): el is HTMLTextAreaElement {
+  if (!el || typeof el !== 'object') return false;
+  const win = getElementWindow(el as Element) as any;
+  return (typeof win.HTMLTextAreaElement !== 'undefined' && el instanceof win.HTMLTextAreaElement) || (el as Element).tagName === 'TEXTAREA';
+}
+
+/**
+ * 跨 Window 实例安全的 HTMLSelectElement 检查
+ */
+export function isSelectElement(el: unknown): el is HTMLSelectElement {
+  if (!el || typeof el !== 'object') return false;
+  const win = getElementWindow(el as Element) as any;
+  return (typeof win.HTMLSelectElement !== 'undefined' && el instanceof win.HTMLSelectElement) || (el as Element).tagName === 'SELECT';
+}
+
+/**
+ * 检查元素是否在视口可见且未隐藏 (通过元素自身 Window 计算样式)
  */
 export function isElementVisible(el: HTMLElement): boolean {
   if (!el || !el.isConnected) return false;
-  const style = window.getComputedStyle(el);
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+  const win = getElementWindow(el);
+  const style = win.getComputedStyle ? win.getComputedStyle(el) : (typeof window !== 'undefined' ? window.getComputedStyle(el) : null);
+  if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
     return false;
   }
   const rect = el.getBoundingClientRect();
@@ -159,4 +194,30 @@ export function findAssociatedLabelText(inputEl: HTMLElement): string {
   if (title) return title.trim();
 
   return '';
+}
+
+/**
+ * 智能生成精准稳定的 DOM 选择器 (优先 id -> automation-id -> name -> 语义 class 组合)
+ */
+export function generateOptimalSelector(el: HTMLElement): string {
+  if (!el) return '';
+  if (el.id) {
+    return `#${CSS.escape(el.id)}`;
+  }
+  const automationId = el.getAttribute('data-automation-id') || el.getAttribute('data-testid');
+  if (automationId) {
+    return `[data-automation-id="${CSS.escape(automationId)}"]`;
+  }
+  const name = el.getAttribute('name');
+  if (name) {
+    return `[name="${CSS.escape(name)}"]`;
+  }
+  const classes = Array.from(el.classList || [])
+    .filter((c) => typeof c === 'string' && !c.includes('focus') && !c.includes('hover') && !c.includes('active') && !c.includes('valid'))
+    .map((c) => `.${CSS.escape(c)}`)
+    .join('');
+  if (classes) {
+    return `${el.tagName.toLowerCase()}${classes}`;
+  }
+  return el.tagName.toLowerCase();
 }

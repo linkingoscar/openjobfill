@@ -143,14 +143,16 @@ export function reconstructPdfLayout(rawItems: any[], viewportWidth?: number): s
   const isTwoColumn = leftCount >= 8 && rightCount >= 8 && spanningCount < (leftCount + rightCount) * 0.3;
 
   if (isTwoColumn) {
-    // 双栏布局：左栏与右栏分别 Y-聚类排版，最后按 左栏 -> 右栏 依次拼接
-    const leftItems = items.filter((it) => it.x + it.width <= midX + 20);
-    const rightItems = items.filter((it) => it.x > midX - 20);
+    // 双栏布局：提取跨栏通栏标题 (Spanning Items/Header)、左栏与右栏
+    const spanningItems = items.filter((it) => it.x < midX - 20 && it.x + it.width > midX + 20);
+    const leftItems = items.filter((it) => it.x + it.width <= midX + 20 && !spanningItems.includes(it));
+    const rightItems = items.filter((it) => it.x >= midX - 20 && !spanningItems.includes(it));
 
+    const headerText = clusterLinesToString(spanningItems);
     const leftText = clusterLinesToString(leftItems);
     const rightText = clusterLinesToString(rightItems);
 
-    return [leftText, rightText].filter(Boolean).join('\n\n');
+    return [headerText, leftText, rightText].filter(Boolean).join('\n\n');
   }
 
   // 3. 单栏布局

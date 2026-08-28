@@ -58,6 +58,7 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   const idCardMatch = text.match(/([1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])/);
   if (idCardMatch) {
     resume.basics.idCardNumber = idCardMatch[1].toUpperCase();
+    resume.basics.idCardType = '身份证';
   }
 
   // 4. 提取性别
@@ -234,8 +235,8 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   if (resume.experiences.length > 0) {
     resume.experiences.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     
-    // 计算全职工作年限 (排除纯实习，且绝不盲推 jobStatus)
-    const fulltimeExp = resume.experiences.filter(e => e.jobType !== '实习');
+    // 计算全职工作年限 (仅针对明确识别为“全职”的经历，绝不盲推)
+    const fulltimeExp = resume.experiences.filter(e => e.jobType === '全职');
     const startYears = fulltimeExp.map(e => parseInt(e.startDate?.slice(0, 4) || '0')).filter(y => y > 1990);
     if (startYears.length > 0) {
       const earliestYear = Math.min(...startYears);
@@ -407,10 +408,19 @@ function parseExperienceSection(lines: string[]): WorkExperience[] {
           currentExp.title = t.trim();
         }
       }
+
+      if (/实习|intern/i.test(line) || /实习生|intern/i.test(currentExp.title || '')) {
+        currentExp.jobType = '实习';
+      } else if (/全职|社招|full-?time/i.test(line)) {
+        currentExp.jobType = '全职';
+      }
     } else if (currentExp) {
       const titleMatch = line.match(/(?:职位|岗位|职务)[：:\s]*([^\s|·,]+)/);
       if (titleMatch) {
         currentExp.title = titleMatch[1];
+        if (/实习/i.test(titleMatch[1])) {
+          currentExp.jobType = '实习';
+        }
       } else {
         descLines.push(line);
       }
@@ -434,6 +444,7 @@ function fillDefaultExp(item: Partial<WorkExperience>): WorkExperience {
     endDate: item.endDate || '',
     description: item.description || '',
     techStack: item.techStack || '',
+    jobType: item.jobType || undefined,
   };
 }
 

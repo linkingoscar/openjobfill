@@ -44,9 +44,12 @@ export const backupManager = {
   },
 
   /**
-   * 导入全量本地数据备份并还原各个存储模块
+   * 导入全量本地数据备份并还原各个存储模块 (支持 合并导入 与 完全覆盖恢复 两种模式)
    */
-  async importFullBackup(jsonStr: string): Promise<{
+  async importFullBackup(
+    jsonStr: string,
+    mode: 'merge' | 'overwrite' = 'merge'
+  ): Promise<{
     resumes: number;
     rules: number;
     applications: number;
@@ -79,17 +82,30 @@ export const backupManager = {
     // 1. 恢复多简历档案
     let importedResumesCount = 0;
     if (rawResumes.length > 0) {
-      for (const r of rawResumes) {
-        if (r && r.basics) {
-          await resumeStorage.saveResume(r);
-          importedResumesCount++;
+      if (mode === 'overwrite') {
+        for (const r of rawResumes) {
+          if (r && r.basics) {
+            await resumeStorage.saveResume(r);
+            importedResumesCount++;
+          }
+        }
+        await resumeStorage.setActiveResumeId(rawResumes[0].id);
+      } else {
+        for (const r of rawResumes) {
+          if (r && r.basics) {
+            await resumeStorage.saveResume(r);
+            importedResumesCount++;
+          }
         }
       }
     }
 
     // 2. 恢复自定义填表规则
     let importedRulesCount = 0;
-    if (rawRules.length > 0) {
+    if (mode === 'overwrite') {
+      await ruleStorage.saveRules(rawRules);
+      importedRulesCount = rawRules.length;
+    } else if (rawRules.length > 0) {
       for (const rule of rawRules) {
         if (rule && rule.domainPattern) {
           await ruleStorage.saveCustomRule(rule);
@@ -100,7 +116,10 @@ export const backupManager = {
 
     // 3. 恢复自定义白名单域名
     let importedDomainsCount = 0;
-    if (rawDomains.length > 0) {
+    if (mode === 'overwrite') {
+      await saveCustomDomains(rawDomains);
+      importedDomainsCount = rawDomains.length;
+    } else if (rawDomains.length > 0) {
       const currentDomains = await getCustomDomains();
       const merged = Array.from(new Set([...currentDomains, ...rawDomains]));
       await saveCustomDomains(merged);
@@ -109,7 +128,10 @@ export const backupManager = {
 
     // 4. 恢复投递看板记录
     let importedAppsCount = 0;
-    if (rawApps.length > 0) {
+    if (mode === 'overwrite') {
+      await trackerStorage.saveApplications(rawApps);
+      importedAppsCount = rawApps.length;
+    } else if (rawApps.length > 0) {
       for (const app of rawApps) {
         if (app && app.id) {
           await trackerStorage.saveApplication(app);

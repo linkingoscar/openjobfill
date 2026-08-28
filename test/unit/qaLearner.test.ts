@@ -74,7 +74,7 @@ describe('Smart Profile / QA Learner & Purity Test Suite (资料补全与纯洁�
             id: 'qa-career',
             keyword: '职业规划',
             answer: '深耕技术，成为架构师。',
-            scope: 'global', // 通用
+            scope: 'global',
           },
         ],
       };
@@ -86,6 +86,69 @@ describe('Smart Profile / QA Learner & Purity Test Suite (资料补全与纯洁�
       const matchedQA = plan.items.find((p) => p.semanticKey?.startsWith('qaBank.'));
       // 腾讯专属答案绝不会被填入阿里校招页
       expect(matchedQA).toBeUndefined();
+    });
+  });
+
+  describe('4. 入职时间与工作经历上下文消歧测试', () => {
+    it('工作经历中的入职时间绝不误归档为 basics.availableTime', () => {
+      // 在工作/实习背景下
+      expect(mapLabelToProfileField('入职时间', '工作经历 某科技有限公司 前端开发', 'experience')).toBeNull();
+      expect(mapLabelToProfileField('入职时间', '实习经历 某互联网大厂', 'experience')).toBeNull();
+      expect(mapLabelToProfileField('开始时间', '项目经历 核心中台架构', 'project')).toBeNull();
+    });
+
+    it('求职意向中的入职时间或显式到岗时间正确归档到 basics.availableTime', () => {
+      expect(mapLabelToProfileField('入职时间', '求职意向 期望到岗', 'basics')?.key).toBe('basics.availableTime');
+      expect(mapLabelToProfileField('可到岗时间', '', '')?.key).toBe('basics.availableTime');
+      expect(mapLabelToProfileField('最快入职时间', '', '')?.key).toBe('basics.availableTime');
+    });
+  });
+
+  describe('5. Domain QA 两遍最高优先级匹配测试', () => {
+    it('当同时存在 Global 通用回答与 Domain 专属回答时，专属回答必须优先命中胜出', () => {
+      const input = document.createElement('textarea');
+      const field: FieldDescriptor = {
+        id: 'f_why_bytedance',
+        element: input,
+        type: 'textarea',
+        label: '为什么选择我们',
+        placeholder: '请说明理由',
+        name: 'reason',
+        ariaLabel: '',
+        required: true,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      const resumeWithBothQAs: StandardResume = {
+        ...EMPTY_RESUME,
+        qaBank: [
+          {
+            id: 'qa-global',
+            keyword: '为什么选择我们',
+            answer: '通用回答：看好贵司的发展前景与平台技术实力。',
+            scope: 'global', // 全局通用 (排在前面)
+          },
+          {
+            id: 'qa-bytedance',
+            keyword: '为什么选择我们',
+            answer: '字节专属回答：我深度热爱抖音产品生态，希望为亿级并发架构贡献力量。',
+            scope: 'domain',
+            domain: 'jobs.bytedance.com', // 字节专属 (排在后面)
+          },
+        ],
+      };
+
+      // 处于字节跳动招聘页面
+      window.location.hostname = 'jobs.bytedance.com';
+
+      const plan = planGenerator.generatePlan([field], resumeWithBothQAs);
+      const matched = plan.items.find((p) => p.semanticKey?.startsWith('qaBank.'));
+
+      expect(matched).toBeDefined();
+      expect(matched?.targetValue).toBe('字节专属回答：我深度热爱抖音产品生态，希望为亿级并发架构贡献力量。');
     });
   });
 });

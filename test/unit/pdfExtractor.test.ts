@@ -81,5 +81,58 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
       // 左栏全部内容输出完毕后，才输出右栏内容
       expect(statusIndex).toBeLessThan(workTitleIndex);
     });
+
+    it('双栏排版中跨越中轴线的通栏 Header (如姓名联系方式) 必须完整保留并优先置顶输出', () => {
+      const spanningItems: PdfLayoutItem[] = [
+        // 跨栏顶部大字姓名与联系方式 (X: 100 ~ 500)
+        { str: '张小龙', x: 150, y: 800, width: 300, height: 20 },
+        { str: '13800138000 | zhang@wechat.com | 现居广州', x: 100, y: 770, width: 400, height: 12 },
+
+        // 左栏 (X: 50 ~ 200)
+        { str: '【求职意向】', x: 60, y: 700, width: 80, height: 12 },
+        { str: '高级产品专家', x: 60, y: 670, width: 80, height: 12 },
+        { str: '期望城市：广州/深圳', x: 60, y: 640, width: 100, height: 12 },
+        { str: '到岗时间：1个月内', x: 60, y: 610, width: 90, height: 12 },
+        { str: '求职状态：在职-看机会', x: 60, y: 580, width: 100, height: 12 },
+        { str: '技能：产品规划、团队管理', x: 60, y: 550, width: 110, height: 12 },
+        { str: '语言：英语流利', x: 60, y: 520, width: 80, height: 12 },
+        { str: '婚姻：已婚', x: 60, y: 490, width: 60, height: 12 },
+
+        // 右栏 (X: 350 ~ 550)
+        { str: '【工作经历】', x: 350, y: 700, width: 80, height: 12 },
+        { str: '腾讯科技有限公司 · 微信事业群', x: 350, y: 670, width: 180, height: 12 },
+        { str: '主导微信核心架构研发', x: 350, y: 640, width: 180, height: 12 },
+        { str: '2010.10 - 至今', x: 350, y: 610, width: 120, height: 12 },
+        { str: '某邮箱科技 · 创始人', x: 350, y: 580, width: 150, height: 12 },
+        { str: '研发 Foxmail', x: 350, y: 550, width: 100, height: 12 },
+        { str: '1997.01 - 2005.03', x: 350, y: 520, width: 120, height: 12 },
+        { str: '毕业于华中科技大学', x: 350, y: 490, width: 120, height: 12 },
+      ];
+
+      const rawItems = spanningItems.map(it => ({
+        str: it.str,
+        transform: [12, 0, 0, 12, it.x, it.y],
+        width: it.width,
+        height: it.height,
+      }));
+
+      const output = reconstructPdfLayout(rawItems, 600);
+
+      // 验证跨栏姓名在最前
+      const nameIndex = output.indexOf('张小龙');
+      const contactIndex = output.indexOf('13800138000 | zhang@wechat.com');
+      const intentIndex = output.indexOf('【求职意向】');
+      const expIndex = output.indexOf('【工作经历】');
+
+      expect(nameIndex).toBeGreaterThan(-1);
+      expect(contactIndex).toBeGreaterThan(-1);
+      expect(intentIndex).toBeGreaterThan(-1);
+      expect(expIndex).toBeGreaterThan(-1);
+
+      // 顶部通栏绝对优先于左右栏
+      expect(nameIndex).toBeLessThan(intentIndex);
+      expect(contactIndex).toBeLessThan(intentIndex);
+      expect(intentIndex).toBeLessThan(expIndex);
+    });
   });
 });

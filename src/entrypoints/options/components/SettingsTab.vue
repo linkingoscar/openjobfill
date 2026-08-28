@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Database, AlertCircle } from 'lucide-vue-next';
+import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Database, RefreshCw, AlertCircle } from 'lucide-vue-next';
 import { backupManager } from '@/core/storage/backupManager';
 
 defineProps<{
@@ -18,6 +18,7 @@ const emit = defineEmits<{
 const newDomainInput = ref('');
 const isExporting = ref(false);
 const isImporting = ref(false);
+const pendingImportMode = ref<'merge' | 'overwrite'>('merge');
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const handleAdd = () => {
@@ -50,7 +51,8 @@ const handleExportAll = async () => {
   }
 };
 
-const triggerFileInput = () => {
+const triggerFileInput = (mode: 'merge' | 'overwrite') => {
+  pendingImportMode.value = mode;
   fileInputRef.value?.click();
 };
 
@@ -58,16 +60,18 @@ const handleImportFile = async (e: Event) => {
   const input = e.target as HTMLInputElement;
   if (!input.files || input.files.length === 0) return;
   const file = input.files[0];
+  const mode = pendingImportMode.value;
   isImporting.value = true;
 
   try {
     const text = await file.text();
-    const result = await backupManager.importFullBackup(text);
+    const result = await backupManager.importFullBackup(text, mode);
     emit('data-restored');
+    const modeLabel = mode === 'overwrite' ? '完全覆盖恢复' : '合并导入';
     emit(
       'show-toast',
       'success',
-      `备份恢复成功！已还原 ${result.resumes} 份简历、${result.rules} 条规则、${result.domains} 个域名、${result.applications} 条投递记录`
+      `备份${modeLabel}成功！已还原 ${result.resumes} 份简历、${result.rules} 条规则、${result.domains} 个域名、${result.applications} 条投递记录`
     );
   } catch (err: any) {
     emit('show-toast', 'error', `导入失败: ${err.message}`);
@@ -89,7 +93,8 @@ const handleImportFile = async (e: Event) => {
         </h3>
       </div>
       <p class="text-slate-600 leading-relaxed">
-        OpenJobFill 所有数据（简历档案、自定义问答库、站点映射规则、自定义域名、投递看板记录）均加密存储在你的本地浏览器中。你可以一键将全部数据打包导出为 JSON 备份文件，或在其他设备上直接恢复。
+        所有数据仅存储在本地浏览器，不上传云端。你可以一键将全部数据打包导出为 JSON 备份文件，或在其他设备上恢复。<br>
+        <span class="text-amber-700 font-medium">⚠️ 导出的备份文件包含个人档案与求职敏感信息，请妥善保管。</span>
       </p>
 
       <div class="flex items-center gap-3 pt-1">
@@ -100,17 +105,27 @@ const handleImportFile = async (e: Event) => {
           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center gap-2 shadow-sm shadow-blue-500/20 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <Download class="w-4 h-4" />
-          <span>{{ isExporting ? '正在打包导出...' : '导出 OpenJobFill 全部本地数据' }}</span>
+          <span>{{ isExporting ? '正在打包导出...' : '导出全部本地数据' }}</span>
         </button>
 
         <button
           type="button"
-          @click="triggerFileInput"
+          @click="triggerFileInput('merge')"
           :disabled="isImporting"
           class="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-50 text-slate-700 font-bold rounded-xl transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-blue-500"
         >
-          <UploadCloud class="w-4 h-4 text-slate-500" />
-          <span>{{ isImporting ? '正在恢复备份...' : '导入 / 恢复全量备份' }}</span>
+          <UploadCloud class="w-4 h-4 text-blue-600" />
+          <span>{{ isImporting ? '正在处理...' : '合并导入备份' }}</span>
+        </button>
+
+        <button
+          type="button"
+          @click="triggerFileInput('overwrite')"
+          :disabled="isImporting"
+          class="px-4 py-2 bg-white border border-amber-200 hover:bg-amber-50 disabled:opacity-50 text-amber-800 font-bold rounded-xl transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-amber-500"
+        >
+          <RefreshCw class="w-4 h-4 text-amber-600" />
+          <span>{{ isImporting ? '正在处理...' : '完全覆盖恢复' }}</span>
         </button>
 
         <input

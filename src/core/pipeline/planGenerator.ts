@@ -247,37 +247,47 @@ export class PlanGenerator {
     qaBank: CustomQABankItem[],
     alreadyMatchedKeys: Set<string>
   ): { item: CustomQABankItem; score: number } | null {
-    let bestItem: CustomQABankItem | null = null;
-    let highestScore = 0;
-
     const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
 
-    for (const qa of qaBank) {
-      if (!qa.keyword || !qa.answer) continue;
-      const keyId = `qaBank.${qa.id}`;
-      if (alreadyMatchedKeys.has(keyId)) continue;
+    const evaluateQA = (qaList: CustomQABankItem[]) => {
+      let bestItem: CustomQABankItem | null = null;
+      let highestScore = 0;
 
-      // 域名作用域隔离：如果 QA 项为 domain 专属且域名不匹配，严格跳过
-      if (qa.scope === 'domain' && qa.domain && currentHostname) {
-        if (!currentHostname.includes(qa.domain) && !qa.domain.includes(currentHostname)) {
-          continue;
+      for (const qa of qaList) {
+        if (!qa.keyword || !qa.answer) continue;
+        const keyId = `qaBank.${qa.id}`;
+        if (alreadyMatchedKeys.has(keyId)) continue;
+
+        const keywords = qa.keyword.split(/[,，/、\s|]+/).map((k) => k.trim()).filter(Boolean);
+        const score = Math.max(
+          calculateTextMatchScore(field.label, keywords),
+          calculateTextMatchScore(field.placeholder, keywords),
+          calculateTextMatchScore(field.contextText, keywords) * 0.8
+        );
+
+        if (score > highestScore && score >= 0.5) {
+          highestScore = score;
+          bestItem = qa;
         }
       }
 
-      const keywords = qa.keyword.split(/[,，/、\s|]+/).map((k) => k.trim()).filter(Boolean);
-      const score = Math.max(
-        calculateTextMatchScore(field.label, keywords),
-        calculateTextMatchScore(field.placeholder, keywords),
-        calculateTextMatchScore(field.contextText, keywords) * 0.8
-      );
+      return bestItem ? { item: bestItem, score: highestScore } : null;
+    };
 
-      if (score > highestScore && score >= 0.5) {
-        highestScore = score;
-        bestItem = qa;
+    // 第一遍：优先匹配当前 Domain 专属 QA 问答 (最高优先级)
+    if (currentHostname) {
+      const domainQAs = qaBank.filter(
+        (qa) => qa.scope === 'domain' && qa.domain && (currentHostname.includes(qa.domain) || qa.domain.includes(currentHostname))
+      );
+      const domainMatch = evaluateQA(domainQAs);
+      if (domainMatch) {
+        return domainMatch;
       }
     }
 
-    return bestItem ? { item: bestItem, score: highestScore } : null;
+    // 第二遍：无专属匹配时，降级匹配 Global 通用问答
+    const globalQAs = qaBank.filter((qa) => qa.scope !== 'domain' || !qa.domain);
+    return evaluateQA(globalQAs);
   }
 
   private matchSemanticDictionary(

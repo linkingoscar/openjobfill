@@ -183,9 +183,9 @@ export const ruleStorage = {
       };
     }
 
-    // 检查字段是否已存在
+    // 检查字段是否已存在 (仅按 selector 查重，允许不同选择器绑定相同字段)
     const existingFieldIdx = rule.fields.findIndex(
-      (f) => f.selector === selector || f.resumeKey === resumeKey
+      (f) => f.selector === selector
     );
     const newField = {
       id: 'f-' + Date.now(),

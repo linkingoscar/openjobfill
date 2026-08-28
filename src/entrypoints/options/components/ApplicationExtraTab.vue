@@ -26,12 +26,12 @@ if (!props.resume.languages) {
 const addFamilyMember = () => {
   props.resume.familyMembers.push({
     id: 'fam-' + Date.now(),
-    relation: '父亲',
+    relation: '',
     name: '',
     company: '',
     jobTitle: '',
     phone: '',
-    politicalStatus: '群众',
+    politicalStatus: '',
   });
 };
 
@@ -54,10 +54,10 @@ const removeCertificate = (index: number) => {
 const addLanguage = () => {
   props.resume.languages.push({
     id: 'lang-' + Date.now(),
-    language: '英语',
-    proficiency: '熟练',
+    language: '',
+    proficiency: '',
     score: '',
-    certificateName: '大学英语六级 (CET-6)',
+    certificateName: '',
   });
 };
 

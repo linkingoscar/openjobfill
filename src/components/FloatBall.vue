@@ -37,6 +37,7 @@ import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
 import { analyzeJDMatch, highlightJDOnWebpage, clearJDHighlights, type JDAnalysisResult } from '@/core/matcher/jdMatcher';
+import { generateOptimalSelector } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
@@ -131,20 +132,9 @@ const handleToggleTaskMapping = (task: any) => {
 };
 
 const handleSaveTaskMapping = async (task: any) => {
-  if (!selectedMappingKey.value) return;
-  let selector = '';
-  if (task.element) {
-    if (task.element.id) {
-      selector = `#${task.element.id}`;
-    } else if (task.element.name) {
-      selector = `[name="${task.element.name}"]`;
-    } else if (task.element.getAttribute('data-automation-id')) {
-      selector = `[data-automation-id="${task.element.getAttribute('data-automation-id')}"]`;
-    } else {
-      const cls = Array.from(task.element.classList || []).filter((c: any) => typeof c === 'string' && !c.includes('focus') && !c.includes('hover')).join('.');
-      selector = cls ? `.${cls}` : task.element.tagName.toLowerCase();
-    }
-  }
+  if (!selectedMappingKey.value || !task.element) return;
+  const selector = generateOptimalSelector(task.element);
+  if (!selector) return;
 
   await ruleStorage.bindFieldToSite(
     window.location.href,

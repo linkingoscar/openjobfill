@@ -120,4 +120,55 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
     const apps = await trackerStorage.getAllApplications();
     expect(apps.some(a => a.id === 'restored-app-1')).toBe(true);
   });
+
+  it('importFullBackup 支持 mode: overwrite 完全覆盖恢复当前数据', async () => {
+    // 写入旧数据
+    await saveCustomDomains(['old-domain.com']);
+    await ruleStorage.saveCustomRule({
+      id: 'old-rule-1',
+      domainPattern: 'old.com',
+      selector: '#old',
+      resumeKey: 'basics.name',
+    });
+
+    const newBackup = {
+      app: 'OpenJobFill',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      data: {
+        resumes: [
+          {
+            ...EMPTY_RESUME,
+            id: 'overwrite-res-1',
+            title: '全新覆盖简历',
+            basics: {
+              ...EMPTY_RESUME.basics,
+              name: '新用户',
+            },
+          },
+        ],
+        customRules: [
+          {
+            id: 'new-rule-1',
+            domainPattern: 'new.com',
+            selector: '#new',
+            resumeKey: 'basics.email',
+          },
+        ],
+        customDomains: ['new-only.com'],
+        jobApplications: [],
+      },
+    };
+
+    const result = await backupManager.importFullBackup(JSON.stringify(newBackup), 'overwrite');
+    expect(result.resumes).toBe(1);
+
+    const domains = await getCustomDomains();
+    expect(domains).toEqual(['new-only.com']); // 旧域名被完全覆盖清空
+    expect(domains).not.toContain('old-domain.com');
+
+    const rules = await ruleStorage.getCustomRules();
+    expect(rules.some(r => r.id === 'new-rule-1')).toBe(true);
+    expect(rules.some(r => r.id === 'old-rule-1')).toBe(false); // 旧规则被清空
+  });
 });

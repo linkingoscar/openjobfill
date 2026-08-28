@@ -1,35 +1,51 @@
 import { resumeStorage } from '../storage/resumeStorage';
 import type { StandardResume } from '../../types/resume';
 import { isRecruitmentPage } from '../whitelist';
+import { isAutofillTouched } from './dispatcher';
+import { isInputElement, isTextAreaElement } from '../../utils/dom';
 
 const BANNER_ID = 'openjobfill-qa-learner-banner';
 
 /**
- * 提取表单控件的题目标题 (Label)
+ * 提取表单控件的题目标题 (Label)，严禁将 Radio/Checkbox 自身的选项文字当成题干
  */
 function getFieldLabel(input: HTMLElement): string {
   // 如果是 Radio / Checkbox，优先查找外层 fieldset 或 form-item 标题
-  if (input instanceof HTMLInputElement && (input.type === 'radio' || input.type === 'checkbox')) {
-    const parentContainer = input.closest('fieldset, .form-item, .el-form-item, .ant-form-item, .semi-form-field, .radio-group, .checkbox-group, [class*="group"]');
+  if (isInputElement(input) && (input.type === 'radio' || input.type === 'checkbox')) {
+    const parentContainer = input.closest('fieldset, .form-item, .el-form-item, .ant-form-item, .semi-form-field, .radio-group, .checkbox-group, [class*="group"], [class*="question"]');
     if (parentContainer) {
-      const legendOrLabel = parentContainer.querySelector('legend, label, .label, .title, .ant-form-item-label, .el-form-item__label');
-      if (legendOrLabel && legendOrLabel.textContent) {
-        const text = legendOrLabel.textContent.replace(/[:：*]/g, '').trim();
+      // 1. 优先查找 legend
+      const legend = parentContainer.querySelector('legend');
+      if (legend && legend.textContent) {
+        const text = legend.textContent.replace(/[:：*]/g, '').trim();
+        if (text.length >= 2 && text.length <= 40) return text;
+      }
+
+      // 2. 查找结构化标题 (严格排除包裹当前 input 本身的 option label)
+      const labelEls = Array.from(
+        parentContainer.querySelectorAll(
+          '.ant-form-item-label, .el-form-item__label, [class*="form-item-label"], [class*="item-label"], [class*="question-title"], [class*="item-title"], label'
+        )
+      );
+      for (const lbl of labelEls) {
+        if (lbl.contains(input)) continue; // 关键：排除包含 input 的选项 label (如“是/否”)
+        const text = (lbl.textContent || '').replace(/[:：*]/g, '').trim();
         if (text.length >= 2 && text.length <= 40) return text;
       }
     }
   }
 
-  if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+  if (isInputElement(input) || isTextAreaElement(input)) {
     if (input.placeholder && input.placeholder.length < 20) {
       return input.placeholder.replace(/^(请输入|请选择)/, '').replace(/[:：*]/g, '').trim();
     }
   }
 
-  // 1. 查找关联的 label 标签
+  // 1. 查找关联的 label 标签 (排除包裹自身的 label)
   if (input.id) {
-    const labelEl = document.querySelector(`label[for="${input.id}"]`);
-    if (labelEl && labelEl.textContent) {
+    const doc = input.ownerDocument || document;
+    const labelEl = doc.querySelector(`label[for="${input.id}"]`);
+    if (labelEl && labelEl.textContent && !labelEl.contains(input)) {
       return labelEl.textContent.replace(/[:：*]/g, '').trim();
     }
   }
@@ -37,10 +53,11 @@ function getFieldLabel(input: HTMLElement): string {
   // 2. 向上查找最近的表单项容器
   const parentContainer = input.closest('.form-item, .el-form-item, .ant-form-item, .semi-form-field, tr, .field-wrapper, .item');
   if (parentContainer) {
-    const label = parentContainer.querySelector('label, .label, .title, .ant-form-item-label, th');
-    if (label && label.textContent) {
-      const text = label.textContent.replace(/[:：*]/g, '').trim();
-      if (text.length < 35) return text;
+    const labelEls = Array.from(parentContainer.querySelectorAll('label, .label, .title, .ant-form-item-label, th'));
+    for (const lbl of labelEls) {
+      if (lbl.contains(input)) continue;
+      const text = (lbl.textContent || '').replace(/[:：*]/g, '').trim();
+      if (text.length >= 2 && text.length < 35) return text;
     }
   }
 
@@ -54,17 +71,41 @@ function getFieldLabel(input: HTMLElement): string {
 }
 
 /**
- * 结构化简历档案字段映射判定 (二分法：档案字段 vs 开放式问答)
+ * 结构化简历档案字段映射判定 (上下文感知 + 消歧防碰撞)
  */
-export function mapLabelToProfileField(label: string): { key: string; name: string } | null {
+export function mapLabelToProfileField(
+  label: string,
+  contextText = '',
+  sectionType = ''
+): { key: string; name: string } | null {
   const clean = label.replace(/[:：*()（）[\]【】]/g, '').trim().toLowerCase();
+  const cleanContext = (contextText + ' ' + sectionType).toLowerCase();
+
   if (/身高|height/i.test(clean)) return { key: 'basics.height', name: '身高' };
   if (/体重|weight/i.test(clean)) return { key: 'basics.weight', name: '体重' };
   if (/健康|health/i.test(clean)) return { key: 'basics.healthStatus', name: '健康状况' };
   if (/籍贯|生源/i.test(clean)) return { key: 'basics.nativePlace.detail', name: '籍贯' };
   if (/户口|户籍/i.test(clean)) return { key: 'basics.hukouLocation.detail', name: '户口所在地' };
   if (/现居|居住地|现住址/i.test(clean)) return { key: 'basics.currentLocation.detail', name: '现居住地' };
-  if (/到岗|到职|入职时间/i.test(clean)) return { key: 'basics.availableTime', name: '到岗时间' };
+
+  // 消歧：入职时间 / 到岗时间
+  if (/到岗|到职|可入职时间|最快入职/i.test(clean)) {
+    return { key: 'basics.availableTime', name: '到岗时间' };
+  }
+  if (/入职时间/i.test(clean)) {
+    // 若处于工作经历、实习、项目等历史模块，严禁污染 basics.availableTime
+    if (
+      /工作|经历|实习|项目|公司|experience|internship|project|job|employer/i.test(cleanContext) ||
+      /experience|education|project/i.test(sectionType)
+    ) {
+      return null;
+    }
+    if (/求职意向|期望|基本信息|意向/i.test(cleanContext)) {
+      return { key: 'basics.availableTime', name: '到岗时间' };
+    }
+    return null; // 无法确定上下文时拒绝盲猜
+  }
+
   if (/婚姻|婚育/i.test(clean)) return { key: 'basics.maritalStatus', name: '婚姻状况' };
   if (/民族|ethnicity/i.test(clean)) return { key: 'basics.ethnicity', name: '民族' };
   if (/期望薪|薪资要求/i.test(clean)) return { key: 'basics.expectedSalaryMin', name: '期望薪资' };
@@ -196,6 +237,9 @@ export function initSmartQALearner(): () => void {
     if (!isRecruitment) return;
 
     const target = e.target;
+    if (!target || !(target instanceof HTMLElement)) return;
+    if (isAutofillTouched(target)) return;
+
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
       return;
     }
@@ -212,7 +256,7 @@ export function initSmartQALearner(): () => void {
     } else if (target instanceof HTMLInputElement && target.type === 'checkbox') {
       value = target.checked ? '是' : '否';
     } else {
-      value = target.value.trim();
+      value = (target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
     }
 
     if (!value || value.length < 1) return;
@@ -227,8 +271,10 @@ export function initSmartQALearner(): () => void {
       const resume = await resumeStorage.getActiveResume();
       if (!resume) return;
 
+      const contextText = target.closest('.form-section, .section, form, .card, .form-item')?.textContent || '';
+
       // 二分法：1. 优先尝试映射到 Profile 结构化字段
-      const profileMatch = mapLabelToProfileField(label);
+      const profileMatch = mapLabelToProfileField(label, contextText);
       if (profileMatch) {
         learnedKeysThisSession.add(label);
         showLearnerBanner(
