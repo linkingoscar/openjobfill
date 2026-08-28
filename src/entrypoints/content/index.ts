@@ -21,7 +21,7 @@ export default defineContentScript({
     let vm: any = null;
 
     // 启动智能问答主动学习监听器 (自我进化问答库)
-    initSmartQALearner();
+    const stopQALearner = initSmartQALearner();
 
     function mountFloatBall() {
       // 只有在顶级窗口 (Top Window) 挂载悬浮球，避免在每个嵌套 iframe 中出现多个悬浮球
@@ -135,6 +135,7 @@ export default defineContentScript({
     // 官方 WXT 上下文失效生命周期钩子：插件重载时立即释放所有监听器与恢复原型
     ctx.onInvalidated(() => {
       stopObserving();
+      stopQALearner();
       unmountFloatBall();
       window.removeEventListener('popstate', handleStepChange);
       window.removeEventListener('hashchange', handleStepChange);

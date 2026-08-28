@@ -250,10 +250,19 @@ export class PlanGenerator {
     let bestItem: CustomQABankItem | null = null;
     let highestScore = 0;
 
+    const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
+
     for (const qa of qaBank) {
       if (!qa.keyword || !qa.answer) continue;
       const keyId = `qaBank.${qa.id}`;
       if (alreadyMatchedKeys.has(keyId)) continue;
+
+      // 域名作用域隔离：如果 QA 项为 domain 专属且域名不匹配，严格跳过
+      if (qa.scope === 'domain' && qa.domain && currentHostname) {
+        if (!currentHostname.includes(qa.domain) && !qa.domain.includes(currentHostname)) {
+          continue;
+        }
+      }
 
       const keywords = qa.keyword.split(/[,，/、\s|]+/).map((k) => k.trim()).filter(Boolean);
       const score = Math.max(

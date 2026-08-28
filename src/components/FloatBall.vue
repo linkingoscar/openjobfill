@@ -29,6 +29,7 @@ import {
   Highlighter
 } from 'lucide-vue-next';
 import { resumeStorage } from '@/core/storage/resumeStorage';
+import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
 import { formFillerEngine } from '@/core/engine/filler';
 import { getAdapterForUrl } from '@/core/adapters';
@@ -65,6 +66,95 @@ const handleFocusTaskElement = (task: any) => {
       if (task.element) task.element.style.outline = '';
     }, 2000);
   }
+};
+
+const activeTaskMappingId = ref<string | null>(null);
+const selectedMappingKey = ref('');
+
+const AVAILABLE_BINDING_FIELDS = [
+  { group: '个人基本信息', options: [
+    { label: '姓名', value: 'basics.name' },
+    { label: '名 (First Name)', value: 'basics.firstName' },
+    { label: '姓 (Last Name)', value: 'basics.lastName' },
+    { label: '手机号码', value: 'basics.phone' },
+    { label: '电子邮箱', value: 'basics.email' },
+    { label: '身份证号', value: 'basics.idCardNumber' },
+    { label: '出生日期', value: 'basics.birthDate' },
+    { label: '性别', value: 'basics.gender' },
+    { label: '民族', value: 'basics.ethnicity' },
+    { label: '政治面貌', value: 'basics.politicalStatus' },
+    { label: '婚姻状况', value: 'basics.maritalStatus' },
+    { label: '身高 (cm)', value: 'basics.height' },
+    { label: '体重 (kg)', value: 'basics.weight' },
+    { label: '健康状况', value: 'basics.healthStatus' },
+    { label: '籍贯 / 生源地', value: 'basics.nativePlace.detail' },
+    { label: '户籍 / 户口所在地', value: 'basics.hukouLocation.detail' },
+    { label: '现居城市', value: 'basics.currentLocation.city' },
+    { label: '现居详细地址', value: 'basics.currentLocation.detail' },
+  ]},
+  { group: '求职与意向', options: [
+    { label: '期望岗位', value: 'basics.expectedRole' },
+    { label: '期望城市', value: 'basics.expectedCity' },
+    { label: '期望最低薪资', value: 'basics.expectedSalaryMin' },
+    { label: '到岗时间', value: 'basics.availableTime' },
+    { label: '当前求职状态', value: 'basics.jobStatus' },
+    { label: '工作年限', value: 'basics.workingYears' },
+    { label: '自我评价', value: 'basics.selfEvaluation' },
+    { label: 'GitHub 地址', value: 'basics.githubUrl' },
+    { label: 'LinkedIn', value: 'basics.linkedinUrl' },
+    { label: '个人主页/博客', value: 'basics.blogUrl' },
+  ]},
+  { group: '教育背景 (第一段)', options: [
+    { label: '学校名称', value: 'educations.0.schoolName' },
+    { label: '学历层次', value: 'educations.0.degree' },
+    { label: '主修专业', value: 'educations.0.major' },
+    { label: '入学年月', value: 'educations.0.startDate' },
+    { label: '毕业年月', value: 'educations.0.endDate' },
+    { label: 'GPA / 成绩', value: 'educations.0.gpa' },
+  ]},
+  { group: '工作实习 (第一段)', options: [
+    { label: '公司名称', value: 'experiences.0.company' },
+    { label: '职位名称', value: 'experiences.0.title' },
+    { label: '工作描述', value: 'experiences.0.description' },
+    { label: '入职时间', value: 'experiences.0.startDate' },
+    { label: '离职时间', value: 'experiences.0.endDate' },
+  ]},
+];
+
+const handleToggleTaskMapping = (task: any) => {
+  if (activeTaskMappingId.value === task.id) {
+    activeTaskMappingId.value = null;
+  } else {
+    activeTaskMappingId.value = task.id;
+    selectedMappingKey.value = '';
+  }
+};
+
+const handleSaveTaskMapping = async (task: any) => {
+  if (!selectedMappingKey.value) return;
+  let selector = '';
+  if (task.element) {
+    if (task.element.id) {
+      selector = `#${task.element.id}`;
+    } else if (task.element.name) {
+      selector = `[name="${task.element.name}"]`;
+    } else if (task.element.getAttribute('data-automation-id')) {
+      selector = `[data-automation-id="${task.element.getAttribute('data-automation-id')}"]`;
+    } else {
+      const cls = Array.from(task.element.classList || []).filter((c: any) => typeof c === 'string' && !c.includes('focus') && !c.includes('hover')).join('.');
+      selector = cls ? `.${cls}` : task.element.tagName.toLowerCase();
+    }
+  }
+
+  await ruleStorage.bindFieldToSite(
+    window.location.href,
+    selector,
+    selectedMappingKey.value,
+    task.label
+  );
+  activeTaskMappingId.value = null;
+  copyToastMessage.value = `🎯 已为当前网站记住映射【${task.label} -> ${selectedMappingKey.value}】！下次自动填表将精准命中。`;
+  setTimeout(() => { copyToastMessage.value = ''; }, 3500);
 };
 
 const notifyStepChange = (newUrl: string) => {
@@ -737,23 +827,61 @@ defineExpose({
             <div 
               v-for="task in fillResult?.remainingTasks || []" 
               :key="task.id"
-              class="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/30 hover:bg-amber-50 transition flex items-start justify-between gap-2"
+              class="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/30 hover:bg-amber-50 transition flex flex-col gap-2"
             >
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5">
-                  <span v-if="task.required" class="px-1 py-0.2 bg-red-100 text-red-700 rounded text-[10px] font-bold">必填</span>
-                  <span class="font-bold text-slate-800 text-xs truncate">{{ task.label }}</span>
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span v-if="task.required" class="px-1 py-0.2 bg-red-100 text-red-700 rounded text-[10px] font-bold">必填</span>
+                    <span class="font-bold text-slate-800 text-xs truncate">{{ task.label }}</span>
+                  </div>
+                  <p class="text-[11px] text-amber-800/80 mt-1 font-medium">{{ task.reason }}</p>
                 </div>
-                <p class="text-[11px] text-amber-800/80 mt-1 font-medium">{{ task.reason }}</p>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    @click="handleFocusTaskElement(task)"
+                    class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"
+                    title="在网页中滚动并高亮定位此输入框"
+                  >
+                    定位
+                  </button>
+                  <button
+                    type="button"
+                    @click="handleToggleTaskMapping(task)"
+                    class="px-2 py-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"
+                    title="将此未识别字段永久绑定到简历属性"
+                  >
+                    记住映射
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                @click="handleFocusTaskElement(task)"
-                class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition flex-shrink-0 shadow-xs"
-                title="在网页中滚动并高亮定位此输入框"
+
+              <!-- 内嵌字段绑定选择器 -->
+              <div 
+                v-if="activeTaskMappingId === task.id"
+                class="pt-2 mt-1 border-t border-amber-200/60 flex items-center gap-2 text-xs"
               >
-                定位
-              </button>
+                <select 
+                  v-model="selectedMappingKey"
+                  class="flex-1 px-2 py-1 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
+                >
+                  <option value="" disabled>请选择此字段对应的简历属性...</option>
+                  <optgroup v-for="grp in AVAILABLE_BINDING_FIELDS" :key="grp.group" :label="grp.group">
+                    <option v-for="opt in grp.options" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </option>
+                  </optgroup>
+                </select>
+                <button
+                  type="button"
+                  :disabled="!selectedMappingKey"
+                  @click="handleSaveTaskMapping(task)"
+                  class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs transition"
+                >
+                  保存
+                </button>
+              </div>
             </div>
           </div>
         </div>

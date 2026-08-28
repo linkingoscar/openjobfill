@@ -1,19 +1,20 @@
 import type { StandardResume } from '../../types/resume';
-import { DEFAULT_RESUME } from './defaultData';
+import { EMPTY_RESUME, DEMO_RESUME, DEFAULT_RESUME } from './defaultData';
 
 const STORAGE_KEY_RESUMES = 'openjobfill_resumes';
 const STORAGE_KEY_ACTIVE_ID = 'openjobfill_active_resume_id';
 
 function sanitizeResume(data: Partial<StandardResume> | null | undefined): StandardResume {
-  const base = JSON.parse(JSON.stringify(DEFAULT_RESUME)) as StandardResume;
+  const base = JSON.parse(JSON.stringify(EMPTY_RESUME)) as StandardResume;
   if (!data || typeof data !== 'object') return base;
 
   return {
     ...base,
     ...data,
     id: data.id || ('resume-' + Date.now()),
-    title: data.title || '我的简历',
+    title: data.title || '我的求职档案',
     isDefault: Boolean(data.isDefault),
+    schemaVersion: 3,
     createdAt: Number(data.createdAt) || Date.now(),
     updatedAt: Number(data.updatedAt) || Date.now(),
     basics: {
@@ -39,7 +40,10 @@ function sanitizeResume(data: Partial<StandardResume> | null | undefined): Stand
     skills: Array.isArray(data.skills) ? data.skills : [],
     certificates: Array.isArray(data.certificates) ? data.certificates : [],
     familyMembers: Array.isArray(data.familyMembers) ? data.familyMembers : [],
-    qaBank: Array.isArray(data.qaBank) ? data.qaBank : [],
+    qaBank: Array.isArray(data.qaBank) ? data.qaBank.map(item => ({
+      ...item,
+      scope: item.scope || (item.domain ? 'domain' : 'global'),
+    })) : [],
   };
 }
 

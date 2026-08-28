@@ -94,6 +94,8 @@ export interface CustomQABankItem {
   id: string;
   keyword: string; // 如 "自我评价", "为什么加入我们", "最成功的事", "优缺点"
   answer: string;
+  scope?: 'global' | 'domain'; // 作用域：通用 vs 域名专属
+  domain?: string; // 专属域名，如 "jobs.bytedance.com"
 }
 
 export interface ResumeBasics {
@@ -158,6 +160,7 @@ export interface StandardResume {
   isDefault: boolean;
   createdAt: number;
   updatedAt: number;
+  schemaVersion?: number; // 架构版本号，默认 3
   
   basics: ResumeBasics;
   educations: EducationExperience[];

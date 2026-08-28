@@ -153,5 +153,54 @@ export const ruleStorage = {
       }
     }
     return null;
-  }
+  },
+
+  /**
+   * 将当前网页的某个元素选择器与简历字段建立永久映射绑定
+   */
+  async bindFieldToSite(
+    url: string,
+    selector: string,
+    resumeKey: string,
+    description: string
+  ): Promise<CustomSiteRule> {
+    let hostname = '';
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      hostname = url;
+    }
+
+    let rule = await this.findMatchingRuleForUrl(url);
+    if (!rule) {
+      rule = {
+        id: 'rule-' + Date.now(),
+        name: `${hostname} 专属自定义规则`,
+        domainPattern: hostname,
+        enabled: true,
+        fields: [],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    // 检查字段是否已存在
+    const existingFieldIdx = rule.fields.findIndex(
+      (f) => f.selector === selector || f.resumeKey === resumeKey
+    );
+    const newField = {
+      id: 'f-' + Date.now(),
+      selector,
+      resumeKey,
+      description,
+    };
+
+    if (existingFieldIdx >= 0) {
+      rule.fields[existingFieldIdx] = newField;
+    } else {
+      rule.fields.push(newField);
+    }
+
+    await this.saveCustomRule(rule);
+    return rule;
+  },
 };
