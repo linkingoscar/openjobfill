@@ -20,7 +20,7 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
       birthDate: '',
       phone: '',
       email: '',
-      idCardType: '身份证',
+      idCardType: '',
       idCardNumber: '',
       politicalStatus: '',
       ethnicity: '',

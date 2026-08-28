@@ -180,6 +180,20 @@ class ResumeStorage {
   }
 
   /**
+   * 完全替换覆盖所有简历列表 (用于备份全量覆盖恢复，杜绝留存遗留数据)
+   */
+  async replaceAllResumes(resumes: StandardResume[]): Promise<void> {
+    const sanitized = (resumes && resumes.length > 0 ? resumes : [DEFAULT_RESUME]).map(sanitizeResume);
+    if (this.isExtensionEnv()) {
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set({ [STORAGE_KEY_RESUMES]: sanitized }, () => resolve());
+      });
+    } else {
+      localStorage.setItem(STORAGE_KEY_RESUMES, JSON.stringify(sanitized));
+    }
+  }
+
+  /**
    * 删除指定简历
    */
   async deleteResume(id: string): Promise<void> {

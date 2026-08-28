@@ -3,6 +3,7 @@ import type { FieldDescriptor, FillPlan, FillPlanItem, PlatformEnhancer, DriverT
 import { calculateSemanticSimilarity } from '../matcher/similarityEngine';
 import { RESUME_DICTIONARY } from '../matcher/dictionary';
 import { calculateTextMatchScore } from '../matcher/heuristic';
+import { isInputElement } from '../../utils/dom';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -60,17 +61,18 @@ export class PlanGenerator {
       let skipReason = '字段已有内容，自动保护跳过';
 
       if (field.type === 'checkbox') {
-        if (field.element instanceof HTMLInputElement && field.element.checked) {
+        if (isInputElement(field.element) && field.element.checked) {
           isAlreadyFilledByUser = true;
           skipReason = '复选框已被勾选，自动保护跳过';
         }
       } else if (field.type === 'radio') {
         const el = field.element;
-        if (el instanceof HTMLInputElement) {
+        if (isInputElement(el)) {
           const name = el.getAttribute('name');
-          const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || document;
+          const doc = el.ownerDocument || document;
+          const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || doc;
           const groupRadios = name
-            ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
             : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
           if (groupRadios.some((r) => r.checked)) {
             isAlreadyFilledByUser = true;

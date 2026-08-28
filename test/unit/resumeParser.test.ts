@@ -123,4 +123,23 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
     const resume = parseResumeFromText(text);
     expect(resume.basics.jobStatus || '').toBe(''); // 绝不被推断为 '在职-考虑机会'
   });
+
+  it('证件类型 idCardType 纯净性：未提取到身份证号时必须保持空字符串，提取到时赋值为身份证', () => {
+    const noIdText = `
+      李雷
+      手机：13900001111
+      邮箱：lilei@test.com
+    `;
+    const noIdResume = parseResumeFromText(noIdText);
+    expect(noIdResume.basics.idCardNumber).toBe('');
+    expect(noIdResume.basics.idCardType).toBe(''); // 严禁盲赋默认值 '身份证'
+
+    const withIdText = `
+      韩梅梅
+      身份证：110101199501011234
+    `;
+    const withIdResume = parseResumeFromText(withIdText);
+    expect(withIdResume.basics.idCardNumber).toBe('110101199501011234');
+    expect(withIdResume.basics.idCardType).toBe('身份证');
+  });
 });

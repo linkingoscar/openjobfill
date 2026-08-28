@@ -1,5 +1,11 @@
 import type { FieldDescriptor, FieldType, FieldSectionInfo } from '../../types/pipeline';
-import { findAssociatedLabelText } from '../../utils/dom';
+import { 
+  findAssociatedLabelText, 
+  getElementWindow, 
+  isInputElement, 
+  isTextAreaElement, 
+  isSelectElement 
+} from '../../utils/dom';
 
 export class PageAnalyzer {
   /**
@@ -87,13 +93,14 @@ export class PageAnalyzer {
   }
 
   private shouldSkipElement(el: HTMLElement): boolean {
-    if (el instanceof HTMLInputElement) {
+    if (isInputElement(el)) {
       if (['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(el.type)) {
         return true;
       }
     }
-    // 判断元素是否在页面上可见
-    const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    // 判断元素是否在页面上可见 (通过元素自身的 Window 计算样式)
+    const win = getElementWindow(el);
+    const style = win.getComputedStyle ? win.getComputedStyle(el) : null;
     if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
       // 若父容器也是隐藏的则跳过
       if (el.offsetWidth === 0 && el.offsetHeight === 0 && !el.getClientRects().length) {
@@ -107,10 +114,10 @@ export class PageAnalyzer {
     if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
       return 'contenteditable';
     }
-    if (el instanceof HTMLTextAreaElement) {
+    if (isTextAreaElement(el)) {
       return 'textarea';
     }
-    if (el instanceof HTMLSelectElement) {
+    if (isSelectElement(el)) {
       return 'select';
     }
     if (
@@ -124,7 +131,7 @@ export class PageAnalyzer {
     if (el.classList.contains('el-select') || el.classList.contains('ant-select') || el.getAttribute('role') === 'combobox') {
       return 'select';
     }
-    if (el instanceof HTMLInputElement) {
+    if (isInputElement(el)) {
       if (el.type === 'radio') return 'radio';
       if (el.type === 'checkbox') return 'checkbox';
       if (el.type === 'date' || el.type === 'month' || el.classList.contains('datepicker') || el.placeholder.includes('年') || el.placeholder.includes('YYYY')) {
@@ -152,13 +159,13 @@ export class PageAnalyzer {
   }
 
   private readCurrentValue(el: HTMLElement, type: FieldType): any {
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    if (isInputElement(el) || isTextAreaElement(el)) {
       if (type === 'radio' || type === 'checkbox') {
         return (el as HTMLInputElement).checked;
       }
       return el.value;
     }
-    if (el instanceof HTMLSelectElement) {
+    if (isSelectElement(el)) {
       return el.value;
     }
     if (type === 'contenteditable') {
@@ -168,14 +175,15 @@ export class PageAnalyzer {
   }
 
   private extractOptions(el: HTMLElement, type: FieldType): string[] | undefined {
-    if (el instanceof HTMLSelectElement) {
+    if (isSelectElement(el)) {
       return Array.from(el.options).map((o) => o.text.trim()).filter(Boolean);
     }
     if (type === 'radio') {
       const name = el.getAttribute('name');
-      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || document;
+      const doc = el.ownerDocument || document;
+      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || doc;
       const groupRadios = name
-        ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+        ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
         : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
       if (groupRadios.length > 0) {
         return groupRadios

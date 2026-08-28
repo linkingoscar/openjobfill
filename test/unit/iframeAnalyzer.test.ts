@@ -46,13 +46,61 @@ describe('PageAnalyzer Iframe Deep Scanning Suite (跨同源 iframe 深度扫描
     // 3. 执行全页面扫描
     const descriptors = analyzer.analyzePage(document);
 
-    // 4. 验证主文档与 iframe 内的 input 都被成功捕获
+    // 4. 验证主文档与 iframe 内的 input 都被成功捕获，且类型正确解析为 text/textarea/select 等，未因 realm 差异变成 unknown
     expect(descriptors.length).toBe(3);
 
     const labels = descriptors.map((d) => d.label);
     expect(labels).toContain('主页面邮箱');
     expect(labels).toContain('子页面手机号');
     expect(labels).toContain('子页面姓名');
+
+    const phoneDesc = descriptors.find((d) => d.label === '子页面手机号');
+    expect(phoneDesc?.type).toBe('text');
+  });
+
+  it('同源 iframe 内部的 textarea, select 和 radio group 应被准确识别且 options 正常提取', () => {
+    const iframe = document.createElement('iframe');
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (iframeDoc) {
+      iframeDoc.body.innerHTML = `
+        <form>
+          <div class="form-item">
+            <label for="if-select">最高学历</label>
+            <select id="if-select">
+              <option value="bachelor">本科</option>
+              <option value="master">硕士</option>
+            </select>
+          </div>
+          <div class="radio-group">
+            <label>性别</label>
+            <input type="radio" name="if-gender" value="male" /> 男
+            <input type="radio" name="if-gender" value="female" /> 女
+          </div>
+          <div class="form-item">
+            <label for="if-summary">个人总结</label>
+            <textarea id="if-summary" placeholder="请简述优势"></textarea>
+          </div>
+        </form>
+      `;
+    }
+
+    const descriptors = analyzer.analyzePage(document);
+    const selectDesc = descriptors.find((d) => d.label === '最高学历');
+    const radioDesc = descriptors.find((d) => d.label === '性别' || d.type === 'radio');
+    const textareaDesc = descriptors.find((d) => d.label === '个人总结');
+
+    expect(selectDesc).toBeDefined();
+    expect(selectDesc?.type).toBe('select');
+    expect(selectDesc?.options).toContain('本科');
+    expect(selectDesc?.options).toContain('硕士');
+
+    expect(textareaDesc).toBeDefined();
+    expect(textareaDesc?.type).toBe('textarea');
+
+    expect(radioDesc).toBeDefined();
+    expect(radioDesc?.type).toBe('radio');
   });
 
   it('面对跨域 iframe 访问受限抛出异常时，应具备容错弹性而不崩溃', () => {

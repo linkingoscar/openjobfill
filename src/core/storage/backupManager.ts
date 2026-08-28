@@ -83,13 +83,12 @@ export const backupManager = {
     let importedResumesCount = 0;
     if (rawResumes.length > 0) {
       if (mode === 'overwrite') {
-        for (const r of rawResumes) {
-          if (r && r.basics) {
-            await resumeStorage.saveResume(r);
-            importedResumesCount++;
-          }
+        const validResumes = rawResumes.filter((r) => r && r.basics);
+        await resumeStorage.replaceAllResumes(validResumes);
+        if (validResumes.length > 0) {
+          await resumeStorage.setActiveResumeId(validResumes[0].id);
         }
-        await resumeStorage.setActiveResumeId(rawResumes[0].id);
+        importedResumesCount = validResumes.length;
       } else {
         for (const r of rawResumes) {
           if (r && r.basics) {

@@ -4,6 +4,8 @@ import {
   setNativeRadioChecked,
   setNativeCheckboxChecked,
   simulateClick,
+  markElementAsAutofilled,
+  isAutofillTouched,
 } from '@/core/engine/dispatcher';
 
 describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => {
@@ -106,11 +108,21 @@ describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => 
     btn.addEventListener('mouseup', () => events.push('mouseup'));
     btn.addEventListener('click', () => events.push('click'));
 
-    // happy-dom scrollIntoView mock
-    btn.scrollIntoView = vi.fn();
-
     simulateClick(btn);
 
     expect(events).toEqual(['mousedown', 'mouseup', 'click']);
+  });
+
+  it('markElementAsAutofilled 与 isAutofillTouched 应具备跨 frame DOM 属性标记与短时生命周期', () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+
+    expect(isAutofillTouched(input)).toBe(false);
+
+    markElementAsAutofilled(input);
+
+    // 刚被插件自动填充时，必须被标记为 touched，且带有 DOM attribute 跨 realm 标识
+    expect(isAutofillTouched(input)).toBe(true);
+    expect(input.getAttribute('data-openjobfill-autofill')).toBe('1');
   });
 });

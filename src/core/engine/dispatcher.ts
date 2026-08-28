@@ -1,18 +1,30 @@
 import { getElementWindow, isInputElement, isTextAreaElement, isSelectElement } from '../../utils/dom';
 
 /**
- * 记录被扩展自动填表所触碰过的元素集合 (防止自动派发 change/input 事件被 SmartLearner 误学回去)
+ * 记录被扩展自动填表所触碰过的元素 (短时生命周期 + 跨 frame DOM attribute 标记，防止自动填表自身派发的事件触发自学，同时不影响用户后续手动纠错)
  */
-export const autofillTouchedElements = new WeakSet<Element>();
+export const lastAutofilledMap = new WeakMap<Element, number>();
 
 export function markElementAsAutofilled(el: Element): void {
   if (el && typeof el === 'object') {
-    autofillTouchedElements.add(el);
+    lastAutofilledMap.set(el, Date.now());
+    try {
+      el.setAttribute?.('data-openjobfill-autofill', '1');
+      setTimeout(() => {
+        try {
+          el.removeAttribute?.('data-openjobfill-autofill');
+        } catch {}
+      }, 1000);
+    } catch {}
   }
 }
 
 export function isAutofillTouched(el: Element): boolean {
-  return autofillTouchedElements.has(el);
+  if (!el || typeof el !== 'object') return false;
+  if (el.hasAttribute?.('data-openjobfill-autofill')) return true;
+  const lastTime = lastAutofilledMap.get(el);
+  if (lastTime && Date.now() - lastTime < 1000) return true;
+  return false;
 }
 
 export function setNativeValue(

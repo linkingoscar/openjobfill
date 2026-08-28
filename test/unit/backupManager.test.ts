@@ -123,6 +123,15 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
 
   it('importFullBackup 支持 mode: overwrite 完全覆盖恢复当前数据', async () => {
     // 写入旧数据
+    await resumeStorage.saveResume({
+      ...EMPTY_RESUME,
+      id: 'old-obsolete-resume',
+      title: '旧版待覆盖简历',
+      basics: {
+        ...EMPTY_RESUME.basics,
+        name: '旧用户',
+      },
+    });
     await saveCustomDomains(['old-domain.com']);
     await ruleStorage.saveCustomRule({
       id: 'old-rule-1',
@@ -162,6 +171,11 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
 
     const result = await backupManager.importFullBackup(JSON.stringify(newBackup), 'overwrite');
     expect(result.resumes).toBe(1);
+
+    const allResumes = await resumeStorage.getAllResumes();
+    expect(allResumes.length).toBe(1);
+    expect(allResumes[0].id).toBe('overwrite-res-1');
+    expect(allResumes.some(r => r.id === 'old-obsolete-resume')).toBe(false); // 旧简历被彻底覆盖移除
 
     const domains = await getCustomDomains();
     expect(domains).toEqual(['new-only.com']); // 旧域名被完全覆盖清空
