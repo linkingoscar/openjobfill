@@ -98,7 +98,7 @@ export interface CustomQABankItem {
 
 export interface ResumeBasics {
   name: string;
-  gender: '男' | '女' | '其他';
+  gender?: '男' | '女' | '其他' | '';
   birthDate: string; // YYYY-MM-DD
   age?: number;
   phone: string;
@@ -106,9 +106,9 @@ export interface ResumeBasics {
   avatarUrl?: string;
   idCardType: '身份证' | '护照' | '港澳台通行证' | '其他';
   idCardNumber: string;
-  politicalStatus: '中共党员' | '中共预备党员' | '共青团员' | '群众' | '民主党派' | '其他';
+  politicalStatus?: '中共党员' | '中共预备党员' | '共青团员' | '群众' | '民主党派' | '其他' | '';
   ethnicity: string; // 汉族, 满族, 回族 等
-  maritalStatus: '未婚' | '已婚' | '保密';
+  maritalStatus?: '未婚' | '已婚' | '保密' | '';
   height?: string; // 身高 cm
   weight?: string; // 体重 kg
   healthStatus?: '健康' | '良好' | '一般';
@@ -120,7 +120,7 @@ export interface ResumeBasics {
   
   // 求职意向
   workingYears: number; // 工作年限 (0 为应届生)
-  jobStatus: '在职-考虑机会' | '离职-随时到岗' | '应届毕业生' | '在校生找实习';
+  jobStatus?: '在职-考虑机会' | '离职-随时到岗' | '应届毕业生' | '在校生找实习' | '';
   expectedRole?: string; // 期望岗位
   expectedCity?: string; // 期望城市
   expectedSalaryMin?: number; // 期望最低薪资 (k)

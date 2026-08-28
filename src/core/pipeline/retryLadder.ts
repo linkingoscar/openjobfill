@@ -1,5 +1,5 @@
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
-import { setNativeValue, setNativeRadioChecked, setNativeCheckboxChecked, simulateClick } from '../engine/dispatcher';
+import { setNativeValue, setNativeRadioChecked, setRadioGroupValue, setNativeCheckboxChecked, simulateClick } from '../engine/dispatcher';
 import { selectCustomOption } from '../engine/selector';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 import { locationResolver } from '../resolvers/locationResolver';
@@ -90,17 +90,13 @@ export class RetryLadder {
       case 'radio':
         return [
           {
-            name: 'Native Radio Checked Dispatcher',
-            execute: (field) => {
-              if (field.element instanceof HTMLInputElement) {
-                return setNativeRadioChecked(field.element, true);
-              }
-              simulateClick(field.element);
-              return true;
+            name: 'Semantic Radio Group Matcher & Dispatcher',
+            execute: (field, val) => {
+              return setRadioGroupValue(field.element, String(val));
             },
           },
           {
-            name: 'Direct Label/Container Click Fallback',
+            name: 'Direct Radio Option Click Fallback',
             execute: (field) => {
               simulateClick(field.element);
               return true;
@@ -111,10 +107,10 @@ export class RetryLadder {
       case 'checkbox':
         return [
           {
-            name: 'Native Checkbox Checked Dispatcher',
+            name: 'Strict Boolean Checkbox Dispatcher',
             execute: (field, val) => {
               if (field.element instanceof HTMLInputElement) {
-                return setNativeCheckboxChecked(field.element, Boolean(val));
+                return setNativeCheckboxChecked(field.element, val);
               }
               simulateClick(field.element);
               return true;

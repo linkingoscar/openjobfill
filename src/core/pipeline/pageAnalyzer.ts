@@ -14,14 +14,14 @@ export class PageAnalyzer {
       container.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
     );
 
-    // 2. 扫描自定义下拉框 / Combobox 容器
-    const customSelects = Array.from(
+    // 2. 扫描自定义下拉框 / Combobox / Cascader 容器
+    const customComponents = Array.from(
       container.querySelectorAll<HTMLElement>(
-        '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"]'
+        '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]'
       )
     );
 
-    const allCandidateElements = [...nativeInputs, ...customSelects];
+    const allCandidateElements = [...nativeInputs, ...customComponents];
 
     let fieldCounter = 0;
     for (const el of allCandidateElements) {
@@ -95,6 +95,14 @@ export class PageAnalyzer {
     if (el instanceof HTMLSelectElement) {
       return 'select';
     }
+    if (
+      el.classList.contains('el-cascader') ||
+      el.classList.contains('ant-cascader') ||
+      el.classList.contains('semi-cascader') ||
+      el.getAttribute('role') === 'cascader'
+    ) {
+      return 'cascader';
+    }
     if (el.classList.contains('el-select') || el.classList.contains('ant-select') || el.getAttribute('role') === 'combobox') {
       return 'select';
     }
@@ -144,6 +152,21 @@ export class PageAnalyzer {
   private extractOptions(el: HTMLElement, type: FieldType): string[] | undefined {
     if (el instanceof HTMLSelectElement) {
       return Array.from(el.options).map((o) => o.text.trim()).filter(Boolean);
+    }
+    if (type === 'radio') {
+      const name = el.getAttribute('name');
+      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || document;
+      const groupRadios = name
+        ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+        : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+      if (groupRadios.length > 0) {
+        return groupRadios
+          .map((r) => {
+            const labelText = findAssociatedLabelText(r) || r.value || r.parentElement?.textContent?.trim() || '';
+            return labelText.trim();
+          })
+          .filter(Boolean);
+      }
     }
     if (type === 'select') {
       const optionEls = el.querySelectorAll('[role="option"], .el-select-dropdown__item, .ant-select-item-option');

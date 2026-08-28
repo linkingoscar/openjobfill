@@ -4,13 +4,14 @@ import type { PipelineExecutionResult } from '../../types/pipeline';
 import { pageAnalyzer } from '../pipeline/pageAnalyzer';
 import { planGenerator } from '../pipeline/planGenerator';
 import { pipelineExecutor } from '../pipeline/executor';
+import { sectionEngine } from './sectionEngine';
 import { getEnhancerForUrl } from '../adapters/enhancers';
 import { ruleStorage } from '../storage/ruleStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 
 export class FormFillerEngine {
   /**
-   * 执行新一代两阶段决策与执行管道 (Page Analyzer -> Plan -> Execute with Read-Back Verification)
+   * 执行新一代两阶段决策与执行管道 (Section Expansion -> Page Analyzer -> Plan -> Execute with Read-Back Verification)
    */
   async fill(resume: StandardResume): Promise<FillResult> {
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
@@ -25,24 +26,31 @@ export class FormFillerEngine {
       }
     }
 
-    // 2. 加载用户针对当前站点的自定义规则
+    // 2. 全局通用多经历卡片差量扩增 (SectionEngine)
+    try {
+      await sectionEngine.ensureSectionCapacity(resume);
+    } catch (err) {
+      console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
+    }
+
+    // 3. 加载用户针对当前站点的自定义规则
     const customRule = await ruleStorage.findMatchingRuleForUrl(currentUrl);
     const customFieldRules = customRule ? customRule.fields : [];
 
-    // 3. 阶段一：页面全要素深度扫描 (Page Analyzer)
+    // 4. 阶段一：页面全要素深度扫描 (Page Analyzer 重新扫描最新挂载的 DOM 节点)
     const descriptors = pageAnalyzer.analyzePage(document);
     console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
-    // 4. 阶段二：生成全局填表规划 (Fill Plan)
+    // 5. 阶段二：生成全局填表规划 (Fill Plan)
     const plan = planGenerator.generatePlan(descriptors, resume, enhancer, customFieldRules);
     console.log(
       `[OpenJobFill Pipeline] FillPlan generated: ${plan.highConfidenceCount} to fill, ${plan.needsUserCount} need user, ${plan.skipCount} skipped.`
     );
 
-    // 5. 阶段三：执行规划与写后读回验证 (Execution with Read-Back & Retry Ladder)
+    // 6. 阶段三：执行规划与写后读回验证 (Execution with Read-Back & Retry Ladder)
     const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan);
 
-    // 6. 必填缺失与附件区域扫描
+    // 7. 必填缺失与附件区域扫描
     try {
       const missingCount = scanMissingRequiredFields();
       const dropzoneCount = scanAttachmentDropzones();
@@ -63,6 +71,8 @@ export class FormFillerEngine {
       failedCount: executionResult.failedCount,
       logs: executionResult.logs,
       durationMs,
+      remainingTasks: executionResult.remainingTasks,
+      plan: executionResult.plan,
     };
   }
 }

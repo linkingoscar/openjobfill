@@ -47,6 +47,9 @@ async function waitForDropdownCandidates(timeoutMs = 800): Promise<HTMLElement[]
   return [];
 }
 
+import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
+import { locationResolver } from '../resolvers/locationResolver';
+
 /**
  * 单次执行下拉框搜索与匹配尝试
  */
@@ -60,12 +63,30 @@ async function trySelectCustomOptionOnce(
   // 1. 如果是原生 select 标签
   if (triggerEl instanceof HTMLSelectElement) {
     const options = Array.from(triggerEl.options);
+    const optTexts = options.map((o) => o.text.trim());
+
+    // 尝试 OptionResolver / LocationResolver
+    let bestCanonicalText: string | null = null;
+    const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
+    for (const d of domains) {
+      const resolved = optionResolver.resolveOptionValue(optTexts, d, targetText);
+      if (resolved) {
+        bestCanonicalText = resolved;
+        break;
+      }
+    }
+    if (!bestCanonicalText) {
+      bestCanonicalText = locationResolver.matchLocationOption(optTexts, targetText);
+    }
+
     const matched = options.find((opt) => {
       const t = opt.text.trim().toLowerCase();
+      if (bestCanonicalText && opt.text.trim() === bestCanonicalText) return true;
       return fuzzy ? (t.includes(targetLower) || targetLower.includes(t)) : (t === targetLower);
     });
     if (matched) {
       triggerEl.value = matched.value;
+      triggerEl.dispatchEvent(new Event('input', { bubbles: true }));
       triggerEl.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     }
@@ -89,19 +110,49 @@ async function trySelectCustomOptionOnce(
     simulateClick(triggerEl);
   }
 
-  // 4. 动态等待选项列表渲染挂载
+  // 4. 动态等待 Portal 选项列表渲染挂载到 document.body
   const candidateElements = await waitForDropdownCandidates(700);
+  if (candidateElements.length === 0) {
+    return false;
+  }
 
-  // 5. 遍历可见选项，比对文本内容 (第一遍精准匹配，第二遍模糊匹配)
+  const candidateTexts = candidateElements.map((el) => (el.textContent || '').trim()).filter(Boolean);
+
+  // 5. 动态调用 OptionResolver / LocationResolver 解析最优 Option 文本
+  let canonicalMatchedText: string | null = null;
+  const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
+  for (const d of domains) {
+    const resolved = optionResolver.resolveOptionValue(candidateTexts, d, targetText);
+    if (resolved) {
+      canonicalMatchedText = resolved;
+      break;
+    }
+  }
+  if (!canonicalMatchedText) {
+    canonicalMatchedText = locationResolver.matchLocationOption(candidateTexts, targetText);
+  }
+
+  // 6. 遍历可见选项，比对文本内容 (Canonical 优先 -> 精准匹配 -> 模糊匹配)
   let bestMatch: HTMLElement | null = null;
 
-  for (const item of candidateElements) {
-    const itemText = (item.textContent || '').trim().toLowerCase();
-    if (!itemText) continue;
+  if (canonicalMatchedText) {
+    for (const item of candidateElements) {
+      if ((item.textContent || '').trim() === canonicalMatchedText) {
+        bestMatch = item;
+        break;
+      }
+    }
+  }
 
-    if (itemText === targetLower) {
-      bestMatch = item;
-      break;
+  if (!bestMatch) {
+    for (const item of candidateElements) {
+      const itemText = (item.textContent || '').trim().toLowerCase();
+      if (!itemText) continue;
+
+      if (itemText === targetLower) {
+        bestMatch = item;
+        break;
+      }
     }
   }
 
@@ -117,7 +168,7 @@ async function trySelectCustomOptionOnce(
     }
   }
 
-  // 6. 如果找到匹配项，模拟点击
+  // 7. 如果找到匹配项，模拟点击
   if (bestMatch) {
     simulateClick(bestMatch);
     await sleep(120);

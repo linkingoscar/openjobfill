@@ -39,6 +39,14 @@ export class PlanGenerator {
     let skipCount = 0;
 
     for (const field of fields) {
+      // 0. 调用 PlatformEnhancer.enhanceField Hook 进行字段增强
+      if (enhancer && enhancer.enhanceField) {
+        const enhancement = enhancer.enhanceField(field);
+        if (enhancement) {
+          Object.assign(field, enhancement);
+        }
+      }
+
       // 1. 如果字段已被填入有效值且非 radio/checkbox，默认跳过以保护用户输入
       if (
         field.type !== 'radio' &&
@@ -90,6 +98,7 @@ export class PlanGenerator {
       }
 
       // 3. 检查平台专属增强映射 (Platform Enhancer)
+      let platformMatched = false;
       if (enhancer && enhancer.fieldMappings) {
         for (const [selector, resumeKey] of Object.entries(enhancer.fieldMappings)) {
           if (field.element.matches && field.element.matches(selector)) {
@@ -112,10 +121,14 @@ export class PlanGenerator {
               });
               highConfidenceCount++;
               matchedSemanticKeys.add(targetKey);
-              continue;
+              platformMatched = true;
+              break;
             }
           }
         }
+      }
+      if (platformMatched) {
+        continue;
       }
 
       // 4. 检查问答库 (Q&A Bank)

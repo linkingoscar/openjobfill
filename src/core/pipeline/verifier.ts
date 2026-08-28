@@ -1,4 +1,6 @@
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
+import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
+import { locationResolver } from '../resolvers/locationResolver';
 
 export class Verifier {
   /**
@@ -14,27 +16,31 @@ export class Verifier {
     }
 
     if (driverType === 'radio') {
-      if (el instanceof HTMLInputElement && el.type === 'radio') {
-        // 如果是单个 radio
-        if (el.checked) return el.value || el.parentElement?.textContent?.trim() || true;
-        // 如果有同名 radio group，查找选中的项
-        if (el.name) {
-          const checked = document.querySelector<HTMLInputElement>(`input[type="radio"][name="${el.name}"]:checked`);
-          if (checked) {
-            return checked.value || checked.parentElement?.textContent?.trim() || true;
-          }
-        }
-        return false;
+      const name = el.getAttribute('name');
+      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || document;
+      
+      const checked = name
+        ? document.querySelector<HTMLInputElement>(`input[type="radio"][name="${name}"]:checked`)
+        : container.querySelector<HTMLInputElement>('input[type="radio"]:checked');
+
+      if (checked) {
+        return checked.value || checked.parentElement?.textContent?.trim() || true;
       }
+
+      if (el instanceof HTMLInputElement && el.type === 'radio' && el.checked) {
+        return el.value || el.parentElement?.textContent?.trim() || true;
+      }
+      return false;
     }
 
     if (driverType === 'checkbox') {
       if (el instanceof HTMLInputElement) {
         return el.checked;
       }
+      return false;
     }
 
-    if (driverType === 'select') {
+    if (driverType === 'select' || driverType === 'cascader') {
       if (el instanceof HTMLSelectElement) {
         const selected = el.options[el.selectedIndex];
         return selected ? selected.text.trim() : el.value;
@@ -64,7 +70,7 @@ export class Verifier {
   }
 
   /**
-   * 校验读回的值与期望值是否具备“语义等价性”
+   * 校验读回的值与期望值是否具备“语义等价性” (Domain-Aware Equivalence)
    */
   isSemanticEquivalent(actual: any, expected: any, driverType: DriverType): boolean {
     if (actual === expected) return true;
@@ -72,9 +78,11 @@ export class Verifier {
       return false;
     }
 
-    // Boolean 场景 (Checkbox / Radio)
-    if (typeof expected === 'boolean') {
-      return Boolean(actual) === expected;
+    // 1. Boolean 场景 (Checkbox / Radio)
+    if (typeof expected === 'boolean' || typeof actual === 'boolean') {
+      const expBool = typeof expected === 'boolean' ? expected : !['否', 'false', '0', 'no'].includes(String(expected).toLowerCase().trim());
+      const actBool = typeof actual === 'boolean' ? actual : !['否', 'false', '0', 'no', ''].includes(String(actual).toLowerCase().trim());
+      return expBool === actBool;
     }
 
     const strActual = String(actual).toLowerCase().replace(/[\s:：*_\-\(\)（）\[\]【】/]/g, '');
@@ -83,21 +91,53 @@ export class Verifier {
     if (!strActual && !strExpected) return true;
     if (!strActual || !strExpected) return false;
 
-    // 1. 完全一致
+    // 2. 完全一致
     if (strActual === strExpected) return true;
 
-    // 2. 包含关系 (如 "北京市" vs "北京"，"大学本科" vs "本科")
-    if (strActual.includes(strExpected) || strExpected.includes(strActual)) {
-      return true;
+    // 3. 政治面貌排斥保护 (正式党员与预备党员严禁混为一谈)
+    if (
+      (strActual.includes('预备') && !strExpected.includes('预备')) ||
+      (!strActual.includes('预备') && strExpected.includes('预备'))
+    ) {
+      return false;
     }
 
-    // 3. 日期等价性 (如 "2023-09" vs "2023年09月" vs "2023/09")
+    // 4. 性别排斥保护 (男 vs 女 严禁 substring 匹配)
+    if ((strActual === '男' && strExpected === '女') || (strActual === '女' && strExpected === '男')) {
+      return false;
+    }
+
+    // 5. Select 标准域 Canonical 判定
+    if (driverType === 'select' || driverType === 'cascader') {
+      const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
+      for (const d of domains) {
+        const canAct = optionResolver.toCanonical(d, strActual);
+        const canExp = optionResolver.toCanonical(d, strExpected);
+        if (canAct && canExp && canAct === canExp) {
+          return true;
+        }
+      }
+
+      // Location 判定
+      const locAct = locationResolver.normalizeLocation(strActual);
+      const locExp = locationResolver.normalizeLocation(strExpected);
+      if (locAct.city && locExp.city && locAct.city === locExp.city) {
+        return true;
+      }
+    }
+
+    // 6. 日期等价性 (如 "2023-09" vs "2023年09月" vs "2023/09")
     if (driverType === 'date') {
       const numActual = strActual.replace(/[^\d]/g, '');
       const numExpected = strExpected.replace(/[^\d]/g, '');
       if (numActual && numExpected && (numActual.startsWith(numExpected) || numExpected.startsWith(numActual))) {
         return true;
       }
+    }
+
+    // 7. 通用包含关系
+    if (strActual.includes(strExpected) || strExpected.includes(strActual)) {
+      return true;
     }
 
     return false;

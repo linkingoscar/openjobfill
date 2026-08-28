@@ -67,6 +67,8 @@ export interface FillLogItem {
   message?: string;
 }
 
+import type { FillPlan, RemainingTaskItem } from './pipeline';
+
 export interface FillResult {
   success: boolean;
   adapterName: string;
@@ -75,4 +77,6 @@ export interface FillResult {
   failedCount: number;
   logs: FillLogItem[];
   durationMs: number;
+  remainingTasks?: RemainingTaskItem[];
+  plan?: FillPlan;
 }

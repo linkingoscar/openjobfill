@@ -114,14 +114,63 @@ export function setNativeRadioChecked(radioEl: HTMLInputElement, checked = true)
 }
 
 /**
- * 模拟对复选框 (Checkbox) 的勾选
+ * 在同组单选框 (Radio Group) 中，根据 targetValue 定位目标选项并选中
  */
-export function setNativeCheckboxChecked(checkboxEl: HTMLInputElement, checked: boolean): boolean {
+export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolean {
+  if (!el || !targetValue) return false;
+
+  const stringVal = String(targetValue).toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+  const name = el.getAttribute('name');
+  const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || document;
+  
+  const groupRadios = name
+    ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+    : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+
+  for (const radio of groupRadios) {
+    const radioVal = (radio.value || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+    const radioLabel = (radio.parentElement?.textContent || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+
+    if (
+      radioVal === stringVal ||
+      radioLabel === stringVal ||
+      (stringVal.length >= 1 && (radioVal.includes(stringVal) || radioLabel.includes(stringVal)))
+    ) {
+      return setNativeRadioChecked(radio, true);
+    }
+  }
+
+  if (el instanceof HTMLInputElement && el.type === 'radio') {
+    return setNativeRadioChecked(el, true);
+  }
+  return false;
+}
+
+/**
+ * 模拟对复选框 (Checkbox) 的勾选 (严格布尔值解析)
+ */
+export function setNativeCheckboxChecked(checkboxEl: HTMLInputElement, checkedOrVal: boolean | string | number): boolean {
   if (!checkboxEl) return false;
 
-  if (checkboxEl.checked !== checked) {
+  let targetChecked = false;
+  if (typeof checkedOrVal === 'boolean') {
+    targetChecked = checkedOrVal;
+  } else {
+    const s = String(checkedOrVal).trim().toLowerCase();
+    if (['是', 'yes', 'y', 'true', '1', 'checked', '同意', '接受'].includes(s)) {
+      targetChecked = true;
+    } else if (['否', 'no', 'n', 'false', '0', '不同意', '拒绝'].includes(s)) {
+      targetChecked = false;
+    } else {
+      targetChecked = Boolean(checkedOrVal);
+    }
+  }
+
+  if (checkboxEl.checked !== targetChecked) {
     checkboxEl.focus();
     checkboxEl.click();
+    checkboxEl.checked = targetChecked;
+    checkboxEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     checkboxEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     checkboxEl.blur();
   }

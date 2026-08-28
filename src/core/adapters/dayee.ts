@@ -99,12 +99,13 @@ export const dayeeAdapter: SiteAdapter = {
     // 5. 性别
     const genderLabels = Array.from(document.querySelectorAll<HTMLElement>('label, .dayee-radio, .el-radio'));
     if (genderLabels.length > 0 && resume.basics.gender) {
-      const matched = genderLabels.find((l) => l.textContent?.includes(resume.basics.gender));
+      const targetGender = resume.basics.gender;
+      const matched = genderLabels.find((l) => l.textContent?.includes(targetGender));
       if (matched) {
         const radio = matched.querySelector<HTMLInputElement>('input[type="radio"]');
         if (radio) setNativeRadioChecked(radio, true);
         else matched.click();
-        logSuccess('性别', 'basics.gender', resume.basics.gender);
+        logSuccess('性别', 'basics.gender', targetGender);
       }
     }
 

@@ -85,12 +85,13 @@ export const mokaAdapter: SiteAdapter = {
       document.querySelectorAll<HTMLElement>('.moka-radio-group label, [class*="gender"] label, .el-radio')
     );
     if (genderLabels.length > 0 && resume.basics.gender) {
-      const target = genderLabels.find((l) => l.textContent?.includes(resume.basics.gender));
+      const targetGender = resume.basics.gender;
+      const target = genderLabels.find((l) => l.textContent?.includes(targetGender));
       if (target) {
         const radio = target.querySelector<HTMLInputElement>('input[type="radio"]');
         if (radio) setNativeRadioChecked(radio, true);
         else target.click();
-        logSuccess('性别', 'basics.gender', resume.basics.gender);
+        logSuccess('性别', 'basics.gender', targetGender);
       }
     }
 

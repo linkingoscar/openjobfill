@@ -84,12 +84,13 @@ export const feishuAdapter: SiteAdapter = {
     // 4. 性别 (Semi Radio)
     const genderLabels = Array.from(document.querySelectorAll<HTMLElement>('.semi-radio, label.semi-radio-wrapper'));
     if (genderLabels.length > 0 && resume.basics.gender) {
-      const matched = genderLabels.find((l) => l.textContent?.includes(resume.basics.gender));
+      const targetGender = resume.basics.gender;
+      const matched = genderLabels.find((l) => l.textContent?.includes(targetGender));
       if (matched) {
         const input = matched.querySelector<HTMLInputElement>('input[type="radio"]');
         if (input) setNativeRadioChecked(input, true);
         else matched.click();
-        logSuccess('性别', 'basics.gender', resume.basics.gender);
+        logSuccess('性别', 'basics.gender', targetGender);
       }
     }
 
