@@ -15,11 +15,25 @@ export interface FieldSynonymItem {
 const BASE_PERSONAL_FIELDS: FieldSynonymItem[] = [
   // 1. 基础个人信息
   {
-    resumeKey: 'basics.name',
-    name: '姓名',
+    resumeKey: 'basics.firstName',
+    name: '名字 / First Name',
     keywords: [
-      '姓名', '真实姓名', '中文姓名', '名字', '申请人姓名', '候选人姓名', '用户姓名', '本人姓名',
-      'name', 'full name', 'fullname', 'candidate name', 'applicant name', 'legal name', 'first name'
+      'first name', 'firstname', 'given name', '名', '名字', 'first_name', 'fname', 'userfirstname'
+    ],
+  },
+  {
+    resumeKey: 'basics.lastName',
+    name: '姓氏 / Last Name',
+    keywords: [
+      'last name', 'lastname', 'surname', 'family name', '姓', '姓氏', 'last_name', 'lname', 'userlastname'
+    ],
+  },
+  {
+    resumeKey: 'basics.name',
+    name: '姓名 / Full Name',
+    keywords: [
+      '姓名', '真实姓名', '中文姓名', '申请人姓名', '候选人姓名', '用户姓名', '本人姓名',
+      'name', 'full name', 'fullname', 'candidate name', 'applicant name', 'legal name', 'your name'
     ],
   },
   {

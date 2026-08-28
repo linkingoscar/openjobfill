@@ -68,13 +68,7 @@ export default defineContentScript({
       () => unmountFloatBall()
     );
 
-    // 官方 WXT 上下文失效生命周期钩子：插件重载时立即释放所有监听器与 DOM
-    ctx.onInvalidated(() => {
-      stopObserving();
-      unmountFloatBall();
-    });
-
-    // 智能多步向导 (Multi-Step Wizard) SPA 路由与步骤切换侦测
+    // 智能多步向导 (Multi-Step Wizard) SPA 路由与 DOM 步骤切换侦测
     let lastUrl = window.location.href;
     const handleStepChange = () => {
       if (window.location.href !== lastUrl) {
@@ -99,6 +93,56 @@ export default defineContentScript({
       originalReplaceState.apply(this, args);
       handleStepChange();
     };
+
+    // DOM 表单签名突变监听 (捕获无 URL 变化的同页多步切换)
+    const computeFormSignature = () => {
+      const stepTitles = Array.from(
+        document.querySelectorAll(
+          '.ant-steps-item-active, .el-step.is-process, .semi-step-item-process, [class*="step"][class*="active"], [class*="step-current"]'
+        )
+      )
+        .map((el) => (el.textContent || '').trim())
+        .join('|');
+      const inputNames = Array.from(document.querySelectorAll('input, select, textarea'))
+        .slice(0, 25)
+        .map((el) => el.getAttribute('name') || el.getAttribute('data-automation-id') || el.id || el.className)
+        .filter(Boolean)
+        .join(',');
+      return `${stepTitles}::${inputNames}`;
+    };
+
+    let lastSignature = computeFormSignature();
+    let signatureTimer: any = null;
+
+    const domStepObserver = new MutationObserver(() => {
+      if (signatureTimer) clearTimeout(signatureTimer);
+      signatureTimer = setTimeout(() => {
+        const newSig = computeFormSignature();
+        if (newSig && newSig !== lastSignature) {
+          lastSignature = newSig;
+          console.log('[OpenJobFill] 检测到网申表单 DOM 步骤结构突变');
+          if (vm && vm.notifyStepChange) {
+            vm.notifyStepChange(window.location.href);
+          }
+        }
+      }, 500);
+    });
+
+    try {
+      domStepObserver.observe(document.body, { childList: true, subtree: true });
+    } catch (e) {}
+
+    // 官方 WXT 上下文失效生命周期钩子：插件重载时立即释放所有监听器与恢复原型
+    ctx.onInvalidated(() => {
+      stopObserving();
+      unmountFloatBall();
+      window.removeEventListener('popstate', handleStepChange);
+      window.removeEventListener('hashchange', handleStepChange);
+      history.pushState = originalPushState;
+      history.replaceState = originalReplaceState;
+      domStepObserver.disconnect();
+      if (signatureTimer) clearTimeout(signatureTimer);
+    });
 
     // 监听来自 Background / Popup 的指令
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

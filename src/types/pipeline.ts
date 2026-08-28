@@ -95,6 +95,12 @@ export interface PipelineExecutionResult {
   plan: FillPlan;
 }
 
+export interface PlatformRepeaterConfig {
+  sectionRoot?: string;
+  itemSelector?: string;
+  addButton?: string;
+}
+
 /**
  * 平台特征增强器 (替换原有整页接管的 monolithic adapter)
  */
@@ -111,6 +117,14 @@ export interface PlatformEnhancer {
   // 平台专属静态选择器映射
   fieldMappings?: Record<string, string>; // CSS Selector -> Semantic Key
   
+  // 平台专属经历增行与卡片配置
+  repeaterConfigs?: {
+    education?: PlatformRepeaterConfig;
+    experience?: PlatformRepeaterConfig;
+    project?: PlatformRepeaterConfig;
+    family?: PlatformRepeaterConfig;
+  };
+
   // 增行/初始化钩子
   onBeforePlan?(resume: StandardResume, doc?: Document): Promise<void> | void;
 }

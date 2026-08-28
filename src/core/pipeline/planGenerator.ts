@@ -55,19 +55,39 @@ export class PlanGenerator {
         }
       }
 
-      // 1. 如果字段已被填入有效值且非 radio/checkbox，默认跳过以保护用户输入
-      if (
-        field.type !== 'radio' &&
-        field.type !== 'checkbox' &&
-        field.currentValue &&
-        String(field.currentValue).trim().length > 0
-      ) {
+      // 1. 用户输入保护：如果字段已有内容或选项已被用户手动选过，默认跳过以保护用户输入
+      let isAlreadyFilledByUser = false;
+      let skipReason = '字段已有内容，自动保护跳过';
+
+      if (field.type === 'checkbox') {
+        if (field.element instanceof HTMLInputElement && field.element.checked) {
+          isAlreadyFilledByUser = true;
+          skipReason = '复选框已被勾选，自动保护跳过';
+        }
+      } else if (field.type === 'radio') {
+        const el = field.element;
+        if (el instanceof HTMLInputElement) {
+          const name = el.getAttribute('name');
+          const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || document;
+          const groupRadios = name
+            ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+            : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+          if (groupRadios.some((r) => r.checked)) {
+            isAlreadyFilledByUser = true;
+            skipReason = '单选框组已有选定项，自动保护跳过';
+          }
+        }
+      } else if (field.currentValue && String(field.currentValue).trim().length > 0) {
+        isAlreadyFilledByUser = true;
+      }
+
+      if (isAlreadyFilledByUser) {
         items.push({
           id: `plan_${field.id}`,
           field,
           action: 'SKIP',
           confidence: 1.0,
-          reason: '字段已有内容，自动保护跳过',
+          reason: skipReason,
           driverType: this.resolveDriverType(field),
         });
         skipCount++;
@@ -301,10 +321,24 @@ export class PlanGenerator {
     if (bestKey && highestScore >= 0.6) {
       const val = getValueByPath(resume, bestKey);
       if (hasUsableValue(val)) {
+        let stringVal = String(val);
+        // 如果是 Location 对象，序列化为省-市-区
+        if (typeof val === 'object' && val !== null && ('province' in val || 'city' in val)) {
+          const loc = val as any;
+          stringVal = [loc.province, loc.city, loc.district].filter(Boolean).join('-');
+        } else if (field.type === 'cascader' && bestKey.startsWith('basics.') && (bestKey.includes('Location') || bestKey.includes('nativePlace'))) {
+          // 如果字段是 Cascader，优先获取完整的省-市-区
+          const parentLocKey = bestKey.replace(/\.(city|province|district)$/, '');
+          const parentLoc = getValueByPath(resume, parentLocKey) as any;
+          if (parentLoc && typeof parentLoc === 'object') {
+            stringVal = [parentLoc.province, parentLoc.city, parentLoc.district].filter(Boolean).join('-');
+          }
+        }
+
         return {
           resumeKey: bestKey,
           name: bestName,
-          targetValue: String(val),
+          targetValue: stringVal,
           confidence: highestScore,
         };
       }

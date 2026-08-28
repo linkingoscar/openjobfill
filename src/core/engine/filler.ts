@@ -28,7 +28,7 @@ export class FormFillerEngine {
 
     // 2. 全局通用多经历卡片差量扩增 (SectionEngine)
     try {
-      await sectionEngine.ensureSectionCapacity(resume);
+      await sectionEngine.ensureSectionCapacity(resume, enhancer);
     } catch (err) {
       console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
     }

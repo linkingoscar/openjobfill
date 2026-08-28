@@ -41,9 +41,11 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
     let searchRoot: ParentNode = document;
     if (popupId) {
       const popupEl = document.getElementById(popupId) || document.querySelector(`[id="${popupId}"]`);
-      if (popupEl) {
-        searchRoot = popupEl;
+      if (!popupEl || !isElementVisible(popupEl as HTMLElement)) {
+        await sleep(50);
+        continue; // 声明了 popupId 时必须只等待自身 Popup 挂载，严禁中途退回 document 全局误拿其他下拉
       }
+      searchRoot = popupEl;
     }
 
     for (const selector of OPTION_SELECTORS) {
@@ -247,7 +249,7 @@ export async function selectCascaderOptions(
   if (!triggerEl) return false;
   const pathTexts = Array.isArray(pathData) 
     ? pathData 
-    : pathData.split(/[-/、\s]/).map(s => s.trim()).filter(Boolean);
+    : pathData.split(/[-/、>]/).map(s => s.trim()).filter(Boolean);
 
   if (pathTexts.length === 0) return false;
 

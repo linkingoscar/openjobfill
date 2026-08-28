@@ -258,4 +258,89 @@ describe('Precision Engine & Anti-False-Positive Test Suite (精准决策与防�
       expect(parsed.basics.jobStatus).toBe(''); // 严禁默认为 '应届毕业生'
     });
   });
+
+  describe('7. 用户已有输入与单选框组已有选择保护', () => {
+    it('当单选框组中已有 checked 的选项时，PlanGenerator 必须生成 action: SKIP 保护用户手动选择', () => {
+      document.body.innerHTML = `
+        <div class="form-item">
+          <label>是否接受调剂</label>
+          <input type="radio" name="adjust" value="yes" /> 是
+          <input type="radio" name="adjust" value="no" checked /> 否
+        </div>
+      `;
+
+      const yesRadio = document.querySelector('input[value="yes"]') as HTMLInputElement;
+      const field: FieldDescriptor = {
+        id: 'f_adjust',
+        element: yesRadio,
+        type: 'radio',
+        label: '是否接受调剂',
+        placeholder: '',
+        name: 'adjust',
+        ariaLabel: '',
+        required: true,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      const plan = planGenerator.generatePlan([field], BASE_MOCK_RESUME);
+      expect(plan.items[0].action).toBe('SKIP');
+      expect(plan.items[0].reason).toContain('保护');
+    });
+
+    it('当复选框已被用户勾选时，PlanGenerator 必须生成 action: SKIP 保护用户选择', () => {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      document.body.appendChild(checkbox);
+
+      const field: FieldDescriptor = {
+        id: 'f_agree',
+        element: checkbox,
+        type: 'checkbox',
+        label: '同意用户协议',
+        placeholder: '',
+        name: 'agree',
+        ariaLabel: '',
+        required: true,
+        disabled: false,
+        readOnly: false,
+        currentValue: 'true',
+        contextText: '',
+      };
+
+      const plan = planGenerator.generatePlan([field], BASE_MOCK_RESUME);
+      expect(plan.items[0].action).toBe('SKIP');
+    });
+  });
+
+  describe('8. Cascader 多级位置序列化与结构化路径', () => {
+    it('当字段为 Cascader 时，PlanGenerator 应该输出完整的省-市-区路径', () => {
+      const div = document.createElement('div');
+      div.className = 'ant-cascader';
+      document.body.appendChild(div);
+
+      const field: FieldDescriptor = {
+        id: 'f_city_cascader',
+        element: div,
+        type: 'cascader',
+        label: '现居住城市',
+        placeholder: '请选择现居住地',
+        name: 'current_city',
+        ariaLabel: '',
+        required: true,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      const plan = planGenerator.generatePlan([field], BASE_MOCK_RESUME);
+      const item = plan.items[0];
+      expect(item).toBeDefined();
+      expect(item.targetValue).toBe('北京市-海淀区');
+    });
+  });
 });

@@ -28,6 +28,23 @@ export const mokaEnhancer: PlatformEnhancer = {
     'textarea[name*="desc"]': 'experiences.0.description',
     'textarea[name*="self"]': 'basics.selfEvaluation',
   },
+  repeaterConfigs: {
+    education: {
+      sectionRoot: '.moka-education-section, [class*="education-section"], [data-section="education"]',
+      itemSelector: '.moka-education-item, .moka-card, [class*="education-item"]',
+      addButton: '.moka-add-education, [class*="add-education"]',
+    },
+    experience: {
+      sectionRoot: '.moka-experience-section, [class*="experience-section"], [data-section="experience"]',
+      itemSelector: '.moka-experience-item, [class*="experience-item"]',
+      addButton: '.moka-add-experience, [class*="add-experience"]',
+    },
+    project: {
+      sectionRoot: '.moka-project-section, [class*="project-section"]',
+      itemSelector: '.moka-project-item, [class*="project-item"]',
+      addButton: '.moka-add-project, [class*="add-project"]',
+    },
+  },
 };
 
 export const beisenEnhancer: PlatformEnhancer = {
@@ -88,23 +105,35 @@ export const workdayEnhancer: PlatformEnhancer = {
     );
   },
   fieldMappings: {
-    '[data-automation-id="legalNameSection_firstName"] input, [data-automation-id="firstName"] input': 'basics.firstName',
-    '[data-automation-id="legalNameSection_lastName"] input, [data-automation-id="lastName"] input': 'basics.lastName',
-    '[data-automation-id="preferredNameSection_firstName"] input': 'basics.preferredName',
-    '[data-automation-id="phone-number"] input, [data-automation-id="phone-number"]': 'basics.phone',
-    '[data-automation-id="email"] input, [data-automation-id="email"]': 'basics.email',
-    '[data-automation-id="addressSection_countryRegion"]': 'basics.country',
-    '[data-automation-id="addressSection_postalCode"] input': 'basics.postalCode',
-    '[data-automation-id="addressSection_addressLine1"] input': 'basics.addressLine1',
-    '[data-automation-id="addressSection_city"] input': 'basics.currentLocation.city',
-    '[data-automation-id="school"] input': 'educations.0.schoolName',
-    '[data-automation-id="degree"]': 'educations.0.degree',
-    '[data-automation-id="field-of-study"] input': 'educations.0.major',
-    '[data-automation-id="company"] input': 'experiences.0.company',
-    '[data-automation-id="jobTitle"] input': 'experiences.0.title',
-    '[data-automation-id="startDate"] input': 'experiences.0.startDate',
-    '[data-automation-id="endDate"] input': 'experiences.0.endDate',
-    '[data-automation-id="description"] textarea': 'experiences.0.description',
+    'input[data-automation-id*="firstName"], [data-automation-id*="firstName"] input, input[data-automation-id="legalNameSection_firstName"], [data-automation-id="legalNameSection_firstName"] input': 'basics.firstName',
+    'input[data-automation-id*="lastName"], [data-automation-id*="lastName"] input, input[data-automation-id="legalNameSection_lastName"], [data-automation-id="legalNameSection_lastName"] input': 'basics.lastName',
+    'input[data-automation-id*="preferredName"], [data-automation-id*="preferredName"] input': 'basics.preferredName',
+    'input[data-automation-id*="phone-number"], [data-automation-id*="phone-number"] input, [data-automation-id*="phone-number"]': 'basics.phone',
+    'input[data-automation-id*="email"], [data-automation-id*="email"] input, [data-automation-id="email"]': 'basics.email',
+    '[data-automation-id="addressSection_countryRegion"], select[data-automation-id*="country"], [data-automation-id*="country"]': 'basics.country',
+    'input[data-automation-id*="postalCode"], [data-automation-id*="postalCode"] input': 'basics.postalCode',
+    'input[data-automation-id*="addressLine1"], [data-automation-id*="addressLine1"] input': 'basics.addressLine1',
+    'input[data-automation-id*="addressSection_city"], [data-automation-id*="addressSection_city"] input, input[data-automation-id*="city"], [data-automation-id*="city"] input': 'basics.currentLocation.city',
+    'input[data-automation-id*="school"], [data-automation-id*="school"] input': 'educations.0.schoolName',
+    '[data-automation-id*="degree"], select[data-automation-id*="degree"]': 'educations.0.degree',
+    'input[data-automation-id*="field-of-study"], [data-automation-id*="field-of-study"] input, input[data-automation-id*="major"], [data-automation-id*="major"] input': 'educations.0.major',
+    'input[data-automation-id*="company"], [data-automation-id*="company"] input': 'experiences.0.company',
+    'input[data-automation-id*="jobTitle"], [data-automation-id*="jobTitle"] input': 'experiences.0.title',
+    'input[data-automation-id*="startDate"], [data-automation-id*="startDate"] input': 'experiences.0.startDate',
+    'input[data-automation-id*="endDate"], [data-automation-id*="endDate"] input': 'experiences.0.endDate',
+    'textarea[data-automation-id*="description"], [data-automation-id*="description"] textarea': 'experiences.0.description',
+  },
+  repeaterConfigs: {
+    education: {
+      sectionRoot: '[data-automation-id="educationSection"]',
+      itemSelector: '[data-automation-id="educationSection"] [data-automation-id="panelSet"]',
+      addButton: '[data-automation-id="Add Another Education"], [data-automation-id="add-education-button"]',
+    },
+    experience: {
+      sectionRoot: '[data-automation-id="workExperienceSection"]',
+      itemSelector: '[data-automation-id="workExperienceSection"] [data-automation-id="panelSet"]',
+      addButton: '[data-automation-id="Add Another Work Experience"], [data-automation-id="add-work-experience-button"]',
+    },
   },
 };
 

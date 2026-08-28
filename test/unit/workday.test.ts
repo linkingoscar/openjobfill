@@ -98,5 +98,95 @@ describe('Workday & International ATS Suite (Workday 与国际化网申专项测
       expect(zipPlan).toBeDefined();
       expect(zipPlan?.targetValue).toBe('94043');
     });
+
+    it('当 data-automation-id 直接挂在 input 上时，WorkdayEnhancer 同样必须精准识别', () => {
+      document.body.innerHTML = `
+        <form data-automation-id="workdayApplicationForm">
+          <input data-automation-id="firstName" type="text" />
+          <input data-automation-id="lastName" type="text" />
+        </form>
+      `;
+
+      const mockInternationalResume: StandardResume = {
+        id: 'wd-2',
+        title: 'Workday 国际简历 2',
+        isDefault: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        basics: {
+          name: 'Alex Ferguson',
+          firstName: 'Alex',
+          lastName: 'Ferguson',
+          phone: '',
+          email: '',
+          birthDate: '',
+          idCardNumber: '',
+          workingYears: 8,
+        },
+        educations: [],
+        experiences: [],
+        projects: [],
+        skills: [],
+        languages: [],
+        certificates: [],
+        familyMembers: [],
+        qaBank: [],
+      };
+
+      const descriptors = pageAnalyzer.analyzePage(document);
+      const plan = planGenerator.generatePlan(descriptors, mockInternationalResume, workdayEnhancer);
+
+      const firstNamePlan = plan.items.find((p) => p.semanticKey === 'basics.firstName');
+      expect(firstNamePlan).toBeDefined();
+      expect(firstNamePlan?.targetValue).toBe('Alex');
+
+      const lastNamePlan = plan.items.find((p) => p.semanticKey === 'basics.lastName');
+      expect(lastNamePlan).toBeDefined();
+      expect(lastNamePlan?.targetValue).toBe('Ferguson');
+    });
+
+    it('通用语义词典面对 First Name / Given Name 时，绝对只能匹配 basics.firstName，绝不能填入 Full Name', () => {
+      document.body.innerHTML = `
+        <div>
+          <label>First Name</label>
+          <input name="user_fname" type="text" />
+        </div>
+      `;
+
+      const mockResume: StandardResume = {
+        id: 'wd-3',
+        title: '通用简历',
+        isDefault: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        basics: {
+          name: 'Johnathan Smith',
+          firstName: 'Johnathan',
+          lastName: 'Smith',
+          phone: '',
+          email: '',
+          birthDate: '',
+          idCardNumber: '',
+          workingYears: 3,
+        },
+        educations: [],
+        experiences: [],
+        projects: [],
+        skills: [],
+        languages: [],
+        certificates: [],
+        familyMembers: [],
+        qaBank: [],
+      };
+
+      const descriptors = pageAnalyzer.analyzePage(document);
+      // 不传任何 PlatformEnhancer，测试通用词典
+      const plan = planGenerator.generatePlan(descriptors, mockResume, null);
+
+      const item = plan.items[0];
+      expect(item).toBeDefined();
+      expect(item.semanticKey).toBe('basics.firstName');
+      expect(item.targetValue).toBe('Johnathan'); // 必须是 Johnathan，绝不能是 Johnathan Smith
+    });
   });
 });
