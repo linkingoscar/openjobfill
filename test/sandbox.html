@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>OpenJobFill 模拟网申综合测试表单 (Sandbox)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; padding: 40px; }
+    .form-container { max-width: 820px; margin: 0 auto; background: #fff; padding: 36px; border-radius: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
+    h2 { margin-top: 0; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }
+    h3 { margin-top: 28px; color: #1e293b; font-size: 16px; border-left: 4px solid #2563eb; padding-left: 10px; display: flex; align-items: center; justify-content: space-between; }
+    .form-row { display: flex; gap: 16px; margin-bottom: 16px; }
+    .form-item { flex: 1; display: flex; flex-direction: column; }
+    .form-label { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="date"], select, textarea {
+      padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .radio-group { display: flex; gap: 16px; align-items: center; height: 42px; }
+    .section-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .btn-add { background: #eff6ff; color: #2563eb; border: 1px dashed #bfdbfe; padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-add:hover { background: #dbeafe; }
+    .submit-btn { background: #2563eb; color: #fff; border: none; padding: 12px 24px; font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer; margin-top: 20px; width: 100%; }
+    .submit-btn:hover { background: #1d4ed8; }
+    .log-box { margin-top: 20px; padding: 16px; background: #0f172a; color: #38bdf8; font-family: monospace; border-radius: 8px; font-size: 13px; white-space: pre-wrap; display: none; }
+  </style>
+</head>
+<body>
+
+<div class="form-container">
+  <h2>🎯 OpenJobFill 招聘网申综合测试表单</h2>
+  <p style="color: #64748b; font-size: 13px;">用于全方位测试插件对基础个人信息、多段教育/工作经历卡片、技术项目、问答库模糊语义等全功能识别效果。</p>
+
+  <form id="jobForm" onsubmit="event.preventDefault(); showFormValues();">
+    <!-- 1. 基本信息 -->
+    <h3>一、 个人基本信息</h3>
+    <div class="form-row">
+      <div class="form-item">
+        <label class="form-label">真实姓名 *</label>
+        <input type="text" name="candidateName" placeholder="请输入姓名" required />
+      </div>
+      <div class="form-item">
+        <label class="form-label">性别 *</label>
+        <div class="radio-group">
+          <label><input type="radio" name="gender" value="男" /> 男</label>
+          <label><input type="radio" name="gender" value="女" /> 女</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-item">
+        <label class="form-label">手机号码 *</label>
+        <input type="tel" name="mobile" placeholder="请输入11位手机号" required />
+      </div>
+      <div class="form-item">
+        <label class="form-label">电子邮箱 *</label>
+        <input type="email" name="email" placeholder="example@mail.com" required />
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-item">
+        <label class="form-label">身份证号码</label>
+        <input type="text" name="idCard" placeholder="请输入18位身份证号" />
+      </div>
+      <div class="form-item">
+        <label class="form-label">出生日期</label>
+        <input type="date" name="birthday" />
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-item">
+        <label class="form-label">政治面貌</label>
+        <select name="politicalStatus">
+          <option value="">请选择</option>
+          <option value="群众">群众</option>
+          <option value="共青团员">共青团员</option>
+          <option value="中共预备党员">中共预备党员</option>
+          <option value="中共党员">中共党员</option>
+        </select>
+      </div>
+      <div class="form-item">
+        <label class="form-label">现居城市</label>
+        <input type="text" name="city" placeholder="如：北京市" />
+      </div>
+      <div class="form-item">
+        <label class="form-label">籍贯生源地</label>
+        <input type="text" name="nativePlace" placeholder="如：山东省青岛市" />
+      </div>
+    </div>
+
+    <!-- 2. 教育背景 (多段经历卡片) -->
+    <h3>
+      <span>二、 教育背景经历</span>
+      <button type="button" class="btn-add" onclick="addEducationCard()">+ 添加教育经历</button>
+    </h3>
+    <div id="education-section-container">
+      <div class="section-card education-item" data-section="education">
+        <div class="form-row">
+          <div class="form-item">
+            <label class="form-label">就读学校 (第1段) *</label>
+            <input type="text" name="edu_school_0" placeholder="请输入就读学校" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">学历层次</label>
+            <select name="edu_degree_0">
+              <option value="">请选择</option>
+              <option value="专科">专科</option>
+              <option value="本科">本科</option>
+              <option value="硕士">硕士</option>
+              <option value="博士">博士</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-item">
+            <label class="form-label">所学专业 *</label>
+            <input type="text" name="edu_major_0" placeholder="如：计算机科学与技术" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">GPA 成绩绩点</label>
+            <input type="text" name="edu_gpa_0" placeholder="如：3.8/4.0" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 工作与实习经历 -->
+    <h3>
+      <span>三、 工作与实习经历</span>
+      <button type="button" class="btn-add" onclick="addWorkCard()">+ 添加工作经历</button>
+    </h3>
+    <div id="work-section-container">
+      <div class="section-card work-item" data-section="experience">
+        <div class="form-row">
+          <div class="form-item">
+            <label class="form-label">公司单位名称 *</label>
+            <input type="text" name="exp_company_0" placeholder="如：北京字节跳动科技有限公司" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">职位岗位 *</label>
+            <input type="text" name="exp_title_0" placeholder="如：前端开发工程师" />
+          </div>
+        </div>
+        <div class="form-item">
+          <label class="form-label">工作内容与成果描述</label>
+          <textarea name="exp_desc_0" rows="3" placeholder="请详细描述您的工作职责与业绩亮点..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 自我评价与开放问答 -->
+    <h3>四、 自我评价与开放性问答 (问答库智能匹配测试)</h3>
+    <div class="form-item" style="margin-bottom: 16px;">
+      <label class="form-label">自我评价 / 个人优势</label>
+      <textarea name="selfEvaluation" rows="3" placeholder="请简述您的核心技术优势与综合能力..."></textarea>
+    </div>
+
+    <div class="form-item" style="margin-bottom: 16px;">
+      <label class="form-label">未来的职业发展规划与职业目标</label>
+      <textarea name="careerPlan" rows="3" placeholder="谈谈您未来 3-5 年的职业规划..."></textarea>
+    </div>
+
+    <button type="submit" class="submit-btn">测试提交表单（校验填入值）</button>
+  </form>
+
+  <div id="logOutput" class="log-box"></div>
+</div>
+
+<script>
+  let eduCount = 1;
+  function addEducationCard() {
+    eduCount++;
+    const container = document.getElementById('education-section-container');
+    const div = document.createElement('div');
+    div.className = 'section-card education-item';
+    div.setAttribute('data-section', 'education');
+    div.innerHTML = `
+      <div class="form-row">
+        <div class="form-item">
+          <label class="form-label">就读学校 (第${eduCount}段) *</label>
+          <input type="text" name="edu_school_${eduCount - 1}" placeholder="请输入就读学校" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">学历层次</label>
+          <select name="edu_degree_${eduCount - 1}">
+            <option value="">请选择</option>
+            <option value="本科">本科</option>
+            <option value="硕士">硕士</option>
+            <option value="博士">博士</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-item">
+          <label class="form-label">所学专业 *</label>
+          <input type="text" name="edu_major_${eduCount - 1}" placeholder="如：软件工程" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">GPA 成绩</label>
+          <input type="text" name="edu_gpa_${eduCount - 1}" placeholder="如：3.9/4.0" />
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+
+  let workCount = 1;
+  function addWorkCard() {
+    workCount++;
+    const container = document.getElementById('work-section-container');
+    const div = document.createElement('div');
+    div.className = 'section-card work-item';
+    div.setAttribute('data-section', 'experience');
+    div.innerHTML = `
+      <div class="form-row">
+        <div class="form-item">
+          <label class="form-label">公司单位名称 (第${workCount}段) *</label>
+          <input type="text" name="exp_company_${workCount - 1}" placeholder="公司名称" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">职位岗位 *</label>
+          <input type="text" name="exp_title_${workCount - 1}" placeholder="职位" />
+        </div>
+      </div>
+      <div class="form-item">
+        <label class="form-label">工作内容与成果描述</label>
+        <textarea name="exp_desc_${workCount - 1}" rows="3" placeholder="工作内容描述..."></textarea>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+
+  function showFormValues() {
+    const form = document.getElementById('jobForm');
+    const formData = new FormData(form);
+    const result = {};
+    for (const [key, val] of formData.entries()) {
+      result[key] = val;
+    }
+    const logBox = document.getElementById('logOutput');
+    logBox.style.display = 'block';
+    logBox.textContent = '表单当前实际采集到的数据（已触发受控状态同步）：\n' + JSON.stringify(result, null, 2);
+  }
+</script>
+
+</body>
+</html>
+

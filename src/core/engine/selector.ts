@@ -1,0 +1,255 @@
+import { sleep, isElementVisible } from '../../utils/dom';
+import { setNativeValue, simulateClick } from './dispatcher';
+import { getFormalUniversityVariants, getFormalMajorVariants } from '../matcher/aliasDictionary';
+
+const OPTION_SELECTORS = [
+  '.el-select-dropdown__item', // Element UI / Element Plus
+  '.ant-select-item-option-content', // Ant Design
+  '.ant-select-item-option',
+  '.semi-select-option', // Semi Design (飞书)
+  '[class*="option-item"]',
+  '[class*="select-option"]',
+  '[class*="dropdown-item"]',
+  '[class*="select__menu-notice"]',
+  '[class*="select__option"]',
+  '[role="option"]',
+  'li[role="option"]',
+  '.moka-select-option',
+  '.beisen-select-option',
+  '.dayee-option',
+  '.tencent-select-option',
+];
+
+/**
+ * 动态等待下拉菜单或选项在 DOM 中渲染并可见
+ */
+async function waitForDropdownCandidates(timeoutMs = 800): Promise<HTMLElement[]> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const candidates: HTMLElement[] = [];
+    for (const selector of OPTION_SELECTORS) {
+      const found = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      for (const el of found) {
+        if (isElementVisible(el)) {
+          candidates.push(el);
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      return candidates;
+    }
+
+    await sleep(50);
+  }
+
+  return [];
+}
+
+/**
+ * 单次执行下拉框搜索与匹配尝试
+ */
+async function trySelectCustomOptionOnce(
+  triggerEl: HTMLElement,
+  targetText: string,
+  fuzzy = true
+): Promise<boolean> {
+  const targetLower = targetText.toLowerCase().trim();
+
+  // 1. 如果是原生 select 标签
+  if (triggerEl instanceof HTMLSelectElement) {
+    const options = Array.from(triggerEl.options);
+    const matched = options.find((opt) => {
+      const t = opt.text.trim().toLowerCase();
+      return fuzzy ? (t.includes(targetLower) || targetLower.includes(t)) : (t === targetLower);
+    });
+    if (matched) {
+      triggerEl.value = matched.value;
+      triggerEl.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+    return false;
+  }
+
+  // 2. 检查是否有内部原生 select
+  const internalSelect = triggerEl.querySelector('select');
+  if (internalSelect) {
+    return trySelectCustomOptionOnce(internalSelect, targetText, fuzzy);
+  }
+
+  // 3. 如果包含内部输入框（可搜索下拉框），尝试输入搜索文本以加速定位
+  const inputChild = triggerEl.querySelector<HTMLInputElement>('input');
+  if (inputChild && !inputChild.readOnly) {
+    simulateClick(inputChild);
+    setNativeValue(inputChild, targetText);
+    inputChild.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    inputChild.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+  } else {
+    simulateClick(triggerEl);
+  }
+
+  // 4. 动态等待选项列表渲染挂载
+  const candidateElements = await waitForDropdownCandidates(700);
+
+  // 5. 遍历可见选项，比对文本内容 (第一遍精准匹配，第二遍模糊匹配)
+  let bestMatch: HTMLElement | null = null;
+
+  for (const item of candidateElements) {
+    const itemText = (item.textContent || '').trim().toLowerCase();
+    if (!itemText) continue;
+
+    if (itemText === targetLower) {
+      bestMatch = item;
+      break;
+    }
+  }
+
+  if (!bestMatch && fuzzy) {
+    for (const item of candidateElements) {
+      const itemText = (item.textContent || '').trim().toLowerCase();
+      if (!itemText) continue;
+
+      if (itemText.includes(targetLower) || targetLower.includes(itemText)) {
+        bestMatch = item;
+        break;
+      }
+    }
+  }
+
+  // 6. 如果找到匹配项，模拟点击
+  if (bestMatch) {
+    simulateClick(bestMatch);
+    await sleep(120);
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 模拟非原生下拉选择组件 (集成全国高校与专业同义词/简称自动回退)
+ */
+export async function selectCustomOption(
+  triggerEl: HTMLElement,
+  targetText: string,
+  fuzzy = true
+): Promise<boolean> {
+  if (!triggerEl || !targetText) return false;
+
+  // 第一轮：直接使用原文本尝试匹配
+  const firstTry = await trySelectCustomOptionOnce(triggerEl, targetText, fuzzy);
+  if (firstTry) return true;
+
+  // 第二轮：如果是高校名称或专业名称，尝试同义词/正式全称变体
+  const uniVariants = getFormalUniversityVariants(targetText);
+  for (const variant of uniVariants) {
+    if (variant === targetText) continue;
+    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy);
+    if (variantSuccess) {
+      console.log(`[OpenJobFill] 高校同义词命中: ${targetText} -> ${variant}`);
+      return true;
+    }
+  }
+
+  const majorVariants = getFormalMajorVariants(targetText);
+  for (const variant of majorVariants) {
+    if (variant === targetText) continue;
+    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy);
+    if (variantSuccess) {
+      console.log(`[OpenJobFill] 专业同义词命中: ${targetText} -> ${variant}`);
+      return true;
+    }
+  }
+
+  // 收起下拉框
+  simulateClick(triggerEl);
+  return false;
+}
+
+/**
+ * 模拟多级级联选择器 (Cascader，如 省-市-区, 学历-专业大类-专业)
+ * 支持传入数组或以“-”、“/”拼接的字符串
+ */
+export async function selectCascaderOptions(
+  triggerEl: HTMLElement,
+  pathData: string[] | string
+): Promise<boolean> {
+  if (!triggerEl) return false;
+  const pathTexts = Array.isArray(pathData) 
+    ? pathData 
+    : pathData.split(/[-/、\s]/).map(s => s.trim()).filter(Boolean);
+
+  if (pathTexts.length === 0) return false;
+
+  // 1. 点击展开级联菜单
+  simulateClick(triggerEl);
+  await sleep(250);
+
+  const cascaderItemSelectors = [
+    '.el-cascader-node', // Element Plus
+    '.ant-cascader-menu-item', // Ant Design
+    '.semi-cascader-item',
+    '[class*="cascader-node"]',
+    '[class*="cascader-item"]',
+    '[role="menuitem"]',
+    'li[role="treeitem"]',
+  ];
+
+  for (let i = 0; i < pathTexts.length; i++) {
+    const stepTarget = pathTexts[i].trim().toLowerCase();
+    await sleep(200);
+
+    const candidates: HTMLElement[] = [];
+    for (const selector of cascaderItemSelectors) {
+      const found = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      for (const el of found) {
+        if (isElementVisible(el)) {
+          candidates.push(el);
+        }
+      }
+    }
+
+    const matched = candidates.find((item) => {
+      const text = (item.textContent || '').trim().toLowerCase();
+      return text === stepTarget || text.includes(stepTarget) || stepTarget.includes(text);
+    });
+
+    if (matched) {
+      simulateClick(matched);
+      await sleep(150);
+    } else {
+      console.warn(`[OpenJobFill] Cascader step ${i + 1} (${pathTexts[i]}) not matched.`);
+      return false;
+    }
+  }
+
+  await sleep(150);
+  return true;
+}
+
+/**
+ * 根据选项文案选择 Radio 组中的某一项
+ */
+export function selectRadioByLabel(container: HTMLElement, targetText: string): boolean {
+  if (!container || !targetText) return false;
+
+  const target = targetText.trim().toLowerCase();
+  const labels = Array.from(container.querySelectorAll('label, .el-radio, .ant-radio-wrapper, .semi-radio, [class*="radio"]'));
+  
+  for (const label of labels) {
+    const text = (label.textContent || '').trim().toLowerCase();
+    if (text.includes(target) || target.includes(text)) {
+      const input = label.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (input) {
+        input.click();
+      } else {
+        simulateClick(label as HTMLElement);
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+

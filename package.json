@@ -1,0 +1,37 @@
+{
+  "name": "openjobfill",
+  "version": "1.0.0",
+  "description": "Open-source Job Application Resume Autofill Chrome Extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@vueuse/core": "^12.8.2",
+    "clsx": "^2.1.1",
+    "lucide-vue-next": "^0.477.0",
+    "mammoth": "^1.12.1",
+    "pdfjs-dist": "^6.2.108",
+    "tailwind-merge": "^3.0.2",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.308",
+    "@types/node": "^22.13.10",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@wxt-dev/module-vue": "^1.0.3",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vue-tsc": "^2.2.8",
+    "wxt": "^0.19.28"
+  }
+}
