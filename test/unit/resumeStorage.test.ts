@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 
 const RESUMES_KEY = 'openjobfill_resumes';
@@ -71,5 +73,21 @@ describe('ResumeStorage 首装初始化', () => {
     expect(resumes).toHaveLength(1);
     expect(resumes[0].id).toBe('resume-default');
     expect(JSON.parse(localStorage.getItem(RESUMES_KEY) || '[]')).toHaveLength(1);
+  });
+
+  it('公开下载的 JSON 模板应始终可以被当前版本直接导入', async () => {
+    vi.stubGlobal('chrome', undefined);
+    const templatePath = resolve(process.cwd(), 'src/public/openjobfill-resume-template.json');
+    const templateJson = readFileSync(templatePath, 'utf8');
+
+    const imported = await resumeStorage.importResumeFromJson(templateJson);
+
+    expect(imported.schemaVersion).toBe(4);
+    expect(imported.title).toBe('校招通用简历模板');
+    expect(imported.basics.name).toBe('张三');
+    expect(imported.educations).toHaveLength(1);
+    expect(imported.awards).toHaveLength(1);
+    expect(imported.academicAchievements).toHaveLength(1);
+    expect(imported.campusExperiences).toHaveLength(1);
   });
 });

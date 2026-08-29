@@ -23,6 +23,7 @@ import {
   Zap, 
   Save, 
   Download, 
+  FileJson,
   Upload, 
   User, 
   GraduationCap, 
@@ -186,6 +187,16 @@ const handleExportJson = () => {
   showToast('info', '简历 JSON 配置文件已导出');
 };
 
+const handleDownloadJsonTemplate = () => {
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.href = new URL('/openjobfill-resume-template.json', window.location.origin).href;
+  downloadAnchor.download = 'openjobfill-resume-template.json';
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+  showToast('info', '简历 JSON 模板已下载，可修改后直接导入');
+};
+
 const handleImportJson = (e: Event) => {
   const input = e.target as HTMLInputElement;
   if (!input.files || input.files.length === 0) return;
@@ -236,6 +247,16 @@ const handleImportJson = (e: Event) => {
             <span>导入 JSON</span>
             <input type="file" accept=".json" @change="handleImportJson" aria-label="选择 JSON 格式的简历文件" class="hidden" />
           </label>
+
+          <button
+            type="button"
+            @click="handleDownloadJsonTemplate"
+            class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg flex items-center gap-1.5 transition focus-visible:ring-2 focus-visible:ring-blue-500"
+            title="下载可直接导入的完整 JSON 示例"
+          >
+            <FileJson class="w-3.5 h-3.5" aria-hidden="true" />
+            <span>下载模板</span>
+          </button>
 
           <button
             type="button"
