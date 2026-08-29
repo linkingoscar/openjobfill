@@ -1,6 +1,6 @@
 import type { StandardResume } from '../../types/resume';
 import type { FillResult } from '../../types/adapter';
-import type { PipelineExecutionResult, FillPlan } from '../../types/pipeline';
+import type { PipelineExecutionResult, FillPlan, RemoteFramePlan } from '../../types/pipeline';
 import { pageAnalyzer } from '../pipeline/pageAnalyzer';
 import { planGenerator } from '../pipeline/planGenerator';
 import { pipelineExecutor } from '../pipeline/executor';
@@ -9,11 +9,13 @@ import { getEnhancerForUrl } from '../adapters/enhancers';
 import { ruleStorage } from '../storage/ruleStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 import { applyAIFallbackToPlan } from '../ai/aiFallback';
+import { executeRemoteFrames } from '../frames/frameCoordinator';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
 export interface AnalyzedPlan {
   plan: FillPlan;
   adapterName: string;
+  remoteFrames?: RemoteFramePlan[];
 }
 
 export class FormFillerEngine {
@@ -79,6 +81,23 @@ export class FormFillerEngine {
     const { plan, adapterName } = analyzed;
 
     const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan);
+    const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || []);
+    const remoteDurationMs = remoteResults.reduce((max, remote) => Math.max(max, remote.durationMs), 0);
+
+    for (const remote of remoteResults) {
+      executionResult.filledCount += remote.filledCount;
+      executionResult.skippedCount += remote.skippedCount;
+      executionResult.failedCount += remote.failedCount;
+      executionResult.logs.push(...remote.logs.map((log) => ({
+        ...log,
+        label: `${log.label}（子页面）`,
+      })));
+      executionResult.remainingTasks.push(...remote.remainingTasks.map((task) => ({
+        ...task,
+        frameUrl: remote.url,
+      })));
+    }
+    executionResult.durationMs += remoteDurationMs;
 
     // 必填缺失与附件区域扫描
     try {

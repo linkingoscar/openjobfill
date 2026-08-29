@@ -33,6 +33,7 @@ import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
 import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
+import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { getAdapterForUrl } from '@/core/adapters';
 import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
@@ -256,6 +257,9 @@ const handleQuickFill = async () => {
   if (isFilling.value) return { fillCount: 0, needsUserCount: 0 };
   isFilling.value = true;
   fillResult.value = null;
+  if (previewPlan.value?.remoteFrames?.length) {
+    await cancelRemoteFrames(previewPlan.value.remoteFrames);
+  }
   previewPlan.value = null;
   operationError.value = '';
 
@@ -265,15 +269,22 @@ const handleQuickFill = async () => {
     selectedResumeId.value = activeResume.id;
     // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
     const analyzed = await formFillerEngine.analyze(activeResume);
+    analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id);
     previewPlan.value = analyzed;
     // 展示实际参与规划的引擎名称。旧版这里只显示注册表 adapter，
     // Greenhouse/Lever 等页面容易误以为会走专属 customFill，实际当前统一走 Pipeline。
-    currentAdapterName.value = analyzed.adapterName;
+    currentAdapterName.value = analyzed.remoteFrames.length > 0
+      ? `${analyzed.adapterName} + ${analyzed.remoteFrames.length} 个跨域子页面`
+      : analyzed.adapterName;
     drawerTab.value = 'logs';
     isDrawerOpen.value = true; // 展开抽屉展示预览清单
     return {
-      fillCount: analyzed.plan.items.filter((item) => item.action === 'FILL').length,
-      needsUserCount: analyzed.plan.items.filter((item) => item.action === 'NEEDS_USER').length,
+      fillCount:
+        analyzed.plan.items.filter((item) => item.action === 'FILL').length +
+        analyzed.remoteFrames.reduce((sum, frame) => sum + frame.highConfidenceCount, 0),
+      needsUserCount:
+        analyzed.plan.items.filter((item) => item.action === 'NEEDS_USER').length +
+        analyzed.remoteFrames.reduce((sum, frame) => sum + frame.needsUserCount, 0),
     };
   } catch (err: any) {
     console.error('[OpenJobFill] Analyze error:', err);
@@ -541,12 +552,25 @@ const handleManualFill = async () => {
 // ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
 const previewPlan = ref<AnalyzedPlan | null>(null);
 
-const previewFillItems = computed(
-  () => previewPlan.value?.plan.items.filter((i) => i.action === 'FILL') ?? []
-);
-const previewNeedsUserItems = computed(
-  () => previewPlan.value?.plan.items.filter((i) => i.action === 'NEEDS_USER') ?? []
-);
+const getRemotePreviewItems = (action: 'FILL' | 'NEEDS_USER') =>
+  (previewPlan.value?.remoteFrames || []).flatMap((frame) =>
+    frame.items
+      .filter((item) => item.action === action)
+      .map((item) => ({
+        ...item,
+        id: `frame-${frame.frameId}-${item.id}`,
+        field: { label: `${item.label}（子页面）` },
+      }))
+  );
+
+const previewFillItems = computed(() => [
+  ...(previewPlan.value?.plan.items.filter((item) => item.action === 'FILL') ?? []),
+  ...getRemotePreviewItems('FILL'),
+]);
+const previewNeedsUserItems = computed(() => [
+  ...(previewPlan.value?.plan.items.filter((item) => item.action === 'NEEDS_USER') ?? []),
+  ...getRemotePreviewItems('NEEDS_USER'),
+]);
 
 const confirmFill = async () => {
   if (!previewPlan.value || previewFillItems.value.length === 0 || isFilling.value) return;
@@ -565,12 +589,15 @@ const confirmFill = async () => {
   }
 };
 
-const cancelPreview = () => {
+const cancelPreview = async () => {
+  if (previewPlan.value?.remoteFrames?.length) {
+    await cancelRemoteFrames(previewPlan.value.remoteFrames);
+  }
   previewPlan.value = null;
 };
 
 const handlePreviewManualFill = async () => {
-  previewPlan.value = null;
+  await cancelPreview();
   await handleManualFill();
 };
 
@@ -999,7 +1026,15 @@ defineExpose({
                   <p class="text-[11px] text-amber-800/80 mt-1 font-medium">{{ task.reason }}</p>
                 </div>
                 <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <span
+                    v-if="!task.element"
+                    class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-bold"
+                    :title="task.frameUrl || '位于跨域子页面'"
+                  >
+                    子页面待办
+                  </span>
                   <button
+                    v-if="task.element"
                     type="button"
                     @click="handleFocusTaskElement(task)"
                     class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"
@@ -1008,6 +1043,7 @@ defineExpose({
                     定位
                   </button>
                   <button
+                    v-if="task.element"
                     type="button"
                     @click="handleToggleTaskMapping(task)"
                     class="px-2 py-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"

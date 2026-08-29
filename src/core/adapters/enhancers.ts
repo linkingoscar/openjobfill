@@ -141,11 +141,166 @@ export const workdayEnhancer: PlatformEnhancer = {
   },
 };
 
+export const dayeeEnhancer: PlatformEnhancer = {
+  id: 'dayee-enhancer',
+  name: '用友大易招聘系统增强器',
+  description: '覆盖大易 / 万才 ATS 的字段命名、级联选择与经历卡片',
+  priority: 98,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return (
+      url.includes('dayee.com') ||
+      url.includes('wintalent.cn') ||
+      url.includes('yonyou.com') ||
+      !!root?.querySelector('[id*="dayee" i], [class*="dayee" i], #resumeFrame')
+    );
+  },
+  fieldMappings: {
+    'input[name*="candidateName" i], input[id*="candidateName" i]': 'basics.name',
+    'input[name*="mobile" i], input[id*="mobile" i], input[type="tel"]': 'basics.phone',
+    'input[name*="email" i], input[id*="email" i], input[type="email"]': 'basics.email',
+    'input[name*="idCard" i], input[name*="certNo" i], input[id*="idCard" i]': 'basics.idCardNumber',
+    'input[name*="birth" i], input[id*="birth" i], [class*="birthday" i] input': 'basics.birthDate',
+    '[name*="political" i], [name*="party" i], [id*="political" i]': 'basics.politicalStatus',
+    '[name*="native" i], [id*="native" i], [class*="native-place" i]': 'basics.nativePlace.city',
+    'input[name*="school" i], input[id*="school" i]': 'educations.0.schoolName',
+    'input[name*="major" i], input[id*="major" i]': 'educations.0.major',
+    '[name*="degree" i], [id*="degree" i]': 'educations.0.degree',
+    'input[name*="company" i], input[id*="company" i]': 'experiences.0.company',
+    'input[name*="jobTitle" i], input[id*="jobTitle" i]': 'experiences.0.title',
+    'textarea[name*="evaluation" i], textarea[name*="self" i]': 'basics.selfEvaluation',
+  },
+  repeaterConfigs: {
+    education: {
+      sectionRoot: '[class*="education-section" i], [data-section="education"]',
+      itemSelector: '[class*="education-item" i], [class*="education-card" i]',
+      addButton: '[class*="add-education" i], [data-action="add-education"]',
+    },
+    experience: {
+      sectionRoot: '[class*="experience-section" i], [data-section="experience"]',
+      itemSelector: '[class*="experience-item" i], [class*="experience-card" i]',
+      addButton: '[class*="add-experience" i], [data-action="add-experience"]',
+    },
+  },
+};
+
+export const nowcoderEnhancer: PlatformEnhancer = {
+  id: 'nowcoder-enhancer',
+  name: '牛客招聘系统增强器',
+  priority: 94,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return url.includes('nowcoder.com') || !!root?.querySelector('.nc-form, [class*="nowcoder" i], .job-apply-box');
+  },
+  fieldMappings: {
+    '.name-item input, input[name="name"], input[placeholder*="姓名"]': 'basics.name',
+    'input[name="phone"], input[type="tel"], input[placeholder*="手机"]': 'basics.phone',
+    'input[name="email"], input[type="email"], input[placeholder*="邮箱"]': 'basics.email',
+    'input[name="school"], input[placeholder*="学校"]': 'educations.0.schoolName',
+    'input[name="major"], input[placeholder*="专业"]': 'educations.0.major',
+    '.degree-select, [placeholder*="学历"]': 'educations.0.degree',
+    'input[name*="github" i], input[placeholder*="GitHub" i]': 'basics.githubUrl',
+  },
+};
+
+export const tencentEnhancer: PlatformEnhancer = {
+  id: 'tencent-enhancer',
+  name: '腾讯招聘官网增强器',
+  priority: 93,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return (
+      url.includes('join.qq.com') ||
+      url.includes('careers.tencent.com') ||
+      !!root?.querySelector('.tencent-resume, [class*="tencent-" i]')
+    );
+  },
+  fieldMappings: {
+    '.name-input input, input[name="name"], input[placeholder*="姓名"]': 'basics.name',
+    'input[name="phone"], input[type="tel"], input[placeholder*="手机"]': 'basics.phone',
+    'input[name="email"], input[type="email"], input[placeholder*="邮箱"]': 'basics.email',
+    'input[name*="idCard" i], input[placeholder*="身份证"]': 'basics.idCardNumber',
+    'input[name="schoolName"], input[placeholder*="学校"]': 'educations.0.schoolName',
+    'input[name="major"], input[placeholder*="专业"]': 'educations.0.major',
+    'textarea[placeholder*="自我评价"], textarea[placeholder*="介绍"]': 'basics.selfEvaluation',
+  },
+};
+
+export const alibabaEnhancer: PlatformEnhancer = {
+  id: 'alibaba-enhancer',
+  name: '阿里巴巴 / 淘天招聘增强器',
+  priority: 92,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return (
+      url.includes('talent.alibaba.com') ||
+      url.includes('talent.taotao.com') ||
+      url.includes('job.alibaba.com') ||
+      url.includes('campus.alibaba.com') ||
+      !!root?.querySelector('.ali-apply, [class*="alibaba-" i]')
+    );
+  },
+  fieldMappings: {
+    'input[placeholder*="姓名"], input[aria-label*="姓名"], input[name="name"]': 'basics.name',
+    'input[placeholder*="手机"], input[aria-label*="手机"], input[type="tel"]': 'basics.phone',
+    'input[placeholder*="邮箱"], input[aria-label*="邮箱"], input[type="email"]': 'basics.email',
+    'input[placeholder*="学校"], input[aria-label*="学校"]': 'educations.0.schoolName',
+    'input[placeholder*="专业"], input[aria-label*="专业"]': 'educations.0.major',
+    'textarea[placeholder*="总结"], textarea[placeholder*="评价"]': 'basics.selfEvaluation',
+  },
+};
+
+export const meituanEnhancer: PlatformEnhancer = {
+  id: 'meituan-enhancer',
+  name: '美团招聘官网增强器',
+  priority: 91,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return url.includes('zhaopin.meituan.com') || !!root?.querySelector('.meituan-apply, [class*="meituan-" i]');
+  },
+  fieldMappings: {
+    '.name input, input[name="name"], input[placeholder*="姓名"]': 'basics.name',
+    'input[name="phone"], input[type="tel"], input[placeholder*="手机"]': 'basics.phone',
+    'input[name="email"], input[type="email"], input[placeholder*="邮箱"]': 'basics.email',
+    'input[name*="school" i], input[placeholder*="学校"]': 'educations.0.schoolName',
+    'input[name*="major" i], input[placeholder*="专业"]': 'educations.0.major',
+  },
+};
+
+export const greenhouseEnhancer: PlatformEnhancer = {
+  id: 'greenhouse-enhancer',
+  name: 'Greenhouse / Lever 招聘增强器',
+  priority: 90,
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
+    return (
+      url.includes('greenhouse.io') ||
+      url.includes('lever.co') ||
+      !!root?.querySelector('#application_form, .application-form, #lever-form')
+    );
+  },
+  fieldMappings: {
+    'input#first_name, input[name*="first_name" i], input[aria-label*="First name" i]': 'basics.firstName',
+    'input#last_name, input[name*="last_name" i], input[aria-label*="Last name" i]': 'basics.lastName',
+    'input[name="name"], input[aria-label*="Full name" i]': 'basics.name',
+    'input#email, input[name="email"], input[type="email"]': 'basics.email',
+    'input#phone, input[name="phone"], input[type="tel"]': 'basics.phone',
+    'input[name*="linkedin" i], input[placeholder*="LinkedIn" i]': 'basics.linkedinUrl',
+    'input[name*="github" i], input[placeholder*="GitHub" i]': 'basics.githubUrl',
+  },
+};
+
 export const ALL_PLATFORM_ENHANCERS: PlatformEnhancer[] = [
   mokaEnhancer,
+  dayeeEnhancer,
   beisenEnhancer,
   feishuEnhancer,
+  nowcoderEnhancer,
+  tencentEnhancer,
+  alibabaEnhancer,
+  meituanEnhancer,
   workdayEnhancer,
+  greenhouseEnhancer,
 ];
 
 export function getEnhancerForUrl(url: string, doc?: Document): PlatformEnhancer | null {

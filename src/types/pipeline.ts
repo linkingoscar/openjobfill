@@ -68,6 +68,32 @@ export interface FillPlan {
   totalFieldsCount: number;
 }
 
+/** 可跨扩展消息边界传输的子 frame 预览项（不包含 DOM 引用）。 */
+export interface RemoteFillPlanItem {
+  id: string;
+  label: string;
+  type: FieldType;
+  required: boolean;
+  action: PlanAction;
+  targetValue?: any;
+  confidence: number;
+  reason?: string;
+  semanticKey?: string;
+  source?: FillPlanItem['source'];
+}
+
+/** 一个跨域 frame 在本地保存的分析快照及其可展示摘要。 */
+export interface RemoteFramePlan {
+  frameId: number;
+  analysisId: string;
+  url: string;
+  adapterName: string;
+  items: RemoteFillPlanItem[];
+  highConfidenceCount: number;
+  needsUserCount: number;
+  skipCount: number;
+}
+
 /**
  * 待办未解决/需人工核对的任务项
  */
@@ -77,7 +103,9 @@ export interface RemainingTaskItem {
   type: FieldType;
   required: boolean;
   reason: string;
-  element: HTMLElement;
+  /** 跨域 frame 的待办不能把 DOM 节点传回顶层，此时为空。 */
+  element?: HTMLElement;
+  frameUrl?: string;
 }
 
 /**

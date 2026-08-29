@@ -3,6 +3,9 @@ import FloatBall from '@/components/FloatBall.vue';
 import styleText from './style.css?inline';
 import { isIgnoredDomain, observeRecruitmentPage } from '@/core/whitelist';
 import { initSmartQALearner } from '@/core/engine/qaLearner';
+import { resumeStorage } from '@/core/storage/resumeStorage';
+import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
+import { serializeAnalyzedPlan, serializeExecutionResult } from '@/core/frames/frameCoordinator';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -21,6 +24,7 @@ export default defineContentScript({
     let vm: any = null;
     let stopQALearner: (() => void) | null = null;
     let stopStepTracking: (() => void) | null = null;
+    const framePlans = new Map<string, AnalyzedPlan>();
 
     const startRecruitmentListeners = () => {
       if (!stopQALearner) {
@@ -169,6 +173,42 @@ export default defineContentScript({
 
     // 监听来自 Background / Popup 的指令
     const handleRuntimeMessage = (message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      if (message.type === 'FRAME_ANALYZE') {
+        (async () => {
+          const analysisId = String(message.payload?.analysisId || '');
+          if (!analysisId) throw new Error('缺少跨 frame 分析标识');
+
+          const resumes = await resumeStorage.getAllResumes();
+          const resume = resumes.find((item) => item.id === message.payload?.resumeId) || await resumeStorage.getActiveResume();
+          const analyzed = await formFillerEngine.analyze(resume);
+          framePlans.set(analysisId, analyzed);
+          sendResponse({
+            success: true,
+            plan: serializeAnalyzedPlan(analyzed, analysisId),
+          });
+        })().catch((err) => sendResponse({ success: false, error: err?.message || '子页面分析失败' }));
+        return true;
+      }
+
+      if (message.type === 'FRAME_EXECUTE') {
+        (async () => {
+          const analysisId = String(message.payload?.analysisId || '');
+          const analyzed = framePlans.get(analysisId);
+          if (!analyzed) throw new Error('子页面填写计划已失效，请重新识别');
+
+          const result = await formFillerEngine.executePlan(analyzed);
+          framePlans.delete(analysisId);
+          sendResponse({ success: true, result: serializeExecutionResult(result) });
+        })().catch((err) => sendResponse({ success: false, error: err?.message || '子页面填写失败' }));
+        return true;
+      }
+
+      if (message.type === 'FRAME_CANCEL_ANALYSIS') {
+        framePlans.delete(String(message.payload?.analysisId || ''));
+        sendResponse({ success: true });
+        return;
+      }
+
       if (message.type !== 'TRIGGER_AUTO_FILL') return;
 
       // tabs.sendMessage 默认会把消息广播给所有 frame。悬浮球只挂在顶层，
@@ -204,6 +244,7 @@ export default defineContentScript({
       stopRecruitmentListeners();
       unmountFloatBall();
       chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+      framePlans.clear();
     });
   },
 });

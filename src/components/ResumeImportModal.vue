@@ -237,9 +237,9 @@ const handleConfirmImport = () => {
             <input
               id="resume-file-input"
               type="file"
-              accept=".pdf,.docx,.doc,.txt,.md"
+              accept=".pdf,.docx,.txt,.md"
               @change="handleFileUpload"
-              aria-label="上传简历文件 (支持 PDF, Word, TXT, MD)"
+              aria-label="上传简历文件 (支持 PDF, DOCX, TXT, MD)"
               class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
             <div class="w-14 h-14 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shadow-inner">

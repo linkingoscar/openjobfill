@@ -6,8 +6,10 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
   if (fileName.endsWith('.pdf')) {
     return extractTextFromPdf(file);
-  } else if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
+  } else if (fileName.endsWith('.docx')) {
     return extractTextFromDocx(file);
+  } else if (fileName.endsWith('.doc')) {
+    throw new Error('暂不支持 Word 97-2003 (.doc)，请在 Word 中另存为 .docx 或 .pdf 后导入');
   } else if (fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.json')) {
     return file.text();
   } else {
@@ -219,12 +221,8 @@ export async function extractTextFromDocx(file: File | ArrayBuffer): Promise<str
       }
     }
   } catch (e: any) {
-    if (file instanceof File && file.name.toLowerCase().endsWith('.doc')) {
-      throw new Error('检测到为早期 Word 97-2003 (.doc) 格式，建议在 Word 中另存为 .docx 或 .pdf 后导入以获得最佳识别精度');
-    }
     throw new Error(`Word 文件解析失败: ${e?.message || '未知错误'}`);
   }
 
   return '';
 }
-

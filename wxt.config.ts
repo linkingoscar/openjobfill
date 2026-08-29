@@ -14,7 +14,7 @@ export default defineConfig({
       '48': 'icon-48.png',
       '128': 'icon-128.png',
     },
-    permissions: ['storage', 'activeTab'],
+    permissions: ['storage', 'activeTab', 'webNavigation'],
     // AI 兜底所需的网络访问：localhost 供本地 Ollama，https 供用户自带 Key 的云端接口
     host_permissions: ['http://localhost/*', 'https://*/*'],
     action: {

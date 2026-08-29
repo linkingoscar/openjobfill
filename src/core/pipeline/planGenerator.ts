@@ -115,9 +115,13 @@ export class PlanGenerator {
       let customMatch: { resumeKey: string; description?: string } | null = null;
       if (customRules && customRules.length > 0) {
         for (const cr of customRules) {
-          if (field.element.matches && field.element.matches(cr.selector)) {
-            customMatch = cr;
-            break;
+          try {
+            if (cr.selector && field.element.matches && field.element.matches(cr.selector)) {
+              customMatch = cr;
+              break;
+            }
+          } catch {
+            // 存量或手工导入的坏选择器只跳过该映射，不能阻断整页自动填写。
           }
         }
       }

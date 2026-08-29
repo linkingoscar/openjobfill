@@ -2,6 +2,12 @@ import type { CustomSiteRule } from '../../types/rule';
 
 const RULES_STORAGE_KEY = 'openjobfill_custom_rules';
 
+type LegacyCustomSiteRule = Partial<CustomSiteRule> & {
+  selector?: string;
+  resumeKey?: string;
+  description?: string;
+};
+
 const DEFAULT_PRESET_RULES: CustomSiteRule[] = [
   {
     id: 'preset-zhipin',
@@ -38,6 +44,93 @@ function isExtensionEnv(): boolean {
   }
 }
 
+function hasBalancedSelectorDelimiters(selector: string): boolean {
+  const stack: string[] = [];
+  let quote = '';
+  let escaped = false;
+  for (const char of selector) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '[' || char === '(') stack.push(char);
+    if (char === ']' || char === ')') {
+      const expected = char === ']' ? '[' : '(';
+      if (stack.pop() !== expected) return false;
+    }
+  }
+  return !quote && stack.length === 0 && !escaped;
+}
+
+export function validateCustomSiteRule(rule: CustomSiteRule, doc?: Document): string | null {
+  if (!rule?.id || !rule.name?.trim()) return '规则名称不能为空';
+  if (!rule.domainPattern?.trim()) return '域名匹配模式不能为空';
+
+  try {
+    new RegExp(rule.domainPattern, 'i');
+  } catch {
+    return `域名匹配模式不是有效文本或正则：${rule.domainPattern}`;
+  }
+
+  if (!Array.isArray(rule.fields) || rule.fields.length === 0) {
+    return '至少需要配置一个字段映射';
+  }
+
+  const validationDocument = doc || (typeof document !== 'undefined' ? document : null);
+  for (const [index, field] of rule.fields.entries()) {
+    if (!field.selector?.trim()) return `第 ${index + 1} 个字段的 CSS 选择器不能为空`;
+    if (!field.resumeKey?.trim()) return `第 ${index + 1} 个字段未选择简历属性`;
+    if (!hasBalancedSelectorDelimiters(field.selector)) {
+      return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`;
+    }
+    if (validationDocument) {
+      try {
+        validationDocument.documentElement.matches(field.selector);
+      } catch {
+        return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`;
+      }
+    }
+  }
+
+  return null;
+}
+
+/** 将早期“一条规则只含一个 selector”的备份格式迁移为当前 fields[] 结构。 */
+export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSiteRule | null {
+  if (!input || !input.id || !input.domainPattern) return null;
+  const fields = Array.isArray(input.fields)
+    ? input.fields
+    : input.selector && input.resumeKey
+      ? [{
+          id: `field-${input.id}`,
+          selector: input.selector,
+          resumeKey: input.resumeKey,
+          description: input.description,
+        }]
+      : [];
+
+  return {
+    id: input.id,
+    name: input.name?.trim() || `${input.domainPattern} 自定义规则`,
+    domainPattern: input.domainPattern,
+    enabled: input.enabled !== false,
+    fields,
+    updatedAt: input.updatedAt,
+  };
+}
+
 export const ruleStorage = {
   async getCustomRules(): Promise<CustomSiteRule[]> {
     if (isExtensionEnv()) {
@@ -48,12 +141,12 @@ export const ruleStorage = {
               resolve(this.getFromLocalStorage());
               return;
             }
-            const rules = res[RULES_STORAGE_KEY] as CustomSiteRule[] | undefined;
+            const rules = res[RULES_STORAGE_KEY] as LegacyCustomSiteRule[] | undefined;
             if (!rules || rules.length === 0) {
               this.saveRules(DEFAULT_PRESET_RULES);
               resolve(DEFAULT_PRESET_RULES);
             } else {
-              resolve(rules);
+              resolve(rules.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule));
             }
           });
         } catch {
@@ -70,7 +163,9 @@ export const ruleStorage = {
     if (data) {
       try {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule);
+        }
       } catch {}
     }
     localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(DEFAULT_PRESET_RULES));
@@ -78,29 +173,42 @@ export const ruleStorage = {
   },
 
   async saveRules(rules: CustomSiteRule[]): Promise<void> {
+    const normalizedRules = rules
+      .map((rule) => normalizeCustomSiteRule(rule))
+      .filter((rule): rule is CustomSiteRule => !!rule);
+    for (const rule of normalizedRules) {
+      const validationError = validateCustomSiteRule(rule);
+      if (validationError) throw new Error(`${rule.name}：${validationError}`);
+    }
+
     if (isExtensionEnv()) {
       return new Promise((resolve) => {
         try {
-          chrome.storage.local.set({ [RULES_STORAGE_KEY]: rules }, () => resolve());
+          chrome.storage.local.set({ [RULES_STORAGE_KEY]: normalizedRules }, () => resolve());
         } catch {
-          localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(rules));
+          localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules));
           resolve();
         }
       });
     } else {
-      localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(rules));
+      localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules));
     }
   },
 
   async saveCustomRule(rule: CustomSiteRule): Promise<void> {
+    const normalizedRule = normalizeCustomSiteRule(rule);
+    if (!normalizedRule) throw new Error('规则格式不完整');
+    const validationError = validateCustomSiteRule(normalizedRule);
+    if (validationError) throw new Error(validationError);
+
     const rules = await this.getCustomRules();
-    const index = rules.findIndex((r) => r.id === rule.id);
-    rule.updatedAt = new Date().toISOString();
+    const index = rules.findIndex((r) => r.id === normalizedRule.id);
+    normalizedRule.updatedAt = new Date().toISOString();
 
     if (index >= 0) {
-      rules[index] = rule;
+      rules[index] = normalizedRule;
     } else {
-      rules.push(rule);
+      rules.push(normalizedRule);
     }
 
     await this.saveRules(rules);
@@ -127,16 +235,16 @@ export const ruleStorage = {
       const current = await this.getCustomRules();
       const map = new Map<string, CustomSiteRule>();
       current.forEach((r) => map.set(r.id, r));
-      imported.forEach((r) => {
-        if (r.id && r.name && r.domainPattern) {
-          map.set(r.id, r);
-        }
+      imported.forEach((rawRule, index) => {
+        const rule = normalizeCustomSiteRule(rawRule);
+        if (!rule) throw new Error(`第 ${index + 1} 条规则格式不完整`);
+        const validationError = validateCustomSiteRule(rule);
+        if (validationError) throw new Error(`第 ${index + 1} 条规则无效：${validationError}`);
+        map.set(rule.id, rule);
       });
 
       const merged = Array.from(map.values());
-      await new Promise<void>((resolve) => {
-        chrome.storage.local.set({ [RULES_STORAGE_KEY]: merged }, () => resolve());
-      });
+      await this.saveRules(merged);
 
       return imported.length;
     } catch (err: any) {
@@ -148,8 +256,12 @@ export const ruleStorage = {
     const rules = await this.getCustomRules();
     for (const rule of rules) {
       if (!rule.enabled) continue;
-      if (url.includes(rule.domainPattern) || new RegExp(rule.domainPattern, 'i').test(url)) {
-        return rule;
+      try {
+        if (url.includes(rule.domainPattern) || new RegExp(rule.domainPattern, 'i').test(url)) {
+          return rule;
+        }
+      } catch {
+        console.warn(`[OpenJobFill] 已跳过无效的自定义规则域名模式：${rule.name}`);
       }
     }
     return null;

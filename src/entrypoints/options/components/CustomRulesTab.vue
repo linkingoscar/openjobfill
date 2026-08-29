@@ -13,7 +13,7 @@ import {
   AlertCircle,
   HelpCircle
 } from 'lucide-vue-next';
-import { ruleStorage } from '@/core/storage/ruleStorage';
+import { ruleStorage, validateCustomSiteRule } from '@/core/storage/ruleStorage';
 import type { CustomSiteRule, CustomFieldMapping } from '@/types/rule';
 
 const emit = defineEmits<{
@@ -114,15 +114,20 @@ const handleRemoveField = (index: number) => {
 };
 
 const handleSaveRule = async () => {
-  if (!currentRule.value.name.trim() || !currentRule.value.domainPattern.trim()) {
-    emit('show-toast', '请填写规则名称和域名匹配模式', 'error');
+  const validationError = validateCustomSiteRule(currentRule.value, document);
+  if (validationError) {
+    emit('show-toast', validationError, 'error');
     return;
   }
 
-  await ruleStorage.saveCustomRule(currentRule.value);
-  await loadRules();
-  isEditing.value = false;
-  emit('show-toast', `已保存规则：${currentRule.value.name}`);
+  try {
+    await ruleStorage.saveCustomRule(currentRule.value);
+    await loadRules();
+    isEditing.value = false;
+    emit('show-toast', `已保存规则：${currentRule.value.name}`);
+  } catch (err: any) {
+    emit('show-toast', err?.message || '规则保存失败', 'error');
+  }
 };
 
 const handleDeleteRule = async (id: string, name: string) => {
