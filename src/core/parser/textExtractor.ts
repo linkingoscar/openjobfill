@@ -142,7 +142,9 @@ export function reconstructPdfLayout(rawItems: any[], viewportWidth?: number): s
     }
   }
 
-  const isTwoColumn = leftCount >= 8 && rightCount >= 8 && spanningCount < (leftCount + rightCount) * 0.3;
+  // 真双栏页面的跨中轴文本通常极少；表格式单栏简历会有大量正文横跨中轴。
+  // 阈值过宽会把“日期｜单位｜职位 + 通栏职责”的常见校招模板拆成左右两份并打乱阅读顺序。
+  const isTwoColumn = leftCount >= 8 && rightCount >= 8 && spanningCount < (leftCount + rightCount) * 0.15;
 
   if (isTwoColumn) {
     // 双栏布局：提取跨栏通栏标题 (Spanning Items/Header)、左栏与右栏

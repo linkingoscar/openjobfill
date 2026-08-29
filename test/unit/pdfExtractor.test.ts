@@ -34,6 +34,31 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
   });
 
   describe('2. 双栏简历排版解构与重组 (Two-Column Layout Recovery)', () => {
+    it('日期、单位、职位三列加通栏职责的单栏简历不应被误判为双栏', () => {
+      const rawItems: any[] = [];
+      for (let row = 0; row < 10; row++) {
+        const y = 740 - row * 45;
+        rawItems.push(
+          { str: `202${row % 6}.09—202${(row % 6) + 1}.06`, transform: [12, 0, 0, 12, 35, y], width: 80, height: 12 },
+          { str: `示例单位${row}`, transform: [12, 0, 0, 12, 260, y], width: 90, height: 12 },
+          { str: `示例职位${row}`, transform: [12, 0, 0, 12, 480, y], width: 70, height: 12 },
+          { str: `负责第${row}段工作的通栏职责描述，应保持在对应经历之后。`, transform: [12, 0, 0, 12, 45, y - 18], width: 500, height: 12 },
+        );
+      }
+
+      const output = reconstructPdfLayout(rawItems, 600);
+      const firstRow = output.indexOf('2020.09—2021.06');
+      const firstCompany = output.indexOf('示例单位0');
+      const firstRole = output.indexOf('示例职位0');
+      const firstDescription = output.indexOf('负责第0段工作');
+      const secondRow = output.indexOf('2021.09—2022.06');
+
+      expect(firstRow).toBeLessThan(firstCompany);
+      expect(firstCompany).toBeLessThan(firstRole);
+      expect(firstRole).toBeLessThan(firstDescription);
+      expect(firstDescription).toBeLessThan(secondRow);
+    });
+
     it('对于左右双栏简历，必须先完整输出左栏内容，再输出右栏内容，绝不能左右穿插交叉', () => {
       // 模拟双栏简历：左侧栏 (X: 50~200)，右侧栏 (X: 300~550)
       const twoColumnItems: PdfLayoutItem[] = [

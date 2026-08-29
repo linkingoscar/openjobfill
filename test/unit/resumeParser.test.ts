@@ -251,4 +251,63 @@ __证书及专业技能__
     expect(resume.campusExperiences).toHaveLength(1);
     expect(resume.certificates.map(item => item.name)).toContain('全国计算机二级');
   });
+
+  it('应识别单页 PDF 的紧凑三列经历、多个项目章节和分号式荣誉列表', () => {
+    const pdfLayoutText = `
+测试姓名
+联系电话：15600000002 邮箱：test@example.com 意向岗位：产品运营、产品经理
+出生日期：2001.09.06 籍贯：辽宁沈阳 政治面貌：中共党员
+教育背景
+2024.09—2027.07 测试大学 国际商务与管理｜应用经济学硕士
+专业排名：平均成绩 92.18/100，专业排名 1
+核心课程：经济学研究方法论、计量经济学
+2020.09—2024.07 示例大学 国际商务｜管理学学士
+实习经历
+2025.07—2025.09 某市政府 政府见习
+•负责基层台账维护与群众接待。
+2024.06—2024.09 示例公司 人力资源部实习生
+•负责简历筛选与招聘流程跟进。
+学生工作经历
+2024.10—2026.07 测试大学研究生会 学术科创部部长
+•负责校级学术活动组织。
+2024.10—2026.07 测试大学党委组织部 部门助理、宣讲员
+•负责材料整理与理论宣讲。
+科研项目经历
+2025.03—2026.02 全国调研课题 项目成员
+•承担实地走访、资料收集和报告撰写。
+社会实践经历
+2025.08—2025.11 “助农项目”|“品牌赋能项目” 项目成员
+•参与直播展示与农产品推广。
+•协调宣传、调研和文创小组交付。
+荣誉奖项与技能
+荣誉奖项：研究生一等奖学金；大学生创新大赛省级铜奖；优秀团员荣誉；
+证书技能：大学英语四六级；普通话二级甲等；全国计算机二级；
+熟练使用 Word、Excel、PowerPoint。
+`;
+
+    const resume = parseResumeFromText(pdfLayoutText, '匿名单页简历.pdf');
+
+    expect(resume.basics).toMatchObject({
+      name: '测试姓名',
+      phone: '15600000002',
+      email: 'test@example.com',
+      expectedRole: '产品运营、产品经理',
+    });
+    expect(resume.basics.nativePlace?.city).toBe('辽宁沈阳');
+    expect(resume.educations[0]).toMatchObject({
+      schoolName: '测试大学', degree: '硕士', major: '国际商务与管理/应用经济学', gpa: '92.18/100',
+    });
+    expect(resume.experiences).toHaveLength(2);
+    expect(resume.experiences[0]).toMatchObject({ company: '某市政府', title: '政府见习', jobType: '实习' });
+    expect(resume.campusExperiences).toHaveLength(2);
+    expect(resume.projects).toHaveLength(3);
+    expect(resume.projects.map(project => project.projectName)).toEqual([
+      '“助农项目”',
+      '“品牌赋能项目”',
+      '全国调研课题',
+    ]);
+    expect(resume.awards).toHaveLength(3);
+    expect(resume.skills.map(skill => skill.name)).toEqual(['Word', 'Excel', 'PowerPoint']);
+    expect(resume.certificates.map(item => item.name)).toContain('全国计算机二级');
+  });
 });

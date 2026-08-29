@@ -17,7 +17,7 @@ export function normalizeResumeText(rawText: string): string {
     .replace(/\[([^\]]+)]\((?:mailto:)?[^)]+\)/g, '$1')
     .replace(/__([^\n]+?)__/g, '$1')
     .replace(/^\s*[-*+]\s+/gm, '')
-    .replace(/[\uF06C\uF0B7]/g, '•')
+    .replace(/[\uF06C\uF0B7\uF097]/g, '•')
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -118,26 +118,27 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   }
 
   // 8. 提取籍贯与所在地 (省/市)
-  const nativeMatch = text.match(/(?:籍\s*贯|生源地)[：: \t]*([^\n|，,]{2,20})/);
+  const nativeMatch = text.match(/(?:籍\s*贯|生源地)[：: \t]*([^\s|，,]{2,20})/);
   if (nativeMatch) {
     const loc = nativeMatch[1].trim();
     resume.basics.nativePlace = { province: '', city: loc, detail: loc };
   }
 
-  const birthPlaceMatch = text.match(/出生地[：: \t]*([^\n|，,]{2,20})/);
+  const birthPlaceMatch = text.match(/出生地[：: \t]*([^\s|，,]{2,20})/);
   if (birthPlaceMatch) {
     const loc = birthPlaceMatch[1].trim();
     resume.basics.birthPlace = { province: '', city: loc, detail: loc };
   }
 
-  const currentLocMatch = text.match(/(?:现居住地|现居地|目前所在地|常住城市|现居)[：: \t]*([^\n|，,]{2,20})/);
+  const currentLocMatch = text.match(/(?:现居住地|现居地|目前所在地|常住城市|现居)[：: \t]*([^\s|，,]{2,20})/);
   if (currentLocMatch) {
     const loc = currentLocMatch[1].trim();
     resume.basics.currentLocation = { province: '', city: loc, detail: loc };
   }
 
   // 9. 提取期望职位 / 求职意向
-  const roleMatch = text.match(/(?:^|\n|\|)\s*(?:求职意向|期望职位|意向岗位|应聘岗位|目标职位)[：: \t]*([^\n|，,]+)/m);
+  // 标签后的冒号是必要条件，因此可以安全支持联系方式同一行中的“意向岗位：…”而不会命中正文里的“求职意向及匹配情况”。
+  const roleMatch = text.match(/(?:求职意向|期望职位|意向岗位|应聘岗位|目标职位)[：: \t]+([^\n|，,]+)/m);
   if (roleMatch) {
     resume.basics.expectedRole = roleMatch[1].trim();
   }
@@ -195,7 +196,7 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
     { type: 'contact', headers: ['联系方式', '联系信息', 'contact'] },
     { type: 'education', headers: ['教育背景', '教育经历', '学习经历', '教育信息', '学历经历', '教育与培训', '学历信息', 'education'] },
     { type: 'experience', headers: ['工作经历', '工作经验', '实习经历', '实习经验', '工作与实习', '工作及实习经历', '实习工作经历', '职业经历', '从业经历', '实践经历', 'experience', 'work experience', 'internship'] },
-    { type: 'projects', headers: ['项目经历', '项目经验', '重点项目', '主要项目', '个人项目', '项目实践', 'projects', 'project experience'] },
+    { type: 'projects', headers: ['项目经历', '科研项目经历', '科研经历', '课题经历', '社会实践经历', '项目经验', '重点项目', '主要项目', '个人项目', '项目实践', 'projects', 'project experience'] },
     { type: 'academic', headers: ['学术成果', '科研成果', '论文成果', '论文发表', 'publication', 'publications'] },
     { type: 'awards', headers: ['获奖情况', '荣誉奖项', '奖项荣誉', '奖学金', 'awards', 'honors'] },
     { type: 'campus', headers: ['学生干部经历', '校园经历', '学生工作', '校内实践', 'campus experience'] },
@@ -238,19 +239,19 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   // 12. 解析各分块数据
   for (const sec of sections) {
     if (sec.type === 'education') {
-      resume.educations = parseEducationSection(sec.content);
+      resume.educations.push(...parseEducationSection(sec.content));
     } else if (sec.type === 'experience') {
-      resume.experiences = parseExperienceSection(sec.content);
+      resume.experiences.push(...parseExperienceSection(sec.content));
     } else if (sec.type === 'projects') {
-      resume.projects = parseProjectSection(sec.content);
+      resume.projects.push(...parseProjectSection(sec.content));
     } else if (sec.type === 'family') {
-      resume.familyMembers = parseFamilySection(sec.content);
+      resume.familyMembers.push(...parseFamilySection(sec.content));
     } else if (sec.type === 'academic') {
-      resume.academicAchievements = parseAcademicSection(sec.content);
+      resume.academicAchievements!.push(...parseAcademicSection(sec.content));
     } else if (sec.type === 'awards') {
-      resume.awards = parseAwardSection(sec.content);
+      resume.awards!.push(...parseAwardSection(sec.content));
     } else if (sec.type === 'campus') {
-      resume.campusExperiences = parseCampusSection(sec.content);
+      resume.campusExperiences!.push(...parseCampusSection(sec.content));
     } else if (sec.type === 'skills') {
       const parsedSkills = parseSkillsSection(sec.content);
       resume.skills.push(...parsedSkills.skills);
@@ -269,6 +270,19 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   }
 
   resume.languages = parseLanguageScores(text);
+  const globalSkillLines = lines.filter(line => /^(?:证书技能|技能|专业技能)[：:]|精通|熟练使用|熟悉使用/.test(line));
+  if (globalSkillLines.length > 0) {
+    const globalSkills = parseSkillsSection(globalSkillLines);
+    const existingSkillNames = new Set(resume.skills.map(skill => skill.name.toLowerCase()));
+    globalSkills.skills.forEach((skill) => {
+      if (!existingSkillNames.has(skill.name.toLowerCase())) resume.skills.push(skill);
+    });
+    const existingCertificates = new Set(resume.certificates.map(certificate => certificate.name));
+    globalSkills.certificates.forEach((certificate) => {
+      if (!existingCertificates.has(certificate.name)) resume.certificates.push(certificate);
+    });
+    if (!resume.basics.hobbies && globalSkills.hobbies) resume.basics.hobbies = globalSkills.hobbies;
+  }
   if (resume.experiences.length > 0) {
     resume.experiences.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     
@@ -377,15 +391,20 @@ function parseEducationSection(lines: string[]): EducationExperience[] {
       };
       const withoutDates = line
         .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, ' ')
-        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, ' ');
+        .replace(/至今|目前|现在|present|to|[-~–—至到]/gi, ' ');
       const tokens = withoutDates.split(/[\s|·,\t]+/).map((part) => part.trim()).filter(Boolean);
       const schoolIndex = tokens.findIndex((part) => schoolKeywords.some((kw) => part.includes(kw)));
       currentEdu.schoolName = schoolIndex >= 0 ? tokens[schoolIndex] : '';
       const majorCandidate = tokens.slice(schoolIndex + 1).find((token) =>
-        !degreeKeywords.some((degree) => degree.words.some((word) => token.includes(word))) &&
+        !degreeKeywords.some((degree) => degree.words.some((word) => token.toLowerCase() === word.toLowerCase())) &&
         !/^(?:GPA|绩点|全日制|统招)/i.test(token)
       );
-      if (majorCandidate) currentEdu.major = majorCandidate;
+      if (majorCandidate) {
+        currentEdu.major = majorCandidate
+          .replace(/[|｜]/g, '/')
+          .replace(/(?:博士|硕士|研究生|本科|学士|专科|大专)$/i, '')
+          .trim();
+      }
     }
 
     if (!currentEdu) continue;
@@ -397,9 +416,9 @@ function parseEducationSection(lines: string[]): EducationExperience[] {
     }
     const coursesMatch = line.match(/(?:主要|主修|核心)?课程[：: \t]*(.+)$/);
     if (coursesMatch) currentEdu.courses = coursesMatch[1].trim();
-    const majorMatch = line.match(/(?:专业|主修)[：: \t]*([^|,，]+)/);
+    const majorMatch = line.match(/(?:所学专业|专业名称|主修专业|主修)[：: \t]*([^|,，]+)/);
     if (majorMatch && !coursesMatch) currentEdu.major = majorMatch[1].trim();
-    const gpaMatch = line.match(/(?:GPA|绩点)[：: \t]*([\d.]+(?:\/[\d.]+)?)/i);
+    const gpaMatch = line.match(/(?:GPA|绩点|平均成绩)[：: \t]*([\d.]+(?:\/[\d.]+)?)/i);
     if (gpaMatch) currentEdu.gpa = gpaMatch[1];
     if (/统招|全日制/.test(line)) currentEdu.isFullTime = !/非全日制/.test(line);
   }
@@ -465,7 +484,7 @@ function parseExperienceSection(lines: string[]): WorkExperience[] {
 
   for (const line of lines) {
     const dates = extractDateRange(line);
-    const hasCompanySignal = /公司|科技|网络|技术|集团|实验室|有限|工作室|研发中心|Inc|Corp|Ltd/.test(line);
+    const hasCompanySignal = /公司|科技|网络|技术|集团|实验室|有限|工作室|研发中心|政府|银行|事务所|研究院|Inc|Corp|Ltd/.test(line);
 
     if (dates.startDate || (hasCompanySignal && !currentExp)) {
       if (currentExp && (currentExp.company || currentExp.title)) {
@@ -482,23 +501,30 @@ function parseExperienceSection(lines: string[]): WorkExperience[] {
 
       const cleanExpLine = line
         .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, '')
-        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, '');
-      const tokens = cleanExpLine.split(/[\s|·,\t]+/).filter(Boolean);
-      for (const t of tokens) {
-        if (hasCompanySignal && (!currentExp.company || currentExp.company.length < t.length)) {
-          currentExp.company = t.trim();
-        } else if (/工程师|开发|专员|助理|实习生|前端|后端|算法|产品|主管|经理|架构师|顾问/.test(t)) {
-          currentExp.title = t.trim();
+        .replace(/至今|目前|现在|present|to|[-~–—至到]/gi, '');
+      const compactRow = cleanExpLine.replace(/\s+/g, ' ').trim();
+      const inlineRole = compactRow.match(/^(.+?)\s+([^ ]*(?:实习生|见习|工程师|开发|专员|助理|主管|经理|架构师|顾问|分析师|管培生))$/i);
+      if (inlineRole) {
+        currentExp.company = inlineRole[1].trim();
+        currentExp.title = inlineRole[2].trim();
+      } else {
+        const tokens = compactRow.split(/[\s|·,\t]+/).filter(Boolean);
+        for (const t of tokens) {
+          if (hasCompanySignal && !currentExp.company) {
+            currentExp.company = t.trim();
+          } else if (/工程师|开发|专员|助理|实习生|见习|前端|后端|算法|产品|主管|经理|架构师|顾问|分析师|管培生/.test(t)) {
+            currentExp.title = t.trim();
+          }
         }
       }
 
-      if (/实习|intern/i.test(line) || /实习生|intern/i.test(currentExp.title || '')) {
+      if (/实习|见习|intern/i.test(line) || /实习生|见习|intern/i.test(currentExp.title || '')) {
         currentExp.jobType = '实习';
       } else if (/全职|社招|full-?time/i.test(line)) {
         currentExp.jobType = '全职';
       }
     } else if (currentExp) {
-      const titleMatch = line.match(/(?:职位|岗位|职务)[：:\s]*([^\s|·,]+)/);
+      const titleMatch = line.match(/^(?:职位|岗位|职务)[：:\s]*([^\s|·,]+)/);
       if (titleMatch) {
         currentExp.title = titleMatch[1];
         if (/实习/i.test(titleMatch[1])) {
@@ -536,6 +562,8 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
   const projects: ProjectExperience[] = [];
   let currentProj: Partial<ProjectExperience> | null = null;
   const descriptionLines: string[] = [];
+  let parallelProjects: Partial<ProjectExperience>[] = [];
+  let parallelProjectIndex = 0;
   let skippingEmbeddedCampusBlock = false;
 
   const finishCurrent = () => {
@@ -546,6 +574,12 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
     descriptionLines.length = 0;
   };
 
+  const finishParallelProjects = () => {
+    parallelProjects.forEach(project => projects.push(fillDefaultProj(project)));
+    parallelProjects = [];
+    parallelProjectIndex = 0;
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trim();
     // 只接受常见的一到两位项目序号，避免把 2024.10—2025.06 日期误认成“第 2024 个项目”。
@@ -554,6 +588,7 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
     if (numberedTitle || explicitTitle) {
       const projectName = (numberedTitle?.[1] || explicitTitle?.[1] || '').trim();
       finishCurrent();
+      finishParallelProjects();
       // 部分 Word 简历把校园组织经历混排在项目章节中；这类“组织 + 职务”应留给校园经历解析。
       if (/大学|学院|研究生会|党委|团委|学生会/.test(projectName) && /\t|\s{2,}|部长|助理|负责人|主席|委员/.test(projectName)) {
         skippingEmbeddedCampusBlock = true;
@@ -580,17 +615,45 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
       continue;
     }
     if (dates.startDate && !currentProj) {
-      const projectName = line
+      let projectName = line
         .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, ' ')
-        .replace(/[-~–—至到]|to|至今|目前|现在|present/gi, ' ')
+        .replace(/至今|目前|现在|present|to|[-~–—至到]/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+      const inlineRole = projectName.match(/\s+(项目成员|项目负责人|负责人|核心成员|组长)$/);
+      const role = inlineRole?.[1] || '';
+      if (inlineRole) projectName = projectName.slice(0, inlineRole.index).trim();
+      const parallelNames = projectName.split(/[|｜]/).map(name => name.trim()).filter(Boolean);
+      if (parallelNames.length > 1) {
+        finishParallelProjects();
+        parallelProjects = parallelNames.map((name, index) => ({
+          id: `proj-${Date.now()}-${projects.length + index}`,
+          projectName: name,
+          role,
+          startDate: dates.startDate,
+          endDate: dates.endDate,
+          description: '',
+        }));
+        parallelProjectIndex = 0;
+        continue;
+      }
       currentProj = {
         id: `proj-${Date.now()}-${projects.length}`,
-        projectName,
+        projectName: parallelNames[0] || projectName,
+        role,
         startDate: dates.startDate,
         endDate: dates.endDate,
       };
+      continue;
+    }
+    if (parallelProjects.length > 0) {
+      const startsBullet = /^•/.test(line);
+      if (startsBullet && parallelProjects[parallelProjectIndex]?.description) {
+        parallelProjectIndex = Math.min(parallelProjectIndex + 1, parallelProjects.length - 1);
+      }
+      const project = parallelProjects[parallelProjectIndex];
+      const cleanDescription = line.replace(/^•\s*/, '').trim();
+      project.description = [project.description, cleanDescription].filter(Boolean).join('\n');
       continue;
     }
     if (!currentProj) continue;
@@ -607,6 +670,7 @@ function parseProjectSection(lines: string[]): ProjectExperience[] {
   }
 
   finishCurrent();
+  finishParallelProjects();
 
   return projects;
 }
@@ -713,7 +777,7 @@ function parseSkillsSection(lines: string[]): {
       if (/^(?:兴趣爱好|爱好|热爱)[：:]/.test(line)) continue;
     }
 
-    const certificateMatch = line.match(/^(?:证书|专业证书|资格证书)[：: \t]*(.+)$/);
+    const certificateMatch = line.match(/^(?:证书技能|证书|专业证书|资格证书)[：: \t]*(.+)$/);
     if (certificateMatch) {
       certificateMatch[1].split(/[、,，；;]/).map(item => item.trim()).filter(Boolean).forEach((name) => {
         certificates.push({ id: `certificate-${Date.now()}-${certificates.length}`, name });
@@ -799,7 +863,18 @@ function parseAwardSection(lines: string[]): AwardItem[] {
   }
   finish();
   const detailedAwards = awards.filter((award) => award.issueDate || award.level || award.grade || award.role || award.description);
-  return detailedAwards.length > 0 ? detailedAwards : awards;
+  if (detailedAwards.length > 0) return detailedAwards;
+  if (awards.length > 0) return awards;
+
+  // 单页 PDF 常把全部荣誉压缩成以分号分隔的连续文本，不再使用编号和明细标签。
+  const compactAwards = lines
+    .filter(line => !/^(?:证书技能|证书|专业技能|技能)[：:]/.test(line) && !/熟练使用|精通|熟悉使用/.test(line))
+    .join(' ')
+    .replace(/^.*?荣誉奖项[：:]\s*/, '')
+    .split(/[；;]/)
+    .map(name => name.replace(/^[，,。\s]+|[，,。\s]+$/g, '').trim())
+    .filter(name => name.length > 2 && /奖|荣誉|团员|金奖|银奖|铜奖/.test(name));
+  return compactAwards.map((name, index) => ({ id: `award-${Date.now()}-${index}`, name }));
 }
 
 function parseCampusSection(lines: string[]): CampusExperience[] {
@@ -820,13 +895,31 @@ function parseCampusSection(lines: string[]): CampusExperience[] {
     current = null;
   };
   for (const line of lines) {
+    const dates = extractDateRange(line);
+    if (dates.startDate) {
+      const compactRow = line
+        .replace(/\d{4}[年\-\./]\d{1,2}(?:[月\-\./]\d{1,2})?日?月?/g, '')
+        .replace(/至今|目前|现在|present|to|[-~–—至到]/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (compactRow) {
+        finish();
+        const roleMatch = compactRow.match(/^(.+?)\s+(.+(?:部长|助理|负责人|主席|委员|班长|宣讲员|干事|部员))$/);
+        current = {
+          organization: (roleMatch?.[1] || compactRow).trim(),
+          title: roleMatch?.[2]?.trim() || '',
+          startDate: dates.startDate,
+          endDate: dates.endDate,
+        };
+        continue;
+      }
+    }
     const heading = line.match(/^\d{1,2}[.、]\s*(?!\d)(.+)$/);
     if (heading) {
       finish();
       current = { organization: heading[1].trim() };
       continue;
     }
-    const dates = extractDateRange(line);
     if (!current && /大学|学院|研究生会|学生会|党委|团委|班$|社团|协会/.test(line) && !dates.startDate) {
       current = { organization: line.trim() };
       continue;
@@ -846,8 +939,9 @@ function parseCampusSection(lines: string[]): CampusExperience[] {
       current.description = line.replace(/^[^：:]+[：: \t]*/, '').trim();
     } else if (/^主要职责[：:]/.test(line)) {
       current.responsibility = line.replace(/^[^：:]+[：: \t]*/, '').trim();
-    } else if (!current.description) {
-      current.description = line.trim();
+    } else {
+      const descriptionLine = line.replace(/^•\s*/, '').trim();
+      current.description = [current.description, descriptionLine].filter(Boolean).join('\n');
     }
   }
   finish();
