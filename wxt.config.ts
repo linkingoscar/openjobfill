@@ -15,18 +15,15 @@ export default defineConfig({
       '128': 'icon-128.png',
     },
     permissions: ['storage', 'activeTab'],
+    // AI 兜底所需的网络访问：localhost 供本地 Ollama，https 供用户自带 Key 的云端接口
+    host_permissions: ['http://localhost/*', 'https://*/*'],
     action: {
-      default_title: 'OpenJobFill 控制面板',
       default_icon: {
         '16': 'icon-16.png',
         '32': 'icon-32.png',
         '48': 'icon-48.png',
         '128': 'icon-128.png',
       },
-    },
-    options_ui: {
-      page: 'options.html',
-      open_in_tab: true,
     },
     commands: {
       trigger_autofill: {

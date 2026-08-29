@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Database, RefreshCw, AlertCircle } from 'lucide-vue-next';
+import { ref, onMounted } from 'vue';
+import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Database, RefreshCw, AlertCircle, Bot, PlugZap } from 'lucide-vue-next';
 import { backupManager } from '@/core/storage/backupManager';
+import { getAISettings, saveAISettings } from '@/core/storage/aiSettingsStorage';
+import type { AIProviderType } from '@/types/ai';
 
 defineProps<{
   customDomains: string[];
@@ -20,6 +22,76 @@ const isExporting = ref(false);
 const isImporting = ref(false);
 const pendingImportMode = ref<'merge' | 'overwrite'>('merge');
 const fileInputRef = ref<HTMLInputElement | null>(null);
+
+// ── AI 兜底配置（本地优先：默认关闭，纯本地规则即可用；配置后启用 AI 增强）──
+const aiEnabled = ref(false);
+const aiProvider = ref<AIProviderType>('ollama');
+const aiBaseUrl = ref('http://localhost:11434');
+const aiModel = ref('qwen2.5:7b');
+const aiApiKey = ref('');
+const aiSaving = ref(false);
+const aiTesting = ref(false);
+
+onMounted(async () => {
+  const s = await getAISettings();
+  aiEnabled.value = s.enabled;
+  aiProvider.value = s.provider;
+  aiBaseUrl.value = s.baseUrl;
+  aiModel.value = s.model;
+  aiApiKey.value = s.apiKey || '';
+});
+
+const onProviderChange = () => {
+  if (aiProvider.value === 'ollama' && !aiBaseUrl.value.includes('localhost')) {
+    aiBaseUrl.value = 'http://localhost:11434';
+  }
+  if (aiProvider.value === 'openai-compatible' && aiBaseUrl.value.includes('localhost')) {
+    aiBaseUrl.value = 'https://api.deepseek.com';
+  }
+};
+
+const buildSettings = () => ({
+  enabled: aiEnabled.value,
+  provider: aiProvider.value,
+  baseUrl: aiBaseUrl.value.trim(),
+  model: aiModel.value.trim(),
+  apiKey: aiApiKey.value.trim() || undefined,
+});
+
+const saveAI = async () => {
+  aiSaving.value = true;
+  try {
+    await saveAISettings(buildSettings());
+    emit('show-toast', 'success', aiEnabled.value ? 'AI 兜底已启用并保存' : 'AI 兜底已关闭');
+  } catch (err: any) {
+    emit('show-toast', 'error', `保存失败: ${err.message}`);
+  } finally {
+    aiSaving.value = false;
+  }
+};
+
+const testAI = async () => {
+  aiTesting.value = true;
+  try {
+    const resp = await chrome.runtime.sendMessage({
+      type: 'AI_MAP_FIELDS',
+      payload: {
+        settings: buildSettings(),
+        fields: [{ index: 0, label: '姓名', placeholder: '', name: '', ariaLabel: '', inputType: 'text' }],
+        options: [{ resumeKey: 'basics.name', label: '姓名' }],
+      },
+    });
+    if (resp?.success) {
+      emit('show-toast', 'success', '连接成功，AI 兜底可用');
+    } else {
+      emit('show-toast', 'error', `连接失败: ${resp?.error || '未知错误'}`);
+    }
+  } catch (err: any) {
+    emit('show-toast', 'error', `测试失败: ${err.message}`);
+  } finally {
+    aiTesting.value = false;
+  }
+};
 
 const handleAdd = () => {
   const domain = newDomainInput.value.trim().toLowerCase()
@@ -135,6 +207,65 @@ const handleImportFile = async (e: Event) => {
           class="hidden"
           @change="handleImportFile"
         />
+      </div>
+    </section>
+
+    <!-- AI 智能兜底（可选 · 本地优先） -->
+    <section aria-labelledby="ai-heading" class="p-5 bg-violet-50 border border-violet-200/80 rounded-2xl space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <Bot class="w-4 h-4 text-violet-600" />
+          <h3 id="ai-heading" class="text-sm font-bold text-slate-800">AI 智能兜底（可选 · 本地优先）</h3>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <span class="text-xs font-medium" :class="aiEnabled ? 'text-violet-700' : 'text-slate-500'">{{ aiEnabled ? '已启用' : '已关闭' }}</span>
+          <input type="checkbox" v-model="aiEnabled" class="w-4 h-4 accent-violet-600" />
+        </label>
+      </div>
+
+      <p class="text-slate-600 leading-relaxed">
+        默认关闭 —— 纯本地规则引擎即可正常使用。开启后，规则识别失败的字段会交给 AI <strong>一次性批量映射</strong>（省成本），且<strong>只发送字段标签、绝不发送简历内容</strong>。
+        推荐本地 Ollama（零成本、数据不出机）；也可用自带 Key 的云端接口。
+      </p>
+
+      <div v-if="aiEnabled" class="space-y-3 pt-1">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">提供方</label>
+            <select v-model="aiProvider" @change="onProviderChange" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500">
+              <option value="ollama">Ollama 本地模型（推荐）</option>
+              <option value="openai-compatible">OpenAI 兼容云端接口</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">模型</label>
+            <input v-model="aiModel" type="text" placeholder="qwen2.5:7b / deepseek-chat" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">接口地址 Base URL</label>
+          <input v-model="aiBaseUrl" type="text" placeholder="http://localhost:11434 或 https://api.deepseek.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+        </div>
+
+        <div v-if="aiProvider === 'openai-compatible'">
+          <label class="block text-xs font-medium text-slate-600 mb-1">API Key（仅存本地浏览器，不上传）</label>
+          <input v-model="aiApiKey" type="password" placeholder="sk-..." autocomplete="off" class="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+        </div>
+
+        <div class="flex items-center gap-3 pt-1">
+          <button type="button" @click="testAI" :disabled="aiTesting" class="px-4 py-2 bg-white border border-violet-300 hover:bg-violet-50 disabled:opacity-50 text-violet-700 font-bold rounded-xl transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-violet-500">
+            <PlugZap class="w-4 h-4" />
+            <span>{{ aiTesting ? '测试中...' : '测试连接' }}</span>
+          </button>
+          <button type="button" @click="saveAI" :disabled="aiSaving" class="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center gap-2 shadow-sm shadow-violet-500/20 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-violet-500">
+            <span>{{ aiSaving ? '保存中...' : '保存配置' }}</span>
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-500 leading-relaxed border-t border-violet-200/60 pt-2">
+          💡 本地 Ollama：先在终端运行 <code class="bg-white px-1 py-0.5 rounded font-mono">ollama run {{ aiModel || 'qwen2.5:7b' }}</code> 启动模型，再点「测试连接」。AI 匹配的字段会在填充日志中标注「AI 匹配」，便于你重点核对。
+        </p>
       </div>
     </section>
 

@@ -215,7 +215,7 @@ export function matchElementToResumeField(
       calculateTextMatchScore(ariaLabel, item.keywords)
     );
 
-    // 引入科研级 TF-IDF / 空间压缩 Levenshtein / 2-Gram 语义相似度打分
+    // 引入空间压缩 Levenshtein / 2-Gram / 同义词词图融合的语义相似度打分
     const semanticScore = calculateSemanticSimilarity(labelText || placeholder || nameAttr, item.resumeKey);
 
     const heuristicScore = labelScore * 0.6 + placeholderScore * 0.25 + attrScore * 0.15;

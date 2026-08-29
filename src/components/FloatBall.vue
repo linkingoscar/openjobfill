@@ -20,6 +20,7 @@ import {
   Users,
   Download,
   Target,
+  Eye,
   EyeOff,
   AlertTriangle,
   Lightbulb,
@@ -31,11 +32,12 @@ import {
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
-import { formFillerEngine } from '@/core/engine/filler';
+import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { getAdapterForUrl } from '@/core/adapters';
 import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
+import { startManualFill } from '@/core/engine/manualFill';
 import { analyzeJDMatch, highlightJDOnWebpage, clearJDHighlights, type JDAnalysisResult } from '@/core/matcher/jdMatcher';
 import { generateOptimalSelector } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
@@ -253,17 +255,19 @@ const handleQuickFill = async () => {
   if (isFilling.value) return;
   isFilling.value = true;
   fillResult.value = null;
+  previewPlan.value = null;
 
   try {
     const activeResume = await resumeStorage.getActiveResume();
     currentResume.value = activeResume;
     selectedResumeId.value = activeResume.id;
-    const result = await formFillerEngine.fill(activeResume);
-    fillResult.value = result;
+    // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
+    const analyzed = await formFillerEngine.analyze(activeResume);
+    previewPlan.value = analyzed;
     drawerTab.value = 'logs';
-    isDrawerOpen.value = true; // 填表完成后自动展开日志抽屉
+    isDrawerOpen.value = true; // 展开抽屉展示预览清单
   } catch (err: any) {
-    console.error('[OpenJobFill] Autofill error:', err);
+    console.error('[OpenJobFill] Analyze error:', err);
   } finally {
     isFilling.value = false;
   }
@@ -506,8 +510,52 @@ const handleOpenOptions = () => {
   chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS_PAGE' });
 };
 
+const handleManualFill = async () => {
+  if (!currentResume.value) {
+    const activeResume = await resumeStorage.getActiveResume();
+    currentResume.value = activeResume;
+  }
+  if (!currentResume.value) return;
+  // 收起抽屉避免遮挡，进入点选手动填充模式
+  isDrawerOpen.value = false;
+  startManualFill(currentResume.value, (label) => {
+    copyToastMessage.value = `已手动填入：${label}`;
+    setTimeout(() => { copyToastMessage.value = ''; }, 1500);
+  });
+};
+
+// ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
+const previewPlan = ref<AnalyzedPlan | null>(null);
+
+const previewFillItems = computed(
+  () => previewPlan.value?.plan.items.filter((i) => i.action === 'FILL') ?? []
+);
+const previewNeedsUserItems = computed(
+  () => previewPlan.value?.plan.items.filter((i) => i.action === 'NEEDS_USER') ?? []
+);
+
+const confirmFill = async () => {
+  if (!previewPlan.value || isFilling.value) return;
+  isFilling.value = true;
+  try {
+    const result = await formFillerEngine.executePlan(previewPlan.value);
+    fillResult.value = result;
+    previewPlan.value = null;
+    drawerTab.value = 'logs';
+  } catch (err: any) {
+    console.error('[OpenJobFill] Execute fill error:', err);
+  } finally {
+    isFilling.value = false;
+  }
+};
+
+const cancelPreview = () => {
+  previewPlan.value = null;
+};
+
 defineExpose({
   handleQuickFill,
+  handleManualFill,
   notifyStepChange,
 });
 </script>
@@ -722,15 +770,48 @@ defineExpose({
           </div>
 
           <div class="p-4 flex-1 overflow-y-auto space-y-3">
-            <div v-if="!fillResult && !isFilling" class="text-center py-8 text-slate-500">
+            <div v-if="!fillResult && !isFilling && !previewPlan" class="text-center py-8 text-slate-500">
               <Sparkles class="w-8 h-8 mx-auto mb-2 text-blue-400 opacity-60" aria-hidden="true" />
               <p class="font-medium text-xs text-slate-700">点击下方按钮或按 <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono text-xs text-slate-800">Alt+Shift+F</kbd></p>
-              <p class="text-xs text-slate-500 mt-1">一键智能秒填并点亮页面绿色已填徽标</p>
+              <p class="text-xs text-slate-500 mt-1">先智能识别生成预览，核对无误后一键确认填写</p>
             </div>
 
             <div v-if="isFilling" role="status" aria-live="polite" class="text-center py-8 text-slate-600">
               <div class="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
               <p class="font-medium text-xs">正在分析页面结构并注入行内徽标...</p>
+            </div>
+
+            <!-- Preview Plan (填前预览确认：先识别展示，确认后才写入) -->
+            <div v-if="previewPlan && !fillResult" class="space-y-2">
+              <div class="p-2.5 bg-blue-50 rounded-xl border border-blue-200 text-blue-800 text-xs">
+                <span class="font-bold flex items-center gap-1">
+                  <Eye class="w-4 h-4 text-blue-600" aria-hidden="true" />
+                  已识别 {{ previewFillItems.length }} 个字段，请核对后确认填写
+                </span>
+                <span v-if="previewNeedsUserItems.length > 0" class="block mt-0.5 text-amber-700">
+                  另有 {{ previewNeedsUserItems.length }} 项需要你手动补充
+                </span>
+              </div>
+
+              <div class="max-h-56 overflow-y-auto space-y-1 pr-1">
+                <div
+                  v-for="item in previewFillItems"
+                  :key="item.id"
+                  class="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 flex items-center justify-between text-xs"
+                >
+                  <span class="font-medium text-slate-700 truncate">{{ item.field.label }}</span>
+                  <span class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">
+                    {{ item.targetValue }}
+                  </span>
+                </div>
+                <div
+                  v-for="item in previewNeedsUserItems"
+                  :key="item.id"
+                  class="p-2 rounded-lg bg-amber-50/60 border border-amber-100 flex items-center text-xs"
+                >
+                  <span class="text-amber-700 truncate">需手动：{{ item.field.label }}</span>
+                </div>
+              </div>
             </div>
 
             <!-- Result Logs -->
@@ -778,8 +859,28 @@ defineExpose({
             </div>
           </div>
 
-          <!-- Footer Action Button -->
-          <footer class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+          <!-- Footer Action Button：预览确认态 -->
+          <footer v-if="previewPlan && !fillResult" class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+            <button
+              type="button"
+              @click="confirmFill"
+              :disabled="isFilling"
+              class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-emerald-500"
+            >
+              <CheckCircle class="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{{ isFilling ? '正在填写...' : `确认填写 ${previewFillItems.length} 项` }}</span>
+            </button>
+            <button
+              type="button"
+              @click="cancelPreview"
+              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              取消
+            </button>
+          </footer>
+
+          <!-- Footer Action Button：初始态 -->
+          <footer v-else class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
             <button
               type="button"
               @click="handleQuickFill"
@@ -787,7 +888,16 @@ defineExpose({
               class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               <Sparkles class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{{ isFilling ? '正在填写...' : '一键自动填写本页 (Alt+Shift+F)' }}</span>
+              <span>{{ isFilling ? '正在识别...' : '一键识别并预览填写 (Alt+Shift+F)' }}</span>
+            </button>
+            <button
+              type="button"
+              @click="handleManualFill"
+              title="点选手动填充：点击网页上的输入框，从简历字段中选一个填入（自动填充漏填/填错时补救）"
+              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-1.5 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <Pipette class="w-3.5 h-3.5" aria-hidden="true" />
+              <span>手动</span>
             </button>
           </footer>
         </div>

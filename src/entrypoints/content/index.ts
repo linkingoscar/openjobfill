@@ -19,9 +19,18 @@ export default defineContentScript({
     let app: VueApp | null = null;
     let hostEl: HTMLDivElement | null = null;
     let vm: any = null;
+    let stopQALearner: (() => void) | null = null;
 
-    // 启动智能问答主动学习监听器 (自我进化问答库)
-    const stopQALearner = initSmartQALearner();
+    const startRecruitmentListeners = () => {
+      if (!stopQALearner) {
+        stopQALearner = initSmartQALearner();
+      }
+    };
+
+    const stopRecruitmentListeners = () => {
+      stopQALearner?.();
+      stopQALearner = null;
+    };
 
     function mountFloatBall() {
       // 只有在顶级窗口 (Top Window) 挂载悬浮球，避免在每个嵌套 iframe 中出现多个悬浮球
@@ -64,8 +73,14 @@ export default defineContentScript({
 
     // 白名单门控：只在招聘相关页面挂载悬浮球，离开时自动卸载
     const stopObserving = observeRecruitmentPage(
-      () => mountFloatBall(),
-      () => unmountFloatBall()
+      () => {
+        startRecruitmentListeners();
+        mountFloatBall();
+      },
+      () => {
+        stopRecruitmentListeners();
+        unmountFloatBall();
+      }
     );
 
     // 智能多步向导 (Multi-Step Wizard) SPA 路由与 DOM 步骤切换侦测
@@ -135,7 +150,7 @@ export default defineContentScript({
     // 官方 WXT 上下文失效生命周期钩子：插件重载时立即释放所有监听器与恢复原型
     ctx.onInvalidated(() => {
       stopObserving();
-      stopQALearner();
+      stopRecruitmentListeners();
       unmountFloatBall();
       window.removeEventListener('popstate', handleStepChange);
       window.removeEventListener('hashchange', handleStepChange);
@@ -150,6 +165,7 @@ export default defineContentScript({
       if (message.type === 'TRIGGER_AUTO_FILL') {
         // 即使悬浮球未显示，也允许手动触发时临时挂载
         if (!mounted) {
+          startRecruitmentListeners();
           mountFloatBall();
         }
         if (vm && vm.handleQuickFill) {

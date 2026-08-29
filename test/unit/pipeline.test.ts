@@ -3,6 +3,7 @@ import { pageAnalyzer } from '@/core/pipeline/pageAnalyzer';
 import { planGenerator } from '@/core/pipeline/planGenerator';
 import { verifier } from '@/core/pipeline/verifier';
 import { pipelineExecutor } from '@/core/pipeline/executor';
+import { formFillerEngine } from '@/core/engine/filler';
 import { mokaEnhancer } from '@/core/adapters/enhancers';
 import type { StandardResume } from '@/types/resume';
 
@@ -191,6 +192,71 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(verifier.isSemanticEquivalent('2023年09月', '2023-09', 'date')).toBe(true);
       expect(verifier.isSemanticEquivalent('张三', '李四', 'input')).toBe(false);
     });
+
+    it('radio 读回必须限定在本字段所属分组内，不得读回同页他处的选中项', async () => {
+      document.body.innerHTML = `
+        <form id="formA">
+          <div class="form-item">
+            <input type="radio" name="gender" value="男" checked />
+            <input type="radio" name="gender" value="女" />
+          </div>
+        </form>
+        <form id="formB">
+          <div class="form-item">
+            <input type="radio" name="married" value="是" checked />
+            <input type="radio" name="married" value="否" />
+          </div>
+        </form>
+      `;
+
+      const genderEl = document.querySelector<HTMLInputElement>('#formA input[name="gender"]')!;
+      const genderField = {
+        id: 'f-gender',
+        element: genderEl,
+        type: 'radio' as const,
+        label: '性别',
+        placeholder: '',
+        name: 'gender',
+        ariaLabel: '',
+        required: false,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      // 必须读回本组的“男”，而不是 formB 中已选中的“是”
+      const val = await verifier.readBack(genderField, 'radio');
+      expect(val).toBe('男');
+    });
+
+    it('无 name 且无分组容器时，radio 读回不得退化为全文档查询', async () => {
+      document.body.innerHTML = `
+        <div id="otherGroup"><input type="radio" value="X" checked /></div>
+        <div id="mineGroup"><input type="radio" value="Y" /></div>
+      `;
+
+      const el = document.querySelector<HTMLInputElement>('#mineGroup input')!;
+      const field = {
+        id: 'f-no-name',
+        element: el,
+        type: 'radio' as const,
+        label: '未知单选',
+        placeholder: '',
+        name: '',
+        ariaLabel: '',
+        required: false,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      // 该 radio 自身未被选中，必须返回 false，
+      // 绝不能因为降级到 document 而把 otherGroup 的 "X" 读回成自己的值
+      const val = await verifier.readBack(field, 'radio');
+      expect(val).toBe(false);
+    });
   });
 
   describe('PipelineExecutor (执行与待办清单闭环)', () => {
@@ -224,6 +290,24 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       // 验证 DOM 上的值确实已经被填入
       const nameInput = document.querySelector('input[name="name"]') as HTMLInputElement;
       expect(nameInput.value).toBe('张三');
+    });
+
+    it('预览停留时间不应计入最终填写耗时', async () => {
+      document.body.innerHTML = `
+        <form>
+          <div class="form-item">
+            <label>姓名 *</label>
+            <input name="name" type="text" />
+          </div>
+        </form>
+      `;
+
+      const analyzed = await formFillerEngine.analyze(MOCK_RESUME);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const result = await formFillerEngine.executePlan(analyzed);
+
+      expect(result.filledCount).toBe(1);
+      expect(result.durationMs).toBeLessThan(120);
     });
   });
 });

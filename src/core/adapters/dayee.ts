@@ -1,10 +1,11 @@
-import type { SiteAdapter, FillResult, FillLogItem } from '../../types/adapter';
+import type { SiteAdapter, FillResult } from '../../types/adapter';
 import type { StandardResume } from '../../types/resume';
-import { setNativeValue, setNativeRadioChecked } from '../engine/dispatcher';
+import { setNativeValue } from '../engine/dispatcher';
 import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { fillDatePicker } from '../engine/datepicker';
 import { autoExpandHeuristicSections } from '../engine/repeater';
 import { sleep, getAllFormElementsAcrossIframes } from '../../utils/dom';
+import { createFillSession, isIdentityExcluded, type FieldQueryOptions } from './adapterKit';
 
 export const dayeeAdapter: SiteAdapter = {
   id: 'dayee-adapter',
@@ -21,21 +22,7 @@ export const dayeeAdapter: SiteAdapter = {
   },
 
   async customFill(resume: StandardResume): Promise<FillResult> {
-    const startTime = Date.now();
-    const logs: FillLogItem[] = [];
-    let filledCount = 0;
-    let skippedCount = 0;
-    let failedCount = 0;
-
-    const logSuccess = (label: string, field: string, value: string) => {
-      filledCount++;
-      logs.push({ status: 'success', label, field, value });
-    };
-
-    const logSkip = (label: string, field: string, reason: string) => {
-      skippedCount++;
-      logs.push({ status: 'skipped', label, field, value: '', message: reason });
-    };
+    const s = createFillSession('用友大易招聘系统适配器');
 
     // 0. 自动增行
     if (resume.educations && resume.educations.length > 1) {
@@ -45,140 +32,129 @@ export const dayeeAdapter: SiteAdapter = {
       await autoExpandHeuristicSections(['工作', '实习'], resume.experiences.length);
     }
 
-    // 获取包含同源 Iframe 的所有可见输入框
+    // 大易大量页面把表单嵌在同源 Iframe 中，必须遍历跨帧元素集合而非主文档选择器
     const allInputs = getAllFormElementsAcrossIframes();
 
-    const findInput = (keywords: string[]): HTMLElement | null => {
-      for (const el of allInputs) {
-        const id = (el.id || '').toLowerCase();
-        const name = (el.getAttribute('name') || '').toLowerCase();
-        const placeholder = (el.getAttribute('placeholder') || '').toLowerCase();
-        const label = (el.parentElement?.textContent || '').toLowerCase();
+    const makeFinder = (options: FieldQueryOptions = {}) => {
+      return (keywords: string[]): HTMLElement | null => {
+        for (const el of allInputs) {
+          // 身份排斥过滤（紧急联系人等第三方字段需显式豁免）
+          if (isIdentityExcluded(el, options)) continue;
 
-        if (keywords.some(k => id.includes(k) || name.includes(k) || placeholder.includes(k) || label.includes(k))) {
-          return el;
+          const id = (el.id || '').toLowerCase();
+          const name = (el.getAttribute('name') || '').toLowerCase();
+          const placeholder = (el.getAttribute('placeholder') || '').toLowerCase();
+          const label = (el.parentElement?.textContent || '').toLowerCase();
+
+          if (keywords.some((k) => id.includes(k) || name.includes(k) || placeholder.includes(k) || label.includes(k))) {
+            return el;
+          }
         }
-      }
-      return null;
+        return null;
+      };
     };
 
-    // 1. 姓名
-    const nameInput = findInput(['name', 'candidate', '姓名']) as HTMLInputElement;
-    if (nameInput && resume.basics.name) {
-      setNativeValue(nameInput, resume.basics.name);
-      logSuccess('姓名', 'basics.name', resume.basics.name);
-    } else {
-      logSkip('姓名', 'basics.name', '未找到输入框');
-    }
+    const findInput = makeFinder();
+    // 用于定位本就属于第三方的控件（紧急联系人 / 家属），必须豁免身份排斥
+    const findThirdParty = makeFinder({ allowIdentityTerms: true });
 
-    // 2. 手机号
-    const phoneInput = findInput(['mobile', 'phone', '手机']) as HTMLInputElement;
-    if (phoneInput && resume.basics.phone) {
-      setNativeValue(phoneInput, resume.basics.phone);
-      logSuccess('手机号', 'basics.phone', resume.basics.phone);
-    } else {
-      logSkip('手机号', 'basics.phone', '未找到输入框');
-    }
+    const writeText = (el: Element, value: string) => {
+      setNativeValue(el as HTMLInputElement, value);
+      return true;
+    };
 
-    // 3. 邮箱
-    const emailInput = findInput(['email', 'mail', '邮箱']) as HTMLInputElement;
-    if (emailInput && resume.basics.email) {
-      setNativeValue(emailInput, resume.basics.email);
-      logSuccess('电子邮箱', 'basics.email', resume.basics.email);
-    } else {
-      logSkip('电子邮箱', 'basics.email', '未找到输入框');
-    }
+    const writeTextarea = (el: Element, value: string) => {
+      setNativeValue(el as HTMLTextAreaElement, value);
+      return true;
+    };
 
-    // 4. 证件号 / 身份证
-    const idInput = findInput(['idcard', 'certno', '身份证', '证件号']) as HTMLInputElement;
-    if (idInput && resume.basics.idCardNumber) {
-      setNativeValue(idInput, resume.basics.idCardNumber);
-      logSuccess('身份证号', 'basics.idCardNumber', resume.basics.idCardNumber);
-    }
+    // 1. 基础身份信息
+    await s.apply(findInput(['name', 'candidate', '姓名']), '姓名', 'basics.name', resume.basics.name, writeText);
 
-    // 5. 性别
-    const genderLabels = Array.from(document.querySelectorAll<HTMLElement>('label, .dayee-radio, .el-radio'));
-    if (genderLabels.length > 0 && resume.basics.gender) {
-      const targetGender = resume.basics.gender;
-      const matched = genderLabels.find((l) => l.textContent?.includes(targetGender));
-      if (matched) {
-        const radio = matched.querySelector<HTMLInputElement>('input[type="radio"]');
-        if (radio) setNativeRadioChecked(radio, true);
-        else matched.click();
-        logSuccess('性别', 'basics.gender', targetGender);
+    await s.apply(findInput(['mobile', 'phone', '手机']), '手机号', 'basics.phone', resume.basics.phone, writeText);
+
+    await s.apply(findInput(['email', 'mail', '邮箱']), '电子邮箱', 'basics.email', resume.basics.email, writeText);
+
+    await s.apply(findInput(['idcard', 'certno', '身份证', '证件号']), '身份证号', 'basics.idCardNumber', resume.basics.idCardNumber, writeText);
+
+    // 2. 性别单选
+    await s.radioByText(
+      document,
+      ['.dayee-radio', '.el-radio', '[class*="gender"] label'],
+      '性别',
+      'basics.gender',
+      resume.basics.gender
+    );
+
+    // 3. 日期与下拉
+    await s.apply(
+      findInput(['birth', '出生', '生日']),
+      '出生年月',
+      'basics.birthDate',
+      resume.basics.birthDate,
+      async (el, value) => {
+        await fillDatePicker(el as HTMLInputElement, value);
+        return true;
       }
-    }
+    );
 
-    // 6. 出生年月
-    const birthInput = findInput(['birth', '出生', '生日']) as HTMLInputElement;
-    if (birthInput && resume.basics.birthDate) {
-      await fillDatePicker(birthInput, resume.basics.birthDate);
-      logSuccess('出生年月', 'basics.birthDate', resume.basics.birthDate);
-    }
+    await s.apply(
+      findInput(['political', 'party', '政治面貌']),
+      '政治面貌',
+      'basics.politicalStatus',
+      resume.basics.politicalStatus,
+      (el, value) => selectCustomOption(el as HTMLElement, value)
+    );
 
-    // 7. 政治面貌
-    const polDropdown = findInput(['political', 'party', '政治面貌']);
-    if (polDropdown && resume.basics.politicalStatus) {
-      await selectCustomOption(polDropdown, resume.basics.politicalStatus);
-      logSuccess('政治面貌', 'basics.politicalStatus', resume.basics.politicalStatus);
-    }
+    await s.apply(
+      findInput(['native', '籍贯', '生源']),
+      '籍贯',
+      'basics.nativePlace.city',
+      resume.basics.nativePlace?.city,
+      (el, value) => selectCascaderOptions(el as HTMLElement, value)
+    );
 
-    // 8. 籍贯 / 户籍
-    const nativeEl = findInput(['native', '籍贯', '生源']);
-    if (nativeEl && resume.basics.nativePlace?.city) {
-      await selectCascaderOptions(nativeEl, resume.basics.nativePlace.city);
-      logSuccess('籍贯', 'basics.nativePlace.city', resume.basics.nativePlace.city);
-    }
-
-    // 9. 最高教育经历
+    // 4. 最高教育经历
     if (resume.educations && resume.educations.length > 0) {
       const edu = resume.educations[0];
-      const schoolInput = findInput(['school', 'college', '学校', '毕业院校']) as HTMLInputElement;
-      if (schoolInput && edu.schoolName) {
-        setNativeValue(schoolInput, edu.schoolName);
-        logSuccess('毕业学校', 'educations.0.schoolName', edu.schoolName);
-      }
 
-      const majorInput = findInput(['major', '专业']) as HTMLInputElement;
-      if (majorInput && edu.major) {
-        setNativeValue(majorInput, edu.major);
-        logSuccess('所学专业', 'educations.0.major', edu.major);
-      }
+      await s.apply(findInput(['school', 'college', '学校', '毕业院校']), '毕业学校', 'educations.0.schoolName', edu.schoolName, writeText);
 
-      const degreeDropdown = findInput(['degree', '学历', '学位']);
-      if (degreeDropdown && edu.degree) {
-        await selectCustomOption(degreeDropdown, edu.degree);
-        logSuccess('学历学位', 'educations.0.degree', edu.degree);
-      }
+      await s.apply(findInput(['major', '专业']), '所学专业', 'educations.0.major', edu.major, writeText);
+
+      await s.apply(
+        findInput(['degree', '学历', '学位']),
+        '学历学位',
+        'educations.0.degree',
+        edu.degree,
+        (el, value) => selectCustomOption(el as HTMLElement, value)
+      );
     }
 
-    // 10. 紧急联系人 / 家庭信息
+    // 5. 第三方联系人信息（豁免身份排斥，这类字段本就属于他人）
     if (resume.familyMembers && resume.familyMembers.length > 0) {
       const fm = resume.familyMembers[0];
-      const fmNameInput = findInput(['emergency', 'contact', '紧急联系人', '家属姓名']) as HTMLInputElement;
-      if (fmNameInput && fm.name) {
-        setNativeValue(fmNameInput, fm.name);
-        logSuccess('紧急联系人', 'familyMembers.0.name', fm.name);
-      }
+
+      await s.apply(
+        findThirdParty(['emergency', 'contact', '紧急联系人', '家属姓名']),
+        '紧急联系人',
+        'familyMembers.0.name',
+        fm.name,
+        writeText
+      );
     }
 
-    // 11. 自我评价
-    const evalTextarea = findInput(['evaluation', 'self', '评价', '自我介绍']) as HTMLTextAreaElement;
-    if (evalTextarea && resume.basics.selfEvaluation) {
-      setNativeValue(evalTextarea, resume.basics.selfEvaluation);
-      logSuccess('自我评价', 'basics.selfEvaluation', resume.basics.selfEvaluation);
-    }
+    // 6. 自我评价
+    await s.apply(
+      findInput(['evaluation', 'self', '评价', '自我介绍']),
+      '自我评价',
+      'basics.selfEvaluation',
+      resume.basics.selfEvaluation,
+      writeTextarea
+    );
 
     await sleep(200);
 
-    return {
-      success: filledCount > 0,
-      adapterName: '用友大易招聘系统适配器',
-      filledCount,
-      skippedCount,
-      failedCount,
-      logs,
-      durationMs: Date.now() - startTime,
-    };
+    return s.finish();
   },
 };

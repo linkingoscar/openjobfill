@@ -17,10 +17,19 @@ export class Verifier {
 
     if (driverType === 'radio') {
       const name = el.getAttribute('name');
-      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || document;
-      
+      // 找不到分组容器时只能退到父元素，绝不能退到 document ——
+      // 否则会把页面上任意一个已选中的 radio 读回成本字段的值，导致校验误判。
+      const container =
+        el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') ||
+        el.parentElement ||
+        el;
+
+      // 按 name 查找时优先限定在同一个 form 内：同名 radio 组在不同表单中可能重复出现
+      const nameScope: ParentNode =
+        el instanceof HTMLInputElement && el.form ? el.form : document;
+
       const checked = name
-        ? document.querySelector<HTMLInputElement>(`input[type="radio"][name="${name}"]:checked`)
+        ? nameScope.querySelector<HTMLInputElement>(`input[type="radio"][name="${name}"]:checked`)
         : container.querySelector<HTMLInputElement>('input[type="radio"]:checked');
 
       if (checked) {

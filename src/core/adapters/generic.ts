@@ -8,20 +8,14 @@ import { autoExpandHeuristicSections } from '../engine/repeater';
 import { decorateElement } from '../engine/badgeDecorator';
 import { DomScheduler } from '../engine/scheduler';
 import { getAllFormElementsAcrossIframes } from '../../utils/dom';
-
-/**
- * 通过点路径读取对象内部值 (如 'basics.name', 'educations.0.schoolName', 'educations.1.major')
- */
-function getValueByPath(obj: any, path: string): any {
-  if (!obj || !path) return undefined;
-  const parts = path.split('.');
-  let current = obj;
-  for (const part of parts) {
-    if (current === undefined || current === null) return undefined;
-    current = current[part];
-  }
-  return current;
-}
+import { getValueByPath } from '../../utils/objectPath';
+import {
+  tryAIFallback,
+  describeUnmatchedField,
+  isFillableElement,
+  hasFieldHint,
+  type UnmatchedFieldEntry,
+} from '../ai/aiFallback';
 
 export const genericAdapter: SiteAdapter = {
   id: 'generic-adapter',
@@ -56,13 +50,20 @@ export const genericAdapter: SiteAdapter = {
     const inputs = getAllFormElementsAcrossIframes();
     const filledElements = new Set<HTMLElement>();
     const matchedKeys = new Set<string>(); // 已匹配到的简历字段 Key (去重用)
+    const unmatched: UnmatchedFieldEntry[] = []; // 规则未命中、待 AI 兜底
 
-    // 3. 采用科研级 DomScheduler.runChunked 时间切片分批填充，保障 60fps 帧率与主线程响应
+    // 3. 时间切片分批填充，批次之间让出主线程，避免长任务阻塞页面交互
     await DomScheduler.runChunked(inputs, async (el) => {
       if (filledElements.has(el)) return;
 
       const match = matchElementToResumeField(el, matchedKeys, resume.qaBank);
-      if (!match) return;
+      if (!match) {
+        // 规则未命中但疑似表单字段 → 收集给 AI 兜底
+        if (isFillableElement(el) && hasFieldHint(el)) {
+          unmatched.push({ element: el, descriptor: describeUnmatchedField(el, unmatched.length) });
+        }
+        return;
+      }
 
       let strValue = '';
       if (match.qaAnswer) {
@@ -153,6 +154,20 @@ export const genericAdapter: SiteAdapter = {
         });
       }
     }, 6);
+
+    // 4. AI 兜底：把规则仍未命中的字段批量交给 LLM 映射
+    //    （仅发送字段标签、不发送简历内容；未配置时静默跳过，不影响纯本地规则模式）
+    if (unmatched.length > 0) {
+      const aiOutcome = await tryAIFallback(unmatched, resume);
+      if (aiOutcome) {
+        filledCount += aiOutcome.filledCount;
+        skippedCount += aiOutcome.skippedCount;
+        failedCount += aiOutcome.failedCount;
+        logs.push(...aiOutcome.logs);
+        aiOutcome.filledElements.forEach((el) => filledElements.add(el));
+        aiOutcome.matchedKeys.forEach((k) => matchedKeys.add(k));
+      }
+    }
 
     return {
       success: filledCount > 0,

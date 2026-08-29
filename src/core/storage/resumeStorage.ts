@@ -4,6 +4,10 @@ import { EMPTY_RESUME, DEMO_RESUME, DEFAULT_RESUME } from './defaultData';
 const STORAGE_KEY_RESUMES = 'openjobfill_resumes';
 const STORAGE_KEY_ACTIVE_ID = 'openjobfill_active_resume_id';
 
+function createDefaultResumeList(): StandardResume[] {
+  return [sanitizeResume(DEFAULT_RESUME)];
+}
+
 function sanitizeResume(data: Partial<StandardResume> | null | undefined): StandardResume {
   const base = JSON.parse(JSON.stringify(EMPTY_RESUME)) as StandardResume;
   if (!data || typeof data !== 'object') return base;
@@ -61,15 +65,16 @@ class ResumeStorage {
     if (data) {
       try {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed.map(sanitizeResume);
         }
       } catch (e) {
         console.error('Failed to parse resumes from localStorage', e);
       }
     }
-    localStorage.setItem(STORAGE_KEY_RESUMES, JSON.stringify([DEFAULT_RESUME]));
-    return [DEFAULT_RESUME];
+    const defaults = createDefaultResumeList();
+    localStorage.setItem(STORAGE_KEY_RESUMES, JSON.stringify(defaults));
+    return defaults;
   }
 
   /**
@@ -81,13 +86,19 @@ class ResumeStorage {
         try {
           chrome.storage.local.get([STORAGE_KEY_RESUMES], (result) => {
             if (chrome.runtime?.lastError || !result) {
-              resolve(this.getFromLocalStorage());
+              resolve(createDefaultResumeList());
               return;
             }
-            if (result && result[STORAGE_KEY_RESUMES] && Array.isArray(result[STORAGE_KEY_RESUMES])) {
-              resolve(result[STORAGE_KEY_RESUMES].map(sanitizeResume));
+            const stored = result[STORAGE_KEY_RESUMES];
+            if (Array.isArray(stored) && stored.length > 0) {
+              resolve(stored.map(sanitizeResume));
             } else {
-              this.saveResume(DEFAULT_RESUME).then(() => resolve([DEFAULT_RESUME]));
+              // 首次安装时直接初始化底层存储。不能调用 saveResume()：
+              // saveResume() 会再次调用 getAllResumes()，从而在空存储上无限递归。
+              const defaults = createDefaultResumeList();
+              chrome.storage.local.set({ [STORAGE_KEY_RESUMES]: defaults }, () => {
+                resolve(defaults);
+              });
             }
           });
         } catch {
@@ -105,8 +116,7 @@ class ResumeStorage {
   async getActiveResume(): Promise<StandardResume> {
     const resumes = await this.getAllResumes();
     if (resumes.length === 0) {
-      await this.saveResume(DEFAULT_RESUME);
-      return DEFAULT_RESUME;
+      return createDefaultResumeList()[0];
     }
 
     let activeId: string | null = null;

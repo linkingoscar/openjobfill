@@ -1,8 +1,9 @@
 {
   "name": "openjobfill",
   "version": "1.0.0",
-  "description": "Open-source Job Application Resume Autofill Chrome Extension",
+  "description": "Job Application Resume Autofill Chrome Extension - 浏览器本地运行的简历自动填写助手",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "dev": "wxt",

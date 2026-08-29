@@ -1,9 +1,7 @@
-import type { SiteAdapter, FillResult, FillLogItem } from '../../types/adapter';
+import type { SiteAdapter, FillResult } from '../../types/adapter';
 import type { StandardResume } from '../../types/resume';
-import { setNativeValue, setNativeRadioChecked } from '../engine/dispatcher';
-import { selectCustomOption } from '../engine/selector';
-import { fillDatePicker } from '../engine/datepicker';
 import { sleep } from '../../utils/dom';
+import { createFillSession } from './adapterKit';
 
 export const tencentAdapter: SiteAdapter = {
   id: 'tencent-adapter',
@@ -19,99 +17,71 @@ export const tencentAdapter: SiteAdapter = {
   },
 
   async customFill(resume: StandardResume): Promise<FillResult> {
-    const startTime = Date.now();
-    const logs: FillLogItem[] = [];
-    let filledCount = 0;
-    let skippedCount = 0;
-    let failedCount = 0;
+    const s = createFillSession('腾讯招聘官网适配器');
 
-    const logSuccess = (label: string, field: string, value: string) => {
-      filledCount++;
-      logs.push({ status: 'success', label, field, value });
-    };
-
-    const logSkip = (label: string, field: string, reason: string) => {
-      skippedCount++;
-      logs.push({ status: 'skipped', label, field, value: '', message: reason });
-    };
-
-    // 1. 姓名
-    const nameInput = document.querySelector<HTMLInputElement>(
-      'input[placeholder*="姓名"], input[name="name"], .name-input input'
+    await s.text(
+      document,
+      ['.name-input input', 'input[placeholder*="姓名"]', 'input[name="name"]'],
+      '姓名',
+      'basics.name',
+      resume.basics.name
     );
-    if (nameInput && resume.basics.name) {
-      setNativeValue(nameInput, resume.basics.name);
-      logSuccess('姓名', 'basics.name', resume.basics.name);
-    } else {
-      logSkip('姓名', 'basics.name', '未找到输入框');
-    }
 
-    // 2. 手机号
-    const phoneInput = document.querySelector<HTMLInputElement>(
-      'input[placeholder*="手机"], input[name="phone"], input[type="tel"]'
+    await s.text(
+      document,
+      ['input[placeholder*="手机"]', 'input[name="phone"]', 'input[type="tel"]'],
+      '手机号',
+      'basics.phone',
+      resume.basics.phone
     );
-    if (phoneInput && resume.basics.phone) {
-      setNativeValue(phoneInput, resume.basics.phone);
-      logSuccess('手机号', 'basics.phone', resume.basics.phone);
-    }
 
-    // 3. 邮箱
-    const emailInput = document.querySelector<HTMLInputElement>(
-      'input[placeholder*="邮箱"], input[name="email"], input[type="email"]'
+    await s.text(
+      document,
+      ['input[placeholder*="邮箱"]', 'input[name="email"]', 'input[type="email"]'],
+      '电子邮箱',
+      'basics.email',
+      resume.basics.email
     );
-    if (emailInput && resume.basics.email) {
-      setNativeValue(emailInput, resume.basics.email);
-      logSuccess('电子邮箱', 'basics.email', resume.basics.email);
-    }
 
-    // 4. 身份证号
-    const idInput = document.querySelector<HTMLInputElement>(
-      'input[placeholder*="身份证"], input[name*="idcard"], input[name*="idCard"]'
+    await s.text(
+      document,
+      ['input[placeholder*="身份证"]', 'input[name*="idcard"]', 'input[name*="idCard"]'],
+      '身份证号',
+      'basics.idCardNumber',
+      resume.basics.idCardNumber
     );
-    if (idInput && resume.basics.idCardNumber) {
-      setNativeValue(idInput, resume.basics.idCardNumber);
-      logSuccess('身份证号', 'basics.idCardNumber', resume.basics.idCardNumber);
-    }
 
-    // 5. 教育经历 (最高学历)
+    // 教育经历（仅回填最高学历一段）
     if (resume.educations && resume.educations.length > 0) {
       const edu = resume.educations[0];
-      const schoolInput = document.querySelector<HTMLInputElement>(
-        'input[placeholder*="学校"], input[name="schoolName"]'
-      );
-      if (schoolInput && edu.schoolName) {
-        setNativeValue(schoolInput, edu.schoolName);
-        logSuccess('学校名称', 'educations.0.schoolName', edu.schoolName);
-      }
 
-      const majorInput = document.querySelector<HTMLInputElement>(
-        'input[placeholder*="专业"], input[name="major"]'
+      await s.text(
+        document,
+        ['input[name="schoolName"]', 'input[placeholder*="学校"]'],
+        '学校名称',
+        'educations.0.schoolName',
+        edu.schoolName
       );
-      if (majorInput && edu.major) {
-        setNativeValue(majorInput, edu.major);
-        logSuccess('专业名称', 'educations.0.major', edu.major);
-      }
+
+      await s.text(
+        document,
+        ['input[name="major"]', 'input[placeholder*="专业"]'],
+        '专业名称',
+        'educations.0.major',
+        edu.major
+      );
     }
 
-    // 6. 自我评价
-    const evalInput = document.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder*="自我评价"], textarea[placeholder*="介绍"]'
+    await s.textarea(
+      document,
+      ['textarea[placeholder*="自我评价"]', 'textarea[placeholder*="介绍"]'],
+      '自我评价',
+      'basics.selfEvaluation',
+      resume.basics.selfEvaluation
     );
-    if (evalInput && resume.basics.selfEvaluation) {
-      setNativeValue(evalInput, resume.basics.selfEvaluation);
-      logSuccess('自我评价', 'basics.selfEvaluation', resume.basics.selfEvaluation);
-    }
 
     await sleep(200);
 
-    return {
-      success: filledCount > 0,
-      adapterName: '腾讯招聘官网适配器',
-      filledCount,
-      skippedCount,
-      failedCount,
-      logs,
-      durationMs: Date.now() - startTime,
-    };
+    return s.finish();
   },
 };

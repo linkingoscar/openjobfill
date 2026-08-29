@@ -19,6 +19,10 @@ const resumes = ref<StandardResume[]>([]);
 const activeResume = ref<StandardResume | null>(null);
 const isFilling = ref(false);
 const statusMessage = ref('');
+const extensionVersion =
+  typeof chrome !== 'undefined' && chrome.runtime?.getManifest
+    ? chrome.runtime.getManifest().version
+    : '';
 
 onMounted(async () => {
   resumes.value = await resumeStorage.getAllResumes();
@@ -77,7 +81,7 @@ const openOptionsPage = (tabName?: string) => {
         <div>
           <div class="flex items-center gap-1.5">
             <h1 class="text-sm font-bold text-slate-900 leading-tight">OpenJobFill</h1>
-            <span class="px-1.5 py-0.2 bg-blue-100 text-blue-700 font-mono text-3xs font-bold rounded">v4.0</span>
+            <span v-if="extensionVersion" class="px-1.5 py-0.2 bg-blue-100 text-blue-700 font-mono text-3xs font-bold rounded">v{{ extensionVersion }}</span>
           </div>
           <p class="text-2xs text-slate-500">智能简历秒填 & 投递追踪管家</p>
         </div>

@@ -1,6 +1,12 @@
 /**
  * 语义相似度与混合自然语言距离计算引擎
- * 融合 Levenshtein 动态规划空间压缩算法、字符级 N-gram Jaccard 与权重词频模型
+ *
+ * 实际实现由三部分构成：
+ *   1. Levenshtein 编辑距离（空间压缩到 O(min(N, M))）
+ *   2. 字符级 2-Gram Jaccard 集合重合度
+ *   3. 人工维护的表单字段同义词词图（FORM_FIELD_SYNONYM_GRAPH）
+ *
+ * 三者加权融合：同义词直接命中权重最高，其次为 Bigram 与编辑距离的 6:4 混合分。
  */
 
 /**
