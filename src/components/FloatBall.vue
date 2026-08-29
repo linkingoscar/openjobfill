@@ -49,6 +49,7 @@ const isDrawerOpen = ref(false);
 const drawerTab = ref<'logs' | 'review' | 'clipboard' | 'jdMatch'>('logs');
 const currentAdapterName = ref('');
 const fillResult = ref<FillResult | null>(null);
+const operationError = ref('');
 const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
@@ -252,10 +253,11 @@ onUnmounted(() => {
 });
 
 const handleQuickFill = async () => {
-  if (isFilling.value) return;
+  if (isFilling.value) return { fillCount: 0, needsUserCount: 0 };
   isFilling.value = true;
   fillResult.value = null;
   previewPlan.value = null;
+  operationError.value = '';
 
   try {
     const activeResume = await resumeStorage.getActiveResume();
@@ -266,8 +268,16 @@ const handleQuickFill = async () => {
     previewPlan.value = analyzed;
     drawerTab.value = 'logs';
     isDrawerOpen.value = true; // 展开抽屉展示预览清单
+    return {
+      fillCount: analyzed.plan.items.filter((item) => item.action === 'FILL').length,
+      needsUserCount: analyzed.plan.items.filter((item) => item.action === 'NEEDS_USER').length,
+    };
   } catch (err: any) {
     console.error('[OpenJobFill] Analyze error:', err);
+    operationError.value = err?.message || '页面识别失败，请刷新网页后重试';
+    drawerTab.value = 'logs';
+    isDrawerOpen.value = true;
+    throw err;
   } finally {
     isFilling.value = false;
   }
@@ -535,8 +545,9 @@ const previewNeedsUserItems = computed(
 );
 
 const confirmFill = async () => {
-  if (!previewPlan.value || isFilling.value) return;
+  if (!previewPlan.value || previewFillItems.value.length === 0 || isFilling.value) return;
   isFilling.value = true;
+  operationError.value = '';
   try {
     const result = await formFillerEngine.executePlan(previewPlan.value);
     fillResult.value = result;
@@ -544,6 +555,7 @@ const confirmFill = async () => {
     drawerTab.value = 'logs';
   } catch (err: any) {
     console.error('[OpenJobFill] Execute fill error:', err);
+    operationError.value = err?.message || '填写执行失败，请重新识别后再试';
   } finally {
     isFilling.value = false;
   }
@@ -551,6 +563,11 @@ const confirmFill = async () => {
 
 const cancelPreview = () => {
   previewPlan.value = null;
+};
+
+const handlePreviewManualFill = async () => {
+  previewPlan.value = null;
+  await handleManualFill();
 };
 
 defineExpose({
@@ -770,7 +787,19 @@ defineExpose({
           </div>
 
           <div class="p-4 flex-1 overflow-y-auto space-y-3">
-            <div v-if="!fillResult && !isFilling && !previewPlan" class="text-center py-8 text-slate-500">
+            <div
+              v-if="operationError && !isFilling"
+              role="alert"
+              class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs"
+            >
+              <div class="font-bold flex items-center gap-1.5">
+                <AlertTriangle class="w-4 h-4" aria-hidden="true" />
+                本次操作没有完成
+              </div>
+              <p class="mt-1 leading-relaxed">{{ operationError }}</p>
+            </div>
+
+            <div v-if="!fillResult && !isFilling && !previewPlan && !operationError" class="text-center py-8 text-slate-500">
               <Sparkles class="w-8 h-8 mx-auto mb-2 text-blue-400 opacity-60" aria-hidden="true" />
               <p class="font-medium text-xs text-slate-700">点击下方按钮或按 <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono text-xs text-slate-800">Alt+Shift+F</kbd></p>
               <p class="text-xs text-slate-500 mt-1">先智能识别生成预览，核对无误后一键确认填写</p>
@@ -783,10 +812,19 @@ defineExpose({
 
             <!-- Preview Plan (填前预览确认：先识别展示，确认后才写入) -->
             <div v-if="previewPlan && !fillResult" class="space-y-2">
-              <div class="p-2.5 bg-blue-50 rounded-xl border border-blue-200 text-blue-800 text-xs">
+              <div
+                :class="[
+                  'p-2.5 rounded-xl border text-xs',
+                  previewFillItems.length > 0
+                    ? 'bg-blue-50 border-blue-200 text-blue-800'
+                    : 'bg-amber-50 border-amber-200 text-amber-800'
+                ]"
+              >
                 <span class="font-bold flex items-center gap-1">
                   <Eye class="w-4 h-4 text-blue-600" aria-hidden="true" />
-                  已识别 {{ previewFillItems.length }} 个字段，请核对后确认填写
+                  {{ previewFillItems.length > 0
+                    ? `已识别 ${previewFillItems.length} 个字段，请核对后确认填写`
+                    : '当前页面没有可自动填写的字段' }}
                 </span>
                 <span v-if="previewNeedsUserItems.length > 0" class="block mt-0.5 text-amber-700">
                   另有 {{ previewNeedsUserItems.length }} 项需要你手动补充
@@ -816,10 +854,19 @@ defineExpose({
 
             <!-- Result Logs -->
             <div v-if="fillResult" class="space-y-2">
-              <div class="flex items-center justify-between p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-800 text-xs">
+              <div
+                :class="[
+                  'flex items-center justify-between p-2.5 rounded-xl border text-xs',
+                  fillResult.filledCount > 0
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-amber-50 border-amber-200 text-amber-800'
+                ]"
+              >
                 <span class="font-bold flex items-center gap-1">
                   <CheckCircle class="w-4 h-4 text-emerald-600" aria-hidden="true" />
-                  成功填入 {{ fillResult.filledCount }} 项 (已高亮)
+                  {{ fillResult.filledCount > 0
+                    ? `成功填入 ${fillResult.filledCount} 项（已高亮）`
+                    : '本次没有字段填写成功' }}
                 </span>
                 <span class="text-slate-500">耗时 {{ fillResult.durationMs }}ms</span>
               </div>
@@ -862,6 +909,7 @@ defineExpose({
           <!-- Footer Action Button：预览确认态 -->
           <footer v-if="previewPlan && !fillResult" class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
             <button
+              v-if="previewFillItems.length > 0"
               type="button"
               @click="confirmFill"
               :disabled="isFilling"
@@ -869,6 +917,15 @@ defineExpose({
             >
               <CheckCircle class="w-3.5 h-3.5" aria-hidden="true" />
               <span>{{ isFilling ? '正在填写...' : `确认填写 ${previewFillItems.length} 项` }}</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              @click="handlePreviewManualFill"
+              class="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-amber-500"
+            >
+              <Pipette class="w-3.5 h-3.5" aria-hidden="true" />
+              <span>改用手动点选填写</span>
             </button>
             <button
               type="button"
@@ -1255,5 +1312,4 @@ defineExpose({
     </div>
   </aside>
 </template>
-
 

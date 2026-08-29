@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import type { StandardResume } from '@/types/resume';
 import { 
@@ -19,6 +19,7 @@ const resumes = ref<StandardResume[]>([]);
 const activeResume = ref<StandardResume | null>(null);
 const isFilling = ref(false);
 const statusMessage = ref('');
+const statusType = ref<'info' | 'success' | 'error'>('info');
 const extensionVersion =
   typeof chrome !== 'undefined' && chrome.runtime?.getManifest
     ? chrome.runtime.getManifest().version
@@ -36,36 +37,84 @@ const handleSelectResume = async (e: Event) => {
   activeResume.value = resumes.value.find((r) => r.id === id) || null;
 };
 
+const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+
+const hasFillableResumeData = computed(() => {
+  const resume = activeResume.value;
+  if (!resume) return false;
+
+  const basics = resume.basics;
+  return [
+    basics.name,
+    basics.phone,
+    basics.email,
+    basics.idCardNumber,
+    basics.birthDate,
+    basics.expectedRole,
+    basics.selfEvaluation,
+  ].some(hasText)
+    || resume.educations.some((item) => hasText(item.schoolName) || hasText(item.major))
+    || resume.experiences.some((item) => hasText(item.company) || hasText(item.title))
+    || resume.projects.some((item) => hasText(item.projectName) || hasText(item.role));
+});
+
+const candidateSummary = computed(() => {
+  const basics = activeResume.value?.basics;
+  if (!basics) return '尚未选择简历';
+  const name = basics.name.trim() || '姓名未填';
+  return basics.gender ? `${name}（${basics.gender}）` : name;
+});
+
+const educationSummary = computed(() => {
+  const education = activeResume.value?.educations[0];
+  if (!education) return '教育信息未填';
+  return [education.major, education.degree].filter(hasText).join(' · ') || '教育信息未填';
+});
+
 const handleTriggerFill = async () => {
+  if (!activeResume.value || !hasFillableResumeData.value) {
+    statusType.value = 'error';
+    statusMessage.value = '当前简历还是空的，先补几项常用资料再填写。';
+    await openOptionsPage();
+    return;
+  }
+
   isFilling.value = true;
+  statusType.value = 'info';
   statusMessage.value = '正在向当前网页发送填表指令...';
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.id) {
-      await chrome.tabs.sendMessage(tab.id, { 
-        type: 'TRIGGER_AUTO_FILL',
-        payload: { resumeId: activeResume.value?.id }
-      });
-      statusMessage.value = '填表指令已发送！请查看页面右侧悬浮面板。';
+    if (!tab?.id) throw new Error('未找到当前标签页');
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'TRIGGER_AUTO_FILL',
+      payload: { resumeId: activeResume.value.id },
+    });
+    if (!response?.success) {
+      throw new Error(response?.error || '页面没有响应填表指令');
     }
-  } catch (err) {
-    statusMessage.value = '请刷新招聘网页后再试（或当前页面不支持注入插件）';
+
+    statusType.value = 'success';
+    statusMessage.value = response.fillCount > 0
+      ? `已识别 ${response.fillCount} 项，请在页面右侧确认填写。`
+      : `已打开填表面板，${response.needsUserCount || 0} 项需要手动处理。`;
+  } catch (err: any) {
+    statusType.value = 'error';
+    statusMessage.value = err?.message || '请刷新招聘网页后再试（当前页面可能不支持插件）';
   } finally {
-    setTimeout(() => {
-      isFilling.value = false;
-    }, 2000);
+    isFilling.value = false;
   }
 };
 
-const openOptionsPage = (tabName?: string) => {
-  const url = tabName ? `/options.html#${tabName}` : '/options.html';
-  if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-    chrome.tabs.create({ url });
-  } else if (typeof chrome !== 'undefined' && chrome.runtime?.openOptionsPage) {
-    chrome.runtime.openOptionsPage();
+const openOptionsPage = async (tabName?: string) => {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.openOptionsPage && !tabName) {
+    await chrome.runtime.openOptionsPage();
+  } else if (typeof chrome !== 'undefined' && chrome.tabs?.create && chrome.runtime?.getURL) {
+    const url = `${chrome.runtime.getURL('options.html')}${tabName ? `#${tabName}` : ''}`;
+    await chrome.tabs.create({ url });
   } else {
-    window.open(url, '_blank');
+    window.open(`/options.html${tabName ? `#${tabName}` : ''}`, '_blank');
   }
 };
 </script>
@@ -154,18 +203,18 @@ const openOptionsPage = (tabName?: string) => {
         class="block w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         <option v-for="r in resumes" :key="r.id" :value="r.id">
-          {{ r.title }} ({{ r.basics.name }})
+          {{ r.title }}{{ r.basics.name ? ` (${r.basics.name})` : '' }}
         </option>
       </select>
 
       <div v-if="activeResume" class="pt-1.5 text-xs text-slate-500 space-y-1 border-t border-slate-100">
         <div class="flex justify-between items-center">
-          <span class="text-slate-600">候选人: <strong class="font-bold text-slate-800">{{ activeResume.basics.name }}</strong> ({{ activeResume.basics.gender }})</span>
-          <span class="font-mono text-2xs">{{ activeResume.basics.phone }}</span>
+          <span class="text-slate-600">候选人: <strong class="font-bold text-slate-800">{{ candidateSummary }}</strong></span>
+          <span v-if="activeResume.basics.phone" class="font-mono text-2xs">{{ activeResume.basics.phone }}</span>
         </div>
         <div class="flex justify-between truncate text-2xs text-slate-500">
           <span>{{ activeResume.educations[0]?.schoolName || '高校未填' }}</span>
-          <span>{{ activeResume.educations[0]?.major || '' }} · {{ activeResume.educations[0]?.degree || '' }}</span>
+          <span>{{ educationSummary }}</span>
         </div>
       </div>
     </section>
@@ -180,7 +229,7 @@ const openOptionsPage = (tabName?: string) => {
         :aria-label="isFilling ? '正在执行填表操作' : '一键自动填写当前页面表单'"
       >
         <Zap class="w-4 h-4 fill-white" aria-hidden="true" />
-        <span>{{ isFilling ? '正在填表中...' : '一键填入当前页面' }}</span>
+        <span>{{ isFilling ? '正在识别页面...' : hasFillableResumeData ? '一键填入当前页面' : '先完善简历资料' }}</span>
         <kbd class="px-1.5 py-0.5 bg-white/20 rounded text-3xs font-mono">Alt+Shift+F</kbd>
       </button>
 
@@ -189,7 +238,14 @@ const openOptionsPage = (tabName?: string) => {
         v-if="statusMessage"
         role="status"
         aria-live="polite"
-        class="text-xs text-center text-slate-700 px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg animate-fade-in"
+        :class="[
+          'text-xs text-center px-2.5 py-1.5 border rounded-lg animate-fade-in',
+          statusType === 'error'
+            ? 'text-rose-700 bg-rose-50 border-rose-200'
+            : statusType === 'success'
+              ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+              : 'text-slate-700 bg-blue-50 border-blue-200'
+        ]"
       >
         {{ statusMessage }}
       </div>

@@ -1,7 +1,7 @@
 import { createApp, type App as VueApp } from 'vue';
 import FloatBall from '@/components/FloatBall.vue';
 import styleText from './style.css?inline';
-import { isIgnoredDomain, isRecruitmentPage, observeRecruitmentPage } from '@/core/whitelist';
+import { isIgnoredDomain, observeRecruitmentPage } from '@/core/whitelist';
 import { initSmartQALearner } from '@/core/engine/qaLearner';
 
 export default defineContentScript({
@@ -20,16 +20,22 @@ export default defineContentScript({
     let hostEl: HTMLDivElement | null = null;
     let vm: any = null;
     let stopQALearner: (() => void) | null = null;
+    let stopStepTracking: (() => void) | null = null;
 
     const startRecruitmentListeners = () => {
       if (!stopQALearner) {
         stopQALearner = initSmartQALearner();
+      }
+      if (window === window.top && !stopStepTracking) {
+        stopStepTracking = startStepTracking();
       }
     };
 
     const stopRecruitmentListeners = () => {
       stopQALearner?.();
       stopQALearner = null;
+      stopStepTracking?.();
+      stopStepTracking = null;
     };
 
     function mountFloatBall() {
@@ -83,96 +89,116 @@ export default defineContentScript({
       }
     );
 
-    // 智能多步向导 (Multi-Step Wizard) SPA 路由与 DOM 步骤切换侦测
-    let lastUrl = window.location.href;
-    const handleStepChange = () => {
-      if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        console.log('[OpenJobFill] 检测到网申步骤/SPA路由变化:', lastUrl);
-        if (vm && vm.notifyStepChange) {
-          vm.notifyStepChange(lastUrl);
-        }
-      }
-    };
-    window.addEventListener('popstate', handleStepChange);
-    window.addEventListener('hashchange', handleStepChange);
-
-    // 拦截 pushState / replaceState 以精准捕获无刷新单页步骤切换
-    const originalPushState = history.pushState;
-    history.pushState = function (...args) {
-      originalPushState.apply(this, args);
-      handleStepChange();
-    };
-    const originalReplaceState = history.replaceState;
-    history.replaceState = function (...args) {
-      originalReplaceState.apply(this, args);
-      handleStepChange();
-    };
-
-    // DOM 表单签名突变监听 (捕获无 URL 变化的同页多步切换)
-    const computeFormSignature = () => {
-      const stepTitles = Array.from(
-        document.querySelectorAll(
-          '.ant-steps-item-active, .el-step.is-process, .semi-step-item-process, [class*="step"][class*="active"], [class*="step-current"]'
-        )
-      )
-        .map((el) => (el.textContent || '').trim())
-        .join('|');
-      const inputNames = Array.from(document.querySelectorAll('input, select, textarea'))
-        .slice(0, 25)
-        .map((el) => el.getAttribute('name') || el.getAttribute('data-automation-id') || el.id || el.className)
-        .filter(Boolean)
-        .join(',');
-      return `${stepTitles}::${inputNames}`;
-    };
-
-    let lastSignature = computeFormSignature();
-    let signatureTimer: any = null;
-
-    const domStepObserver = new MutationObserver(() => {
-      if (signatureTimer) clearTimeout(signatureTimer);
-      signatureTimer = setTimeout(() => {
-        const newSig = computeFormSignature();
-        if (newSig && newSig !== lastSignature) {
-          lastSignature = newSig;
-          console.log('[OpenJobFill] 检测到网申表单 DOM 步骤结构突变');
-          if (vm && vm.notifyStepChange) {
-            vm.notifyStepChange(window.location.href);
+    // 只在已识别的招聘页顶层窗口启动多步表单侦测，避免普通网页长期挂载全页 MutationObserver。
+    function startStepTracking(): () => void {
+      let lastUrl = window.location.href;
+      const handleStepChange = () => {
+        if (window.location.href !== lastUrl) {
+          lastUrl = window.location.href;
+          console.log('[OpenJobFill] 检测到网申步骤/SPA路由变化:', lastUrl);
+          if (vm?.notifyStepChange) {
+            vm.notifyStepChange(lastUrl);
           }
         }
-      }, 500);
-    });
+      };
+      window.addEventListener('popstate', handleStepChange);
+      window.addEventListener('hashchange', handleStepChange);
 
-    try {
-      domStepObserver.observe(document.body, { childList: true, subtree: true });
-    } catch (e) {}
+      // 拦截 pushState / replaceState 以精准捕获无刷新单页步骤切换
+      const originalPushState = history.pushState;
+      history.pushState = function (...args) {
+        originalPushState.apply(this, args);
+        handleStepChange();
+      };
+      const originalReplaceState = history.replaceState;
+      history.replaceState = function (...args) {
+        originalReplaceState.apply(this, args);
+        handleStepChange();
+      };
+
+      // DOM 表单签名突变监听 (捕获无 URL 变化的同页多步切换)
+      const computeFormSignature = () => {
+        const stepTitles = Array.from(
+          document.querySelectorAll(
+            '.ant-steps-item-active, .el-step.is-process, .semi-step-item-process, [class*="step"][class*="active"], [class*="step-current"]'
+          )
+        )
+          .map((el) => (el.textContent || '').trim())
+          .join('|');
+        const inputNames = Array.from(document.querySelectorAll('input, select, textarea'))
+          .slice(0, 25)
+          .map((el) => el.getAttribute('name') || el.getAttribute('data-automation-id') || el.id || el.className)
+          .filter(Boolean)
+          .join(',');
+        return `${stepTitles}::${inputNames}`;
+      };
+
+      let lastSignature = computeFormSignature();
+      let signatureTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const domStepObserver = new MutationObserver(() => {
+        if (signatureTimer) clearTimeout(signatureTimer);
+        signatureTimer = setTimeout(() => {
+          const newSig = computeFormSignature();
+          if (newSig && newSig !== lastSignature) {
+            lastSignature = newSig;
+            console.log('[OpenJobFill] 检测到网申表单 DOM 步骤结构突变');
+            if (vm?.notifyStepChange) {
+              vm.notifyStepChange(window.location.href);
+            }
+          }
+        }, 500);
+      });
+
+      if (document.body) {
+        domStepObserver.observe(document.body, { childList: true, subtree: true });
+      }
+
+      return () => {
+        window.removeEventListener('popstate', handleStepChange);
+        window.removeEventListener('hashchange', handleStepChange);
+        history.pushState = originalPushState;
+        history.replaceState = originalReplaceState;
+        domStepObserver.disconnect();
+        if (signatureTimer) {
+          clearTimeout(signatureTimer);
+          signatureTimer = null;
+        }
+      };
+    }
+
+    // 监听来自 Background / Popup 的指令
+    const handleRuntimeMessage = (message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      if (message.type !== 'TRIGGER_AUTO_FILL') return;
+
+      (async () => {
+        try {
+          // 即使悬浮球未显示，也允许手动触发时临时挂载
+          if (!mounted) {
+            startRecruitmentListeners();
+            mountFloatBall();
+          }
+          if (!vm?.handleQuickFill) {
+            throw new Error('填表面板尚未准备好，请刷新页面后重试');
+          }
+
+          const result = await vm.handleQuickFill();
+          sendResponse({ success: true, ...result });
+        } catch (err: any) {
+          sendResponse({ success: false, error: err?.message || '页面识别失败' });
+        }
+      })();
+
+      return true;
+    };
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
     // 官方 WXT 上下文失效生命周期钩子：插件重载时立即释放所有监听器与恢复原型
     ctx.onInvalidated(() => {
       stopObserving();
       stopRecruitmentListeners();
       unmountFloatBall();
-      window.removeEventListener('popstate', handleStepChange);
-      window.removeEventListener('hashchange', handleStepChange);
-      history.pushState = originalPushState;
-      history.replaceState = originalReplaceState;
-      domStepObserver.disconnect();
-      if (signatureTimer) clearTimeout(signatureTimer);
-    });
-
-    // 监听来自 Background / Popup 的指令
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === 'TRIGGER_AUTO_FILL') {
-        // 即使悬浮球未显示，也允许手动触发时临时挂载
-        if (!mounted) {
-          startRecruitmentListeners();
-          mountFloatBall();
-        }
-        if (vm && vm.handleQuickFill) {
-          vm.handleQuickFill();
-          sendResponse({ success: true });
-        }
-      }
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     });
   },
 });
