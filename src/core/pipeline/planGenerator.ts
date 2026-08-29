@@ -72,7 +72,7 @@ export class PlanGenerator {
           const doc = el.ownerDocument || document;
           const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || doc;
           const groupRadios = name
-            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
             : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
           if (groupRadios.some((r) => r.checked)) {
             isAlreadyFilledByUser = true;
@@ -90,6 +90,21 @@ export class PlanGenerator {
           action: 'SKIP',
           confidence: 1.0,
           reason: skipReason,
+          driverType: this.resolveDriverType(field),
+        });
+        skipCount++;
+        continue;
+      }
+
+      // 禁用控件不可能被页面真正接收；直接标记跳过，避免执行阶段反复
+      // 写入并把一个明确不可编辑的字段误报成失败待办。
+      if (field.disabled) {
+        items.push({
+          id: `plan_${field.id}`,
+          field,
+          action: 'SKIP',
+          confidence: 1.0,
+          reason: '字段已禁用，自动跳过',
           driverType: this.resolveDriverType(field),
         });
         skipCount++;

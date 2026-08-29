@@ -4,6 +4,7 @@ import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 import { locationResolver } from '../resolvers/locationResolver';
 import { dateEngine } from '../resolvers/dateEngine';
+import { getElementWindow, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 
 export interface ExecutionStrategy {
   name: string;
@@ -26,11 +27,14 @@ export class RetryLadder {
           {
             name: 'Direct Property Assignment + InputEvent Dispatch',
             execute: (field, val) => {
-              const el = field.element as HTMLInputElement;
+              const el = field.element;
+              if (!isInputElement(el) && !isTextAreaElement(el)) return false;
+              const win = getElementWindow(el) as any;
+              const EventClass = win.Event || Event;
               el.focus();
               el.value = String(val);
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new EventClass('input', { bubbles: true }));
+              el.dispatchEvent(new EventClass('change', { bubbles: true }));
               el.blur();
               return true;
             },
@@ -85,16 +89,18 @@ export class RetryLadder {
           {
             name: 'Native Select Option Value & Text Loop Fallback',
             execute: (field, val) => {
-              if (field.element instanceof HTMLSelectElement) {
+              if (isSelectElement(field.element)) {
                 const sel = field.element;
                 const stringVal = String(val).toLowerCase();
+                const win = getElementWindow(sel) as any;
+                const EventClass = win.Event || Event;
                 for (let i = 0; i < sel.options.length; i++) {
                   const optText = sel.options[i].text.toLowerCase();
                   const optVal = sel.options[i].value.toLowerCase();
                   if (optText.includes(stringVal) || optVal === stringVal || stringVal.includes(optText)) {
                     sel.selectedIndex = i;
-                    sel.dispatchEvent(new Event('input', { bubbles: true }));
-                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                    sel.dispatchEvent(new EventClass('input', { bubbles: true }));
+                    sel.dispatchEvent(new EventClass('change', { bubbles: true }));
                     return true;
                   }
                 }
@@ -119,7 +125,7 @@ export class RetryLadder {
           {
             name: 'Strict Boolean Checkbox Dispatcher',
             execute: (field, val) => {
-              if (field.element instanceof HTMLInputElement) {
+              if (isInputElement(field.element)) {
                 return setNativeCheckboxChecked(field.element, val);
               }
               simulateClick(field.element);

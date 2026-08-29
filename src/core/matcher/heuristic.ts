@@ -1,4 +1,4 @@
-import { findAssociatedLabelText } from '../../utils/dom';
+import { findAssociatedLabelText, isInputElement, isTextAreaElement } from '../../utils/dom';
 import { RESUME_DICTIONARY, type FieldSynonymItem } from './dictionary';
 import type { CustomQABankItem } from '../../types/resume';
 import { calculateSemanticSimilarity } from './similarityEngine';
@@ -134,7 +134,7 @@ export function matchElementToResumeField(
   qaBank?: CustomQABankItem[]
 ): MatchedFieldResult | null {
   // 排除隐藏输入框、提交按钮、禁用输入框
-  if (el instanceof HTMLInputElement) {
+  if (isInputElement(el)) {
     if (['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(el.type)) {
       return null;
     }
@@ -142,7 +142,7 @@ export function matchElementToResumeField(
   }
 
   // 跳过已有内容的输入框 (仅填空白)
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+  if (isInputElement(el) || isTextAreaElement(el)) {
     if (el.value && el.value.trim().length > 0) {
       return null;
     }
@@ -155,7 +155,7 @@ export function matchElementToResumeField(
   const contextText = getContextText(el);
 
   // 1. 如果是 Textarea 或大输入框，优先尝试匹配自定义问答库 (Q&A Bank)
-  if (qaBank && qaBank.length > 0 && (el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type === 'text'))) {
+  if (qaBank && qaBank.length > 0 && (isTextAreaElement(el) || (isInputElement(el) && el.type === 'text'))) {
     let bestQA: CustomQABankItem | null = null;
     let highestQAScore = 0;
 
@@ -246,4 +246,3 @@ export function matchElementToResumeField(
 
   return null;
 }
-

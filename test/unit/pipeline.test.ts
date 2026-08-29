@@ -257,6 +257,38 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       const val = await verifier.readBack(field, 'radio');
       expect(val).toBe(false);
     });
+
+    it('iframe 内 radio 读回必须使用所属文档，不能串到顶层同名分组', async () => {
+      const iframe = document.createElement('iframe');
+      document.body.appendChild(iframe);
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      expect(iframeDoc).toBeDefined();
+      if (!iframeDoc) return;
+
+      iframeDoc.body.innerHTML = `
+        <form>
+          <input type="radio" name="gender" value="女" checked />
+          <input type="radio" name="gender" value="男" />
+        </form>
+      `;
+      const el = iframeDoc.querySelector('input[type="radio"]') as HTMLInputElement;
+      const field = {
+        id: 'f-iframe-gender',
+        element: el,
+        type: 'radio' as const,
+        label: '性别',
+        placeholder: '',
+        name: 'gender',
+        ariaLabel: '',
+        required: false,
+        disabled: false,
+        readOnly: false,
+        currentValue: '',
+        contextText: '',
+      };
+
+      expect(await verifier.readBack(field, 'radio')).toBe('女');
+    });
   });
 
   describe('PipelineExecutor (执行与待办清单闭环)', () => {

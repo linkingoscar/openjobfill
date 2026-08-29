@@ -6,11 +6,12 @@ export const mokaEnhancer: PlatformEnhancer = {
   name: 'Moka 招聘系统增强器',
   description: '提供 Moka ATS 特有选择器映射与多卡片增行支持',
   priority: 100,
-  matches: (url: string) => {
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
     return (
       url.includes('mokahr.com') ||
       url.includes('moka.com') ||
-      typeof document !== 'undefined' && !!document.querySelector('.moka-application-form, [class*="moka-"]')
+      !!root?.querySelector('.moka-application-form, [class*="moka-"]')
     );
   },
   fieldMappings: {
@@ -51,12 +52,13 @@ export const beisenEnhancer: PlatformEnhancer = {
   id: 'beisen-enhancer',
   name: '北森 iTalent 增强器',
   priority: 95,
-  matches: (url: string) => {
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
     return (
       url.includes('italent.cn') ||
       url.includes('beisen.com') ||
       url.includes('hotjob.cn') ||
-      typeof document !== 'undefined' && !!document.querySelector('.beisen-form, [class*="italent"]')
+      !!root?.querySelector('.beisen-form, [class*="italent"]')
     );
   },
   fieldMappings: {
@@ -74,12 +76,13 @@ export const feishuEnhancer: PlatformEnhancer = {
   id: 'feishu-enhancer',
   name: '飞书招聘 / 字节跳动增强器',
   priority: 95,
-  matches: (url: string) => {
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
     return (
       url.includes('jobs.bytedance.com') ||
       url.includes('feishu.cn') ||
       url.includes('larksuite.com') ||
-      typeof document !== 'undefined' && !!document.querySelector('.semi-form, [class*="bytedance"]')
+      !!root?.querySelector('.semi-form, [class*="bytedance"]')
     );
   },
   fieldMappings: {
@@ -97,11 +100,12 @@ export const workdayEnhancer: PlatformEnhancer = {
   id: 'workday-enhancer',
   name: 'Workday 国际招聘系统增强器',
   priority: 90,
-  matches: (url: string) => {
+  matches: (url: string, doc?: Document) => {
+    const root = doc || (typeof document !== 'undefined' ? document : null);
     return (
       url.includes('myworkdayjobs.com') ||
       url.includes('workday.com') ||
-      typeof document !== 'undefined' && !!document.querySelector('[data-automation-id*="form"], [data-automation-id]')
+      !!root?.querySelector('[data-automation-id*="form"], [data-automation-id]')
     );
   },
   fieldMappings: {

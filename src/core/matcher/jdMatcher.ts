@@ -280,22 +280,44 @@ export function highlightJDOnWebpage(resume: StandardResume): { matchedCount: nu
   for (const node of textNodes) {
     const text = node.textContent;
     if (!text || !regex.test(text)) continue;
+    regex.lastIndex = 0;
 
     const span = document.createElement('span');
     span.className = 'openjobfill-highlighted-container';
-    
-    // 替换为包含 mark 标签的 html
-    span.innerHTML = text.replace(regex, (match) => {
+
+    // 用 DOM 节点拼接而不是 innerHTML：岗位描述来自外部网页，文本里即使
+    // 出现 <...> 也只能作为文本展示，不能在页面中被重新解释成 HTML。
+    let lastIndex = 0;
+    text.replace(regex, (match, _group, offset: number) => {
+      if (offset > lastIndex) {
+        span.appendChild(document.createTextNode(text.slice(lastIndex, offset)));
+      }
+
       const matchLower = match.toLowerCase();
+      const mark = document.createElement('mark');
       if (matchedSet.has(matchLower)) {
         matchedCount++;
-        return `<mark class="openjobfill-kw-matched" title="[简历已覆盖] ${match}">${match}</mark>`;
+        mark.className = 'openjobfill-kw-matched';
+        mark.title = `[简历已覆盖] ${match}`;
       } else if (missingSet.has(matchLower)) {
         missingCount++;
-        return `<mark class="openjobfill-kw-missing" title="[岗位提及但简历缺失] 点击复制【${match}】">${match}</mark>`;
+        mark.className = 'openjobfill-kw-missing';
+        mark.title = `[岗位提及但简历缺失] 点击复制【${match}】`;
+      } else {
+        span.appendChild(document.createTextNode(match));
+        lastIndex = offset + match.length;
+        return match;
       }
+
+      mark.textContent = match;
+      span.appendChild(mark);
+      lastIndex = offset + match.length;
       return match;
     });
+
+    if (lastIndex < text.length) {
+      span.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
 
     node.parentNode?.replaceChild(span, node);
   }

@@ -12,6 +12,12 @@ import { startElementPicking } from './elementPicker';
 import { setNativeValue, setNativeRadioChecked } from './dispatcher';
 import { selectCustomOption } from './selector';
 import { fillDatePicker } from './datepicker';
+import {
+  getAllDocumentsAcrossIframes,
+  isInputElement,
+  isSelectElement,
+  isTextAreaElement,
+} from '../../utils/dom';
 
 export interface ManualFillField {
   resumeKey: string;
@@ -83,25 +89,27 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
 /**
  * 把值填入目标元素，并给一次成功高亮反馈
  */
-async function applyValueToElement(el: HTMLElement, value: string): Promise<void> {
-  if (el instanceof HTMLInputElement) {
+async function applyValueToElement(el: HTMLElement, value: string): Promise<boolean> {
+  let success = false;
+  if (isInputElement(el)) {
     if (el.type === 'radio') {
-      setNativeRadioChecked(el, true);
+      success = setNativeRadioChecked(el, true);
     } else if (el.type === 'date' || /date|birth/i.test(el.name || '')) {
-      await fillDatePicker(el, value);
+      success = await fillDatePicker(el, value);
     } else {
-      setNativeValue(el, value);
+      success = setNativeValue(el, value);
     }
-  } else if (el instanceof HTMLTextAreaElement) {
-    setNativeValue(el, value);
-  } else if (el instanceof HTMLSelectElement) {
-    await selectCustomOption(el, value);
+  } else if (isTextAreaElement(el)) {
+    success = setNativeValue(el, value);
+  } else if (isSelectElement(el)) {
+    success = await selectCustomOption(el, value);
   } else {
-    const ok = await selectCustomOption(el, value);
-    if (!ok) setNativeValue(el as unknown as HTMLInputElement, value);
+    success = await selectCustomOption(el, value);
+    if (!success) success = setNativeValue(el, value);
   }
 
-  flashSuccess(el);
+  if (success) flashSuccess(el);
+  return success;
 }
 
 /** 填入成功后的短暂绿色高亮，给用户明确反馈 */
@@ -126,8 +134,10 @@ function showFieldMenu(
 ): void {
   removeMenu();
 
+  const doc = anchorEl.ownerDocument || document;
+  const view = doc.defaultView || window;
   const rect = anchorEl.getBoundingClientRect();
-  const menu = document.createElement('div');
+  const menu = doc.createElement('div');
   menu.id = MENU_ID;
   menu.style.cssText = `
     position: fixed;
@@ -147,12 +157,12 @@ function showFieldMenu(
   // 定位：默认放锚点下方，空间不足则放上方；水平方向防溢出
   const menuHeight = 320;
   const below = rect.bottom + 8;
-  const top = below + menuHeight > window.innerHeight ? Math.max(8, rect.top - menuHeight - 8) : below;
-  const left = Math.min(Math.max(8, rect.left), window.innerWidth - 316);
+  const top = below + menuHeight > view.innerHeight ? Math.max(8, rect.top - menuHeight - 8) : below;
+  const left = Math.min(Math.max(8, rect.left), Math.max(8, view.innerWidth - 316));
   menu.style.top = `${top}px`;
   menu.style.left = `${left}px`;
 
-  const search = document.createElement('input');
+  const search = doc.createElement('input');
   search.placeholder = '搜索简历字段…（点击填入，Esc 关闭）';
   search.style.cssText = `
     padding: 10px 12px;
@@ -164,7 +174,7 @@ function showFieldMenu(
     background: #f8fafc;
   `;
 
-  const list = document.createElement('div');
+  const list = doc.createElement('div');
   list.style.cssText = 'overflow-y: auto; flex: 1;';
 
   const renderList = (keyword: string) => {
@@ -175,7 +185,7 @@ function showFieldMenu(
       : fields;
 
     if (filtered.length === 0) {
-      const empty = document.createElement('div');
+      const empty = doc.createElement('div');
       empty.textContent = '没有匹配的字段';
       empty.style.cssText = 'padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;';
       list.appendChild(empty);
@@ -183,7 +193,7 @@ function showFieldMenu(
     }
 
     for (const field of filtered) {
-      const item = document.createElement('button');
+      const item = doc.createElement('button');
       item.type = 'button';
       item.style.cssText = `
         display: block;
@@ -198,11 +208,11 @@ function showFieldMenu(
       item.onmouseenter = () => (item.style.background = '#eff6ff');
       item.onmouseleave = () => (item.style.background = 'transparent');
 
-      const labelEl = document.createElement('div');
+      const labelEl = doc.createElement('div');
       labelEl.textContent = field.label;
       labelEl.style.cssText = 'font-size: 12px; font-weight: 600; color: #0f172a;';
 
-      const valueEl = document.createElement('div');
+      const valueEl = doc.createElement('div');
       const preview = field.value.length > 40 ? field.value.slice(0, 40) + '…' : field.value;
       valueEl.textContent = preview;
       valueEl.style.cssText = 'font-size: 12px; color: #64748b; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
@@ -210,7 +220,7 @@ function showFieldMenu(
       item.appendChild(labelEl);
       item.appendChild(valueEl);
       item.onclick = () => {
-        removeMenu();
+        dismissMenu();
         onSelect(field);
       };
       list.appendChild(item);
@@ -221,7 +231,7 @@ function showFieldMenu(
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      removeMenu();
+      dismissMenu();
       onDismiss();
     }
   });
@@ -229,22 +239,36 @@ function showFieldMenu(
   menu.appendChild(search);
   menu.appendChild(list);
   renderList('');
-  document.body.appendChild(menu);
+  doc.body.appendChild(menu);
   search.focus();
 
   // 点击浮层外部关闭
   const onOutsideClick = (e: MouseEvent) => {
     if (!menu.contains(e.target as Node)) {
-      removeMenu();
+      dismissMenu();
       onDismiss();
-      document.removeEventListener('mousedown', onOutsideClick, true);
     }
   };
-  setTimeout(() => document.addEventListener('mousedown', onOutsideClick, true), 0);
+  let outsideListenerAttached = false;
+  const listenerTimer = view.setTimeout(() => {
+    if (!menu.isConnected) return;
+    doc.addEventListener('mousedown', onOutsideClick, true);
+    outsideListenerAttached = true;
+  }, 0);
+
+  function dismissMenu(): void {
+    view.clearTimeout(listenerTimer);
+    if (outsideListenerAttached) {
+      doc.removeEventListener('mousedown', onOutsideClick, true);
+    }
+    menu.remove();
+  }
 }
 
 function removeMenu(): void {
-  document.getElementById(MENU_ID)?.remove();
+  for (const doc of getAllDocumentsAcrossIframes()) {
+    doc.getElementById(MENU_ID)?.remove();
+  }
 }
 
 /**
@@ -263,7 +287,7 @@ export function startManualFill(resume: StandardResume, onFilled?: (label: strin
 
   startElementPicking(
     (info) => {
-      const el = document.querySelector<HTMLElement>(info.selector);
+      const el = info.element || document.querySelector<HTMLElement>(info.selector);
       if (!el) {
         startManualFill(resume, onFilled);
         return;
@@ -273,8 +297,8 @@ export function startManualFill(resume: StandardResume, onFilled?: (label: strin
         el,
         fields,
         async (field) => {
-          await applyValueToElement(el, field.value);
-          onFilled?.(field.label, field.value);
+          const success = await applyValueToElement(el, field.value);
+          if (success) onFilled?.(field.label, field.value);
           // 填入后继续点选下一个，形成连续补救
           startManualFill(resume, onFilled);
         },

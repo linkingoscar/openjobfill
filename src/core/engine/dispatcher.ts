@@ -160,7 +160,7 @@ export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolea
   const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || doc;
   
   const groupRadios = name
-    ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+    ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
     : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
 
   for (const radio of groupRadios) {

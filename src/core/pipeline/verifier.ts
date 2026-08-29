@@ -1,6 +1,7 @@
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 import { locationResolver } from '../resolvers/locationResolver';
+import { isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 
 export class Verifier {
   /**
@@ -10,7 +11,7 @@ export class Verifier {
     const el = field.element;
 
     if (driverType === 'input') {
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      if (isInputElement(el) || isTextAreaElement(el)) {
         return el.value;
       }
     }
@@ -26,31 +27,31 @@ export class Verifier {
 
       // 按 name 查找时优先限定在同一个 form 内：同名 radio 组在不同表单中可能重复出现
       const nameScope: ParentNode =
-        el instanceof HTMLInputElement && el.form ? el.form : document;
+        isInputElement(el) && el.form ? el.form : (el.ownerDocument || document);
 
       const checked = name
-        ? nameScope.querySelector<HTMLInputElement>(`input[type="radio"][name="${name}"]:checked`)
+        ? nameScope.querySelector<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]:checked`)
         : container.querySelector<HTMLInputElement>('input[type="radio"]:checked');
 
       if (checked) {
         return checked.value || checked.parentElement?.textContent?.trim() || true;
       }
 
-      if (el instanceof HTMLInputElement && el.type === 'radio' && el.checked) {
+      if (isInputElement(el) && el.type === 'radio' && el.checked) {
         return el.value || el.parentElement?.textContent?.trim() || true;
       }
       return false;
     }
 
     if (driverType === 'checkbox') {
-      if (el instanceof HTMLInputElement) {
+      if (isInputElement(el)) {
         return el.checked;
       }
       return false;
     }
 
     if (driverType === 'select' || driverType === 'cascader') {
-      if (el instanceof HTMLSelectElement) {
+      if (isSelectElement(el)) {
         const selected = el.options[el.selectedIndex];
         return selected ? selected.text.trim() : el.value;
       }
@@ -65,7 +66,7 @@ export class Verifier {
     }
 
     if (driverType === 'date') {
-      if (el instanceof HTMLInputElement) {
+      if (isInputElement(el)) {
         return el.value;
       }
       return el.textContent?.trim() || '';

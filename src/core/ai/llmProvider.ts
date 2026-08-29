@@ -10,6 +10,9 @@
  */
 import type { AISettings } from '../../types/ai';
 
+// AI 兜底是可选能力，网络或本地模型不可用时不能让整次填写一直转圈。
+const AI_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function callChatCompletion(settings: AISettings, prompt: string): Promise<string> {
   if (settings.provider === 'ollama') {
     return callOllama(settings, prompt);
@@ -18,9 +21,15 @@ export async function callChatCompletion(settings: AISettings, prompt: string): 
 }
 
 async function callOllama(settings: AISettings, prompt: string): Promise<string> {
+  if (!settings.baseUrl?.trim()) {
+    throw new Error('Ollama 地址未配置');
+  }
+  if (!settings.model?.trim()) {
+    throw new Error('Ollama 模型未配置');
+  }
   const url = `${normalizeBaseUrl(settings.baseUrl)}/api/chat`;
 
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -47,10 +56,16 @@ async function callOpenAICompatible(settings: AISettings, prompt: string): Promi
   if (!settings.apiKey) {
     throw new Error('使用云端接口需要先填写 API Key');
   }
+  if (!settings.baseUrl?.trim()) {
+    throw new Error('云端接口地址未配置');
+  }
+  if (!settings.model?.trim()) {
+    throw new Error('云端接口模型未配置');
+  }
 
   const url = `${normalizeBaseUrl(settings.baseUrl)}/chat/completions`;
 
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -77,4 +92,25 @@ async function callOpenAICompatible(settings: AISettings, prompt: string): Promi
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
+}
+
+/** 带超时的 fetch：让 AI 失败快速回退到本地规则与待办清单。 */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs = AI_REQUEST_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`AI 请求超时（${Math.round(timeoutMs / 1000)} 秒），已回退到本地规则`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }

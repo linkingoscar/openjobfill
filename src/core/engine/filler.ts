@@ -26,7 +26,7 @@ export class FormFillerEngine {
   async analyze(resume: StandardResume): Promise<AnalyzedPlan> {
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     // 1. 获取当前页面匹配的平台增强器 (Platform Enhancer)
-    const enhancer = getEnhancerForUrl(currentUrl);
+    const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
     if (enhancer) {
       console.log(`[OpenJobFill Pipeline] Matched Platform Enhancer: ${enhancer.name} (${enhancer.id})`);
       if (enhancer.onBeforePlan) {

@@ -7,7 +7,7 @@ import { fillDatePicker } from '../engine/datepicker';
 import { autoExpandHeuristicSections } from '../engine/repeater';
 import { decorateElement } from '../engine/badgeDecorator';
 import { DomScheduler } from '../engine/scheduler';
-import { getAllFormElementsAcrossIframes } from '../../utils/dom';
+import { getAllFormElementsAcrossIframes, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 import { getValueByPath } from '../../utils/objectPath';
 import {
   tryAIFallback,
@@ -87,22 +87,20 @@ export const genericAdapter: SiteAdapter = {
       try {
         let success = false;
 
-        if (el instanceof HTMLInputElement) {
+        if (isInputElement(el)) {
           if (el.type === 'radio') {
             if (el.value === strValue || (el.nextSibling?.textContent || '').trim().includes(strValue)) {
-              setNativeRadioChecked(el, true);
-              success = true;
+              success = setNativeRadioChecked(el, true);
             }
           } else if (el.type === 'date' || el.name?.toLowerCase().includes('date') || el.name?.toLowerCase().includes('birth') || match.resumeKey.includes('Date')) {
-            await fillDatePicker(el, strValue);
-            success = true;
+            success = await fillDatePicker(el, strValue);
           } else {
-            setNativeValue(el, strValue);
-            success = true;
+            success = setNativeValue(el, strValue);
           }
-        } else if (el instanceof HTMLTextAreaElement) {
-          setNativeValue(el, strValue);
-          success = true;
+        } else if (isTextAreaElement(el)) {
+          success = setNativeValue(el, strValue);
+        } else if (isSelectElement(el)) {
+          success = await selectCustomOption(el, strValue);
         } else {
           // 尝试下拉组件选择或级联选择
           if (strValue.includes('-') || strValue.includes('/') || strValue.includes(' ')) {
@@ -180,4 +178,3 @@ export const genericAdapter: SiteAdapter = {
     };
   },
 };
-

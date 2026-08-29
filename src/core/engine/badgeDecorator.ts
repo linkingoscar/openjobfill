@@ -1,3 +1,12 @@
+import {
+  getAllDocumentsAcrossIframes,
+  getElementWindow,
+  isFieldRequired,
+  isInputElement,
+  isSelectElement,
+  isTextAreaElement,
+} from '../../utils/dom';
+
 /**
  * OpenJobFill 表单字段行内徽标与高亮提示引擎
  * 在网页表单项注入状态徽标与 Tooltip，提供 Review-First 视觉确认
@@ -12,11 +21,12 @@ export interface BadgeInfo {
 
 const BADGE_CLASS = 'openjobfill-field-badge';
 const BADGE_STYLE_ID = 'openjobfill-badge-styles';
+const badgeByElement = new WeakMap<HTMLElement, HTMLElement>();
 
-function ensureBadgeStyles() {
-  if (document.getElementById(BADGE_STYLE_ID)) return;
+function ensureBadgeStyles(doc: Document = document) {
+  if (doc.getElementById(BADGE_STYLE_ID)) return;
 
-  const style = document.createElement('style');
+  const style = doc.createElement('style');
   style.id = BADGE_STYLE_ID;
   style.textContent = `
     .openjobfill-badge-wrapper {
@@ -107,20 +117,24 @@ function ensureBadgeStyles() {
       background-color: rgba(139, 92, 246, 0.04) !important;
     }
   `;
-  document.head.appendChild(style);
+  (doc.head || doc.documentElement).appendChild(style);
 }
 
 /**
  * 为目标表单元素添加状态徽标与高亮提示
  */
 export function decorateElement(element: HTMLElement, info: BadgeInfo): void {
-  if (!element || !(element instanceof HTMLElement)) return;
-  ensureBadgeStyles();
+  if (!element || typeof element !== 'object' || !element.classList) return;
+  const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!doc) return;
+  ensureBadgeStyles(doc);
 
-  // 如果已经挂载过徽标，先移除旧徽标
-  const existingBadge = element.parentElement?.querySelector(`.${BADGE_CLASS}`);
+  // 如果该元素已经挂载过徽标，先移除自己的旧徽标；同一表单行可能有
+  // 多个输入框，不能用 parent.querySelector 把兄弟字段的徽标误删。
+  const existingBadge = badgeByElement.get(element);
   if (existingBadge) {
     existingBadge.remove();
+    badgeByElement.delete(element);
   }
 
   // 移除旧高亮
@@ -135,14 +149,14 @@ export function decorateElement(element: HTMLElement, info: BadgeInfo): void {
   element.classList.add(`openjobfill-highlight-${info.status}`);
 
   // 创建徽标 DOM
-  const badge = document.createElement('div');
+  const badge = doc.createElement('div');
   badge.className = `${BADGE_CLASS} badge-${info.status}`;
 
   const iconText = info.status === 'success' ? '✓' : info.status === 'warning' ? '!' : info.status === 'attachment' ? '📎' : '?';
   badge.textContent = iconText;
 
   // Tooltip
-  const tooltip = document.createElement('div');
+  const tooltip = doc.createElement('div');
   tooltip.className = 'openjobfill-tooltip';
   const prefix = info.status === 'success' ? '已填入' : info.status === 'warning' ? '建议复核' : info.status === 'attachment' ? '简历附件区' : '待补充必填';
   const valueDisplay = info.value ? `：${info.value}` : '';
@@ -156,11 +170,13 @@ export function decorateElement(element: HTMLElement, info: BadgeInfo): void {
   // 尝试插入到 element 父级中 (若 parent 非 relative，则添加 wrapper)
   const parent = element.parentElement;
   if (parent) {
-    const parentPos = window.getComputedStyle(parent).position;
+    const elementWindow = getElementWindow(element);
+    const parentPos = elementWindow.getComputedStyle(parent).position;
     if (parentPos === 'static') {
       parent.style.position = 'relative';
     }
     parent.appendChild(badge);
+    badgeByElement.set(element, badge);
   }
 }
 
@@ -168,17 +184,18 @@ export function decorateElement(element: HTMLElement, info: BadgeInfo): void {
  * 扫描页面中的文件附件上传区域并注入紫色引导徽标
  */
 export function scanAttachmentDropzones(): number {
-  ensureBadgeStyles();
   let dropzoneCount = 0;
-  const fileInputs = Array.from(document.querySelectorAll<HTMLElement>('input[type="file"], .el-upload, .ant-upload, .upload-dragger, [class*="upload-drag"], [class*="dropzone"]'));
+  for (const doc of getAllDocumentsAcrossIframes()) {
+    const fileInputs = Array.from(doc.querySelectorAll<HTMLElement>('input[type="file"], .el-upload, .ant-upload, .upload-dragger, [class*="upload-drag"], [class*="dropzone"]'));
 
-  for (const el of fileInputs) {
-    decorateElement(el, {
-      status: 'attachment',
-      label: '简历与作品集上传区',
-      message: '点击或拖拽本地 PDF 简历至此完成上传'
-    });
-    dropzoneCount++;
+    for (const el of fileInputs) {
+      decorateElement(el, {
+        status: 'attachment',
+        label: '简历与作品集上传区',
+        message: '点击或拖拽本地 PDF 简历至此完成上传'
+      });
+      dropzoneCount++;
+    }
   }
 
   return dropzoneCount;
@@ -188,34 +205,35 @@ export function scanAttachmentDropzones(): number {
  * 扫描页面所有必填但未填写的输入框，打上红色待补提醒
  */
 export function scanMissingRequiredFields(): number {
-  ensureBadgeStyles();
   let missingCount = 0;
-  const inputs = Array.from(
-    document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-      'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'
-    )
-  );
+  for (const doc of getAllDocumentsAcrossIframes()) {
+    const inputs = Array.from(
+      doc.querySelectorAll<HTMLElement>(
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'
+      )
+    );
 
-  for (const input of inputs) {
-    const isRequired = 
-      input.hasAttribute('required') || 
-      input.getAttribute('aria-required') === 'true' ||
-      input.closest('label, .form-item, .ant-form-item, .el-form-item')?.textContent?.includes('*');
+    for (const input of inputs) {
+      const isRequired = isFieldRequired(input);
 
-    const isEmpty = !input.value || input.value.trim() === '';
+      const value = isInputElement(input) || isTextAreaElement(input) || isSelectElement(input)
+        ? input.value
+        : '';
+      const isEmpty = !value || value.trim() === '';
 
-    if (isRequired && isEmpty) {
-      const labelText = input.getAttribute('placeholder') || 
-                        input.getAttribute('aria-label') || 
-                        input.closest('.form-item, .el-form-item')?.querySelector('label')?.textContent?.replace('*', '').trim() || 
-                        '必填项';
+      if (isRequired && isEmpty) {
+        const labelText = input.getAttribute('placeholder') ||
+                          input.getAttribute('aria-label') ||
+                          input.closest('.form-item, .el-form-item')?.querySelector('label')?.textContent?.replace('*', '').trim() ||
+                          '必填项';
 
-      decorateElement(input, {
-        status: 'missing',
-        label: labelText,
-        message: '简历暂无此项或未自动填入',
-      });
-      missingCount++;
+        decorateElement(input, {
+          status: 'missing',
+          label: labelText,
+          message: '简历暂无此项或未自动填入',
+        });
+        missingCount++;
+      }
     }
   }
 
@@ -226,17 +244,20 @@ export function scanMissingRequiredFields(): number {
  * 清除页面上所有 OpenJobFill 注入的徽标与高亮
  */
 export function clearAllBadges(): void {
-  const badges = document.querySelectorAll(`.${BADGE_CLASS}`);
-  badges.forEach((b) => b.remove());
+  for (const doc of getAllDocumentsAcrossIframes()) {
+    const badges = doc.querySelectorAll(`.${BADGE_CLASS}`);
+    badges.forEach((b) => b.remove());
 
-  const highlighted = document.querySelectorAll(
-    '.openjobfill-highlight-success, .openjobfill-highlight-warning, .openjobfill-highlight-missing'
-  );
-  highlighted.forEach((el) => {
-    el.classList.remove(
-      'openjobfill-highlight-success',
-      'openjobfill-highlight-warning',
-      'openjobfill-highlight-missing'
+    const highlighted = doc.querySelectorAll(
+      '.openjobfill-highlight-success, .openjobfill-highlight-warning, .openjobfill-highlight-missing, .openjobfill-highlight-attachment'
     );
-  });
+    highlighted.forEach((el) => {
+      el.classList.remove(
+        'openjobfill-highlight-success',
+        'openjobfill-highlight-warning',
+        'openjobfill-highlight-missing',
+        'openjobfill-highlight-attachment'
+      );
+    });
+  }
 }

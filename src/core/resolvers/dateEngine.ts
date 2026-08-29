@@ -1,5 +1,6 @@
 import { setNativeValue } from '../engine/dispatcher';
 import { selectCustomOption } from '../engine/selector';
+import { isInputElement } from '../../utils/dom';
 
 export interface SemanticDate {
   year: number;
@@ -95,9 +96,15 @@ export class DateEngine {
     const semantic = this.parseSemanticDate(rawDateStr);
 
     // 1. 如果是原生 input[type="date"]
-    if (el instanceof HTMLInputElement && el.type === 'date') {
-      const formatted = this.formatDate(semantic, 'YYYY-MM-DD');
-      return setNativeValue(el, formatted);
+    if (isInputElement(el) && (el.type === 'date' || el.type === 'month')) {
+      // 「至今」是经历结束日期的业务语义，不是 native date/month 的合法值。
+      // 不写入非法字符串，交给待办清单让用户确认“至今”或页面专属控件。
+      if (semantic.isPresent) return false;
+
+      const format = el.type === 'month' ? 'YYYY-MM' : 'YYYY-MM-DD';
+      const formatted = this.formatDate(semantic, format);
+      const written = setNativeValue(el, formatted);
+      return written && el.value === formatted;
     }
 
     // 2. 检查当前输入框附近是否存在“年/月双下拉框”组合
@@ -105,6 +112,10 @@ export class DateEngine {
     if (parentContainer) {
       const allSelects = Array.from(parentContainer.querySelectorAll<HTMLElement>('select, .el-select, .ant-select'));
       if (allSelects.length >= 2) {
+        // 年/月双下拉没有“至今”的通用合法值；写当前年月会把结束时间
+        // 错成今天，宁可留给待办清单让用户选择页面提供的“至今”选项。
+        if (semantic.isPresent) return false;
+
         // 第一个下拉通常为年份，第二个为月份
         const yearSelect = allSelects[0];
         const monthSelect = allSelects[1];
@@ -112,9 +123,9 @@ export class DateEngine {
         const yearTarget = String(semantic.year);
         const monthTarget = String(semantic.month);
 
-        await selectCustomOption(yearSelect, yearTarget);
-        await selectCustomOption(monthSelect, monthTarget);
-        return true;
+        const yearOk = await selectCustomOption(yearSelect, yearTarget);
+        const monthOk = await selectCustomOption(monthSelect, monthTarget);
+        return yearOk && monthOk;
       }
     }
 

@@ -1,7 +1,11 @@
+import { getAllDocumentsAcrossIframes } from '../../utils/dom';
+
 export interface PickedElementInfo {
   selector: string;
   tagName: string;
   label: string;
+  /** 直接携带元素，避免跨文档（同源 iframe）时只靠顶层 document 查询失败。 */
+  element?: HTMLElement;
   suggestedResumeKey?: string;
   previewValue?: string;
 }
@@ -13,8 +17,10 @@ const BANNER_ID = 'openjobfill-picker-banner';
  * 推导最具唯一性且健壮的 CSS 选择器
  */
 export function generateOptimalSelector(el: HTMLElement): string {
+  const ownerDocument = el.ownerDocument || document;
+
   // 1. 如果有唯一的 ID
-  if (el.id && document.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1) {
+  if (el.id && ownerDocument.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1) {
     return `#${CSS.escape(el.id)}`;
   }
 
@@ -22,7 +28,7 @@ export function generateOptimalSelector(el: HTMLElement): string {
   const name = el.getAttribute('name');
   if (name) {
     const sel = `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
-    if (document.querySelectorAll(sel).length === 1) {
+    if (ownerDocument.querySelectorAll(sel).length === 1) {
       return sel;
     }
   }
@@ -31,7 +37,7 @@ export function generateOptimalSelector(el: HTMLElement): string {
   const placeholder = el.getAttribute('placeholder');
   if (placeholder && placeholder.length < 25) {
     const sel = `${el.tagName.toLowerCase()}[placeholder="${CSS.escape(placeholder)}"]`;
-    if (document.querySelectorAll(sel).length === 1) {
+    if (ownerDocument.querySelectorAll(sel).length === 1) {
       return sel;
     }
   }
@@ -40,7 +46,7 @@ export function generateOptimalSelector(el: HTMLElement): string {
   for (const attr of Array.from(el.attributes)) {
     if (attr.name.startsWith('data-') && attr.value) {
       const sel = `[${attr.name}="${CSS.escape(attr.value)}"]`;
-      if (document.querySelectorAll(sel).length === 1) {
+      if (ownerDocument.querySelectorAll(sel).length === 1) {
         return sel;
       }
     }
@@ -53,7 +59,7 @@ export function generateOptimalSelector(el: HTMLElement): string {
     if (parentClass) {
       const tag = el.tagName.toLowerCase();
       const sel = `.${CSS.escape(parentClass)} ${tag}`;
-      if (document.querySelectorAll(sel).length === 1) {
+      if (ownerDocument.querySelectorAll(sel).length === 1) {
         return sel;
       }
     }
@@ -72,7 +78,7 @@ export function generateOptimalSelector(el: HTMLElement): string {
     }
     path.unshift(selector);
     const combined = path.join(' > ');
-    if (document.querySelectorAll(combined).length === 1) {
+    if (ownerDocument.querySelectorAll(combined).length === 1) {
       return combined;
     }
     curr = curr.parentElement;
@@ -111,8 +117,14 @@ export function startElementPicking(
   onPicked: (info: PickedElementInfo) => void,
   onCancel?: () => void
 ): () => void {
+  const topDocument = typeof document !== 'undefined' ? document : null;
+  if (!topDocument?.body) {
+    onCancel?.();
+    return () => undefined;
+  }
+
   // 1. 创建吸管提示条
-  const banner = document.createElement('div');
+  const banner = topDocument.createElement('div');
   banner.id = BANNER_ID;
   banner.style.cssText = `
     position: fixed;
@@ -138,12 +150,12 @@ export function startElementPicking(
     <span>🔍 元素吸管已激活：请在网页上点击要绑定的输入框</span>
     <kbd style="background:#334155; padding:2px 8px; border-radius:4px; font-size:11px;">按 ESC 退出</kbd>
   `;
-  document.body.appendChild(banner);
+  topDocument.body.appendChild(banner);
 
-  // 2. 创建高亮跟随遮罩
-  const overlay = document.createElement('div');
-  overlay.id = OVERLAY_ID;
-  overlay.style.cssText = `
+  // 2. 每个同源文档各自放一个遮罩。事件不会从 iframe 冒泡到顶层，
+  // 所以选择器也必须在每层文档安装监听，才能点选 iframe 内控件。
+  const overlays = new Map<Document, HTMLElement>();
+  const overlayStyle = `
     position: fixed;
     pointer-events: none;
     z-index: 2147483646;
@@ -153,14 +165,30 @@ export function startElementPicking(
     transition: all 0.08s ease-out;
     display: none;
   `;
-  document.body.appendChild(overlay);
+  for (const doc of getAllDocumentsAcrossIframes(topDocument)) {
+    if (!doc.body) continue;
+    const overlay = doc.createElement('div');
+    overlay.id = OVERLAY_ID;
+    overlay.style.cssText = overlayStyle;
+    doc.body.appendChild(overlay);
+    overlays.set(doc, overlay);
+  }
 
   let currentTarget: HTMLElement | null = null;
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const isPickerUi = (target: HTMLElement, doc: Document): boolean => {
+    return (
+      !!target.closest(`#${BANNER_ID}, #${OVERLAY_ID}, #openjobfill-extension-host`) ||
+      (target.ownerDocument === topDocument && !!topDocument.getElementById(BANNER_ID)?.contains(target)) ||
+      (target.ownerDocument === doc && target.id === BANNER_ID)
+    );
+  };
+
+  const handleMouseMove = (doc: Document) => (e: MouseEvent) => {
     const target = e.target as HTMLElement;
-    if (!target || target.closest(`#${BANNER_ID}`) || target.closest('#openjobfill-extension-host')) {
-      overlay.style.display = 'none';
+    const overlay = overlays.get(doc);
+    if (!target || !overlay || isPickerUi(target, doc)) {
+      if (overlay) overlay.style.display = 'none';
       return;
     }
 
@@ -173,11 +201,14 @@ export function startElementPicking(
     overlay.style.height = `${rect.height}px`;
   };
 
-  const handleClick = (e: MouseEvent) => {
+  const handleClick = (doc: Document) => (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target || isPickerUi(target, doc)) return;
+
     e.preventDefault();
     e.stopPropagation();
 
-    if (!currentTarget) return;
+    currentTarget = target;
 
     const selector = generateOptimalSelector(currentTarget);
     const label = currentTarget.getAttribute('placeholder') || 
@@ -194,6 +225,7 @@ export function startElementPicking(
       selector,
       tagName: currentTarget.tagName.toLowerCase(),
       label: label.replace(/[:：*]/g, '').trim(),
+      element: currentTarget,
       suggestedResumeKey: suggestedKey,
       previewValue
     });
@@ -206,17 +238,30 @@ export function startElementPicking(
     }
   };
 
-  const cleanup = () => {
-    document.removeEventListener('mousemove', handleMouseMove, true);
-    document.removeEventListener('click', handleClick, true);
-    document.removeEventListener('keydown', handleKeyDown, true);
-    banner.remove();
-    overlay.remove();
-  };
+  const listeners: Array<{
+    doc: Document;
+    mouseMove: (e: MouseEvent) => void;
+    click: (e: MouseEvent) => void;
+  }> = [];
 
-  document.addEventListener('mousemove', handleMouseMove, true);
-  document.addEventListener('click', handleClick, true);
-  document.addEventListener('keydown', handleKeyDown, true);
+  for (const doc of overlays.keys()) {
+    const mouseMove = handleMouseMove(doc);
+    const click = handleClick(doc);
+    doc.addEventListener('mousemove', mouseMove, true);
+    doc.addEventListener('click', click, true);
+    doc.addEventListener('keydown', handleKeyDown, true);
+    listeners.push({ doc, mouseMove, click });
+  }
+
+  const cleanup = () => {
+    for (const listener of listeners) {
+      listener.doc.removeEventListener('mousemove', listener.mouseMove, true);
+      listener.doc.removeEventListener('click', listener.click, true);
+      listener.doc.removeEventListener('keydown', handleKeyDown, true);
+    }
+    banner.remove();
+    for (const overlay of overlays.values()) overlay.remove();
+  };
 
   return cleanup;
 }

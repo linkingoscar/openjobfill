@@ -1,4 +1,4 @@
-import { sleep, isElementVisible } from '../../utils/dom';
+import { sleep, isElementVisible, getElementWindow, isInputElement, isSelectElement } from '../../utils/dom';
 import { setNativeValue, simulateClick } from './dispatcher';
 import { getFormalUniversityVariants, getFormalMajorVariants } from '../matcher/aliasDictionary';
 
@@ -25,6 +25,8 @@ const OPTION_SELECTORS = [
  */
 async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 800): Promise<HTMLElement[]> {
   const startTime = Date.now();
+  const ownerDocument = triggerEl?.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!ownerDocument) return [];
 
   // 1. 尝试从 triggerEl 或内部 input 提取关联的 popup ID
   const popupId =
@@ -38,9 +40,9 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
     const candidates: HTMLElement[] = [];
 
     // 优先在关联的 popup 作用域内查找
-    let searchRoot: ParentNode = document;
+    let searchRoot: ParentNode = ownerDocument;
     if (popupId) {
-      const popupEl = document.getElementById(popupId) || document.querySelector(`[id="${popupId}"]`);
+      const popupEl = ownerDocument.getElementById(popupId) || ownerDocument.querySelector(`[id="${CSS.escape(popupId)}"]`);
       if (!popupEl || !isElementVisible(popupEl as HTMLElement)) {
         await sleep(50);
         continue; // 声明了 popupId 时必须只等待自身 Popup 挂载，严禁中途退回 document 全局误拿其他下拉
@@ -81,7 +83,7 @@ async function trySelectCustomOptionOnce(
   const targetLower = targetText.toLowerCase().trim();
 
   // 1. 如果是原生 select 标签
-  if (triggerEl instanceof HTMLSelectElement) {
+  if (isSelectElement(triggerEl)) {
     const options = Array.from(triggerEl.options);
     const optTexts = options.map((o) => o.text.trim());
 
@@ -106,8 +108,10 @@ async function trySelectCustomOptionOnce(
     });
     if (matched) {
       triggerEl.value = matched.value;
-      triggerEl.dispatchEvent(new Event('input', { bubbles: true }));
-      triggerEl.dispatchEvent(new Event('change', { bubbles: true }));
+      const win = getElementWindow(triggerEl) as any;
+      const EventClass = win.Event || Event;
+      triggerEl.dispatchEvent(new EventClass('input', { bubbles: true }));
+      triggerEl.dispatchEvent(new EventClass('change', { bubbles: true }));
       return true;
     }
     return false;
@@ -121,11 +125,13 @@ async function trySelectCustomOptionOnce(
 
   // 3. 如果包含内部输入框（可搜索下拉框），尝试输入搜索文本以加速定位
   const inputChild = triggerEl.querySelector<HTMLInputElement>('input');
-  if (inputChild && !inputChild.readOnly) {
+  if (inputChild && isInputElement(inputChild) && !inputChild.readOnly) {
     simulateClick(inputChild);
     setNativeValue(inputChild, targetText);
-    inputChild.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-    inputChild.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+    const win = getElementWindow(inputChild) as any;
+    const KeyboardEventClass = win.KeyboardEvent || KeyboardEvent;
+    inputChild.dispatchEvent(new KeyboardEventClass('keydown', { key: 'ArrowDown', bubbles: true }));
+    inputChild.dispatchEvent(new KeyboardEventClass('keyup', { key: 'ArrowDown', bubbles: true }));
   } else {
     simulateClick(triggerEl);
   }
@@ -272,8 +278,10 @@ export async function selectCascaderOptions(
     await sleep(200);
 
     const candidates: HTMLElement[] = [];
+    const ownerDocument = triggerEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (!ownerDocument) return false;
     for (const selector of cascaderItemSelectors) {
-      const found = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      const found = Array.from(ownerDocument.querySelectorAll<HTMLElement>(selector));
       for (const el of found) {
         if (isElementVisible(el)) {
           candidates.push(el);
@@ -323,4 +331,3 @@ export function selectRadioByLabel(container: HTMLElement, targetText: string): 
 
   return false;
 }
-

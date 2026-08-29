@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { optionResolver, CanonicalDegree, CanonicalGender, CanonicalPoliticalStatus } from '@/core/resolvers/optionResolver';
 import { locationResolver } from '@/core/resolvers/locationResolver';
 import { dateEngine } from '@/core/resolvers/dateEngine';
+import { fillDatePicker, fillDateRangePicker } from '@/core/engine/datepicker';
 
 describe('Resolvers & Domain Engines (核心结构化解析器套件)', () => {
   describe('OptionResolver (10 大标准域下拉选项语义解析器)', () => {
@@ -110,6 +111,31 @@ describe('Resolvers & Domain Engines (核心结构化解析器套件)', () => {
       expect(yearSelect.value).toBe('2022');
       const monthSelect = document.getElementById('monthSelect') as HTMLSelectElement;
       expect(monthSelect.value).toBe('09');
+    });
+
+    it('native date 不应写入非法的“至今”，正常日期需读回确认且恢复只读状态', async () => {
+      const dateInput = document.createElement('input');
+      dateInput.type = 'date';
+      dateInput.readOnly = true;
+      document.body.appendChild(dateInput);
+
+      expect(await dateEngine.injectSemanticDate(dateInput, '至今')).toBe(false);
+      expect(dateInput.value).toBe('');
+      expect(dateInput.readOnly).toBe(true);
+
+      expect(await dateEngine.injectSemanticDate(dateInput, '2023-9')).toBe(true);
+      expect(dateInput.value).toBe('2023-09-01');
+      expect(dateInput.readOnly).toBe(true);
+    });
+
+    it('日期范围只在每个实际日期都写入成功时返回成功', async () => {
+      const container = document.createElement('div');
+      container.innerHTML = '<input type="date"><input type="date">';
+      document.body.appendChild(container);
+
+      expect(await fillDateRangePicker(container, '2023-01', '至今')).toBe(false);
+      expect((container.querySelectorAll('input')[0] as HTMLInputElement).value).toBe('2023-01-01');
+      expect((container.querySelectorAll('input')[1] as HTMLInputElement).value).toBe('');
     });
   });
 });

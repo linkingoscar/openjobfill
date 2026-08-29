@@ -2,7 +2,7 @@ import { resumeStorage } from '../storage/resumeStorage';
 import type { StandardResume } from '../../types/resume';
 import { isRecruitmentPage } from '../whitelist';
 import { isAutofillTouched } from './dispatcher';
-import { isInputElement, isTextAreaElement } from '../../utils/dom';
+import { isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 
 const BANNER_ID = 'openjobfill-qa-learner-banner';
 
@@ -237,23 +237,23 @@ export function initSmartQALearner(): () => void {
     if (!isRecruitment) return;
 
     const target = e.target;
-    if (!target || !(target instanceof HTMLElement)) return;
-    if (isAutofillTouched(target)) return;
+    if (!target || typeof target !== 'object') return;
+    if (isAutofillTouched(target as Element)) return;
 
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+    if (!(isInputElement(target) || isTextAreaElement(target) || isSelectElement(target))) {
       return;
     }
 
     // 忽略密码框与文件上传
-    if (target instanceof HTMLInputElement && ['password', 'hidden', 'file'].includes(target.type)) {
+    if (isInputElement(target) && ['password', 'hidden', 'file'].includes(target.type)) {
       return;
     }
 
     let value = '';
-    if (target instanceof HTMLInputElement && target.type === 'radio') {
+    if (isInputElement(target) && target.type === 'radio') {
       if (!target.checked) return;
       value = (target.parentElement?.textContent || target.value).replace(/[:：*]/g, '').trim();
-    } else if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+    } else if (isInputElement(target) && target.type === 'checkbox') {
       value = target.checked ? '是' : '否';
     } else {
       value = (target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
@@ -262,7 +262,7 @@ export function initSmartQALearner(): () => void {
     if (!value || value.length < 1) return;
 
     // 提取字段 Label
-    const label = getFieldLabel(target);
+    const label = getFieldLabel(target as HTMLElement);
     if (!label || label.length < 2 || label.length > 40) return;
 
     if (learnedKeysThisSession.has(label)) return;
@@ -271,7 +271,7 @@ export function initSmartQALearner(): () => void {
       const resume = await resumeStorage.getActiveResume();
       if (!resume) return;
 
-      const contextText = target.closest('.form-section, .section, form, .card, .form-item')?.textContent || '';
+      const contextText = (target as HTMLElement).closest('.form-section, .section, form, .card, .form-item')?.textContent || '';
 
       // 二分法：1. 优先尝试映射到 Profile 结构化字段
       const profileMatch = mapLabelToProfileField(label, contextText);

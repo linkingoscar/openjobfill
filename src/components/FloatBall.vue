@@ -39,7 +39,7 @@ import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
 import { startManualFill } from '@/core/engine/manualFill';
 import { analyzeJDMatch, highlightJDOnWebpage, clearJDHighlights, type JDAnalysisResult } from '@/core/matcher/jdMatcher';
-import { generateOptimalSelector } from '@/utils/dom';
+import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
@@ -266,6 +266,9 @@ const handleQuickFill = async () => {
     // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
     const analyzed = await formFillerEngine.analyze(activeResume);
     previewPlan.value = analyzed;
+    // 展示实际参与规划的引擎名称。旧版这里只显示注册表 adapter，
+    // Greenhouse/Lever 等页面容易误以为会走专属 customFill，实际当前统一走 Pipeline。
+    currentAdapterName.value = analyzed.adapterName;
     drawerTab.value = 'logs';
     isDrawerOpen.value = true; // 展开抽屉展示预览清单
     return {
@@ -479,9 +482,10 @@ const handleCopyField = async (item: ClipboardItem) => {
 
     // 智能点填：如果当前页面有聚焦的输入框，顺手写入
     const activeEl = document.activeElement;
-    if (activeEl && (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement)) {
-      setNativeValue(activeEl, item.value);
-      copyToastMessage.value = `已复制并自动填入当前输入框！`;
+    if (activeEl && (isInputElement(activeEl) || isTextAreaElement(activeEl))) {
+      if (setNativeValue(activeEl, item.value)) {
+        copyToastMessage.value = `已复制并自动填入当前输入框！`;
+      }
     }
 
     setTimeout(() => {
@@ -1312,4 +1316,3 @@ defineExpose({
     </div>
   </aside>
 </template>
-

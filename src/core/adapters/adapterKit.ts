@@ -234,8 +234,9 @@ export class FillSession {
     if (!el) return this.fail(label, field, `页面未找到匹配控件 (${describeSelector(selector)})`);
 
     try {
-      setNativeValue(el, stringify(value));
-      this.ok(label, field, value);
+      const ok = setNativeValue(el, stringify(value));
+      if (ok) this.ok(label, field, value);
+      else this.fail(label, field, '控件不支持文本写入');
     } catch (err: any) {
       this.fail(label, field, `写入失败: ${err?.message || '未知异常'}`);
     }
@@ -256,8 +257,9 @@ export class FillSession {
     if (!el) return this.fail(label, field, `页面未找到多行文本框 (${describeSelector(selector)})`);
 
     try {
-      setNativeValue(el, stringify(value));
-      this.ok(label, field, value);
+      const ok = setNativeValue(el, stringify(value));
+      if (ok) this.ok(label, field, value);
+      else this.fail(label, field, '控件不支持多行文本写入');
     } catch (err: any) {
       this.fail(label, field, `写入失败: ${err?.message || '未知异常'}`);
     }
@@ -301,8 +303,9 @@ export class FillSession {
     if (!el) return this.fail(label, field, `页面未找到日期控件 (${describeSelector(selector)})`);
 
     try {
-      await fillDatePicker(el, stringify(value));
-      this.ok(label, field, value);
+      const ok = await fillDatePicker(el, stringify(value));
+      if (ok) this.ok(label, field, value);
+      else this.fail(label, field, `日期控件未接受「${stringify(value)}」`);
     } catch (err: any) {
       this.fail(label, field, `日期写入失败: ${err?.message || '未知异常'}`);
     }
@@ -384,9 +387,9 @@ export class FillSession {
 
     try {
       const radio = matched.querySelector<HTMLInputElement>('input[type="radio"]');
-      if (radio) setNativeRadioChecked(radio, true);
-      else matched.click();
-      this.ok(label, field, target);
+      const ok = radio ? setNativeRadioChecked(radio, true) : (matched.click(), true);
+      if (ok) this.ok(label, field, target);
+      else this.fail(label, field, `单选项「${target}」写入结果未确认`);
     } catch (err: any) {
       this.fail(label, field, `单选写入失败: ${err?.message || '未知异常'}`);
     }

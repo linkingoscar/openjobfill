@@ -171,6 +171,11 @@ export default defineContentScript({
     const handleRuntimeMessage = (message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
       if (message.type !== 'TRIGGER_AUTO_FILL') return;
 
+      // tabs.sendMessage 默认会把消息广播给所有 frame。悬浮球只挂在顶层，
+      // 子 frame 若回传“面板尚未准备好”会和顶层响应竞争，导致 popup 偶发显示失败。
+      // 顶层引擎本身会扫描可访问的同源 iframe，因此子 frame 不重复处理。
+      if (window !== window.top) return;
+
       (async () => {
         try {
           // 即使悬浮球未显示，也允许手动触发时临时挂载

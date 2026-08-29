@@ -26,7 +26,7 @@ import { setNativeValue, setNativeRadioChecked } from '../engine/dispatcher';
 import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { fillDatePicker } from '../engine/datepicker';
 import { getValueByPath } from '../../utils/objectPath';
-import { findAssociatedLabelText } from '../../utils/dom';
+import { findAssociatedLabelText, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 
 export interface UnmatchedFieldEntry {
   element: HTMLElement;
@@ -49,12 +49,12 @@ const PERSONAL_SENSITIVE_PREFIXES = ['basics.name', 'basics.phone', 'basics.emai
  * 判断元素是否值得尝试填充（排除按钮、隐藏域、密码、文件等）
  */
 export function isFillableElement(el: HTMLElement): boolean {
-  if (el instanceof HTMLInputElement) {
+  if (isInputElement(el)) {
     const t = (el.type || 'text').toLowerCase();
     return !['hidden', 'submit', 'button', 'reset', 'file', 'password', 'image', 'checkbox'].includes(t);
   }
-  if (el instanceof HTMLTextAreaElement) return true;
-  if (el instanceof HTMLSelectElement) return true;
+  if (isTextAreaElement(el)) return true;
+  if (isSelectElement(el)) return true;
   return el.isContentEditable || ['combobox', 'listbox'].includes(el.getAttribute('role') || '');
 }
 
@@ -107,7 +107,7 @@ function isSafeMapping(el: HTMLElement, resumeKey: string): boolean {
  * 按元素类型执行填充，返回是否成功
  */
 async function fillElement(el: HTMLElement, strValue: string): Promise<boolean> {
-  if (el instanceof HTMLInputElement) {
+  if (isInputElement(el)) {
     if (el.type === 'radio') {
       const labelText = (el.parentElement?.textContent || el.nextSibling?.textContent || '').trim();
       if (el.value === strValue || labelText === strValue || labelText.includes(strValue)) {
@@ -117,19 +117,16 @@ async function fillElement(el: HTMLElement, strValue: string): Promise<boolean> 
       return false;
     }
     if (el.type === 'date' || /date|birth/i.test(el.name || '')) {
-      await fillDatePicker(el, strValue);
-      return true;
+      return await fillDatePicker(el, strValue);
     }
-    setNativeValue(el, strValue);
-    return true;
+    return setNativeValue(el, strValue);
   }
 
-  if (el instanceof HTMLTextAreaElement) {
-    setNativeValue(el, strValue);
-    return true;
+  if (isTextAreaElement(el)) {
+    return setNativeValue(el, strValue);
   }
 
-  if (el instanceof HTMLSelectElement) {
+  if (isSelectElement(el)) {
     return selectCustomOption(el, strValue);
   }
 

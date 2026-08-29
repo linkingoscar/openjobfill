@@ -1,4 +1,4 @@
-import { sleep, isElementVisible } from '../../utils/dom';
+import { sleep, getAllDocumentsAcrossIframes, isElementVisible } from '../../utils/dom';
 import { simulateClick } from './dispatcher';
 import type { SectionRepeaterRule } from '../../types/adapter';
 
@@ -12,7 +12,9 @@ export async function ensureSectionRows(
 ): Promise<HTMLElement[]> {
   if (requiredCount <= 0) return [];
 
-  const container = document.querySelector<HTMLElement>(rule.containerSelector);
+  const container = getAllDocumentsAcrossIframes()
+    .map((doc) => doc.querySelector<HTMLElement>(rule.containerSelector))
+    .find((candidate): candidate is HTMLElement => !!candidate);
   if (!container) return [];
 
   let currentItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(
@@ -23,7 +25,7 @@ export async function ensureSectionRows(
   let attempts = 0;
   while (currentItems.length < requiredCount && attempts < 5) {
     const addBtn = container.querySelector<HTMLElement>(rule.addButtonSelector) ||
-      document.querySelector<HTMLElement>(rule.addButtonSelector);
+      (container.ownerDocument || document).querySelector<HTMLElement>(rule.addButtonSelector);
 
     if (addBtn && isElementVisible(addBtn)) {
       simulateClick(addBtn);
@@ -51,7 +53,9 @@ export async function autoExpandHeuristicSections(
 ): Promise<boolean> {
   if (requiredCount <= 1) return false;
 
-  const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'));
+  const buttons = getAllDocumentsAcrossIframes().flatMap((doc) =>
+    Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
+  );
   const matchAddButtons = buttons.filter(btn => {
     if (!isElementVisible(btn)) return false;
     const text = (btn.textContent || '').trim().toLowerCase();
@@ -77,4 +81,3 @@ export async function autoExpandHeuristicSections(
 
   return false;
 }
-

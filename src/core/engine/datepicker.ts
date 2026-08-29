@@ -1,5 +1,5 @@
 import { setNativeValue, simulateClick } from './dispatcher';
-import { sleep } from '../../utils/dom';
+import { getElementWindow, isInputElement, sleep } from '../../utils/dom';
 
 /**
  * 格式化日期字符串以适配常见 ATS 格式 (YYYY-MM-DD, YYYY-MM, YYYY/MM, YYYY.MM)
@@ -34,26 +34,40 @@ export async function fillDatePicker(
   dateInput: HTMLInputElement,
   rawDate: string
 ): Promise<boolean> {
-  if (!dateInput || !rawDate) return false;
+  if (!dateInput || !rawDate || !isInputElement(dateInput)) return false;
 
-  const formatted = normalizeDate(rawDate);
+  const inputType = (dateInput.type || '').toLowerCase();
+  const isNativeDate = inputType === 'date' || inputType === 'month';
+  // native date/month 只接受 ISO 日期，不能把经历中的“至今”写成无效值。
+  if (isNativeDate && /至今|目前|现在|present/i.test(rawDate.trim())) return false;
+
+  const formatted = normalizeDate(rawDate, inputType === 'month' ? 'YYYY-MM' : 'YYYY-MM-DD');
   const formattedMonthOnly = normalizeDate(rawDate, 'YYYY-MM');
+  const wasReadOnly = dateInput.readOnly;
+  const win = getElementWindow(dateInput) as any;
+  const KeyboardEventClass = win.KeyboardEvent || KeyboardEvent;
 
-  // 1. 如果支持直接赋值（非完全只读或可通过 native setter 写入）
-  let success = setNativeValue(dateInput, formatted);
+  try {
+    // 1. 如果页面有只读属性导致直接填入无效，先尝试临时解除只读并触发。
+    if (dateInput.readOnly) dateInput.readOnly = false;
+    let success = setNativeValue(dateInput, formatted);
+    if (!success && formattedMonthOnly !== formatted) {
+      success = setNativeValue(dateInput, formattedMonthOnly);
+    }
 
-  // 2. 如果页面有只读属性导致直接填入无效，先尝试临时解除只读并触发
-  if (dateInput.readOnly) {
-    dateInput.readOnly = false;
-    success = setNativeValue(dateInput, formatted) || setNativeValue(dateInput, formattedMonthOnly);
+    // 2. 模拟触发一次回车或失焦以触发校验并关闭日期下拉面板
+    dateInput.dispatchEvent(new KeyboardEventClass('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+    dateInput.dispatchEvent(new KeyboardEventClass('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+    await sleep(60);
+
+    // setNativeValue 对 native date 的 setter 即使收到非法字符串也可能返回 true；
+    // 读回值才能确认浏览器真的接受了日期。
+    if (isNativeDate) return success && dateInput.value === formatted;
+    return success;
+  } finally {
+    // 不把页面原本的只读状态永久改掉，避免破坏后续日期选择器交互。
+    if (wasReadOnly) dateInput.readOnly = true;
   }
-
-  // 3. 模拟触发一次回车或失焦以触发校验并关闭日期下拉面板
-  dateInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-  dateInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
-  await sleep(60);
-
-  return success;
 }
 
 /**
@@ -70,10 +84,17 @@ export async function fillDateRangePicker(
   if (inputs.length >= 2) {
     const startInput = inputs[0];
     const endInput = inputs[1];
-    if (startDate) await fillDatePicker(startInput, startDate);
-    if (endDate) await fillDatePicker(endInput, endDate);
-    return true;
+    let attempted = false;
+    let success = true;
+    if (startDate) {
+      attempted = true;
+      success = (await fillDatePicker(startInput, startDate)) && success;
+    }
+    if (endDate) {
+      attempted = true;
+      success = (await fillDatePicker(endInput, endDate)) && success;
+    }
+    return attempted && success;
   }
   return false;
 }
-

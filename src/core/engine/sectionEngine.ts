@@ -1,7 +1,7 @@
 import type { StandardResume } from '../../types/resume';
 import type { PlatformEnhancer } from '../../types/pipeline';
 import { autoExpandHeuristicSections } from './repeater';
-import { isElementVisible, sleep } from '../../utils/dom';
+import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 
 export class SectionEngine {
   /**
@@ -71,16 +71,20 @@ export class SectionEngine {
     enhancer?: PlatformEnhancer | null,
     sectionKey?: 'education' | 'experience' | 'project' | 'family'
   ): number {
+    const documents = getAllDocumentsAcrossIframes();
+
     // 0. 优先尝试 PlatformEnhancer 专属卡片计数配置
     if (enhancer && enhancer.repeaterConfigs && sectionKey && enhancer.repeaterConfigs[sectionKey]) {
       const config = enhancer.repeaterConfigs[sectionKey]!;
       if (config.sectionRoot) {
-        const root = document.querySelector<HTMLElement>(config.sectionRoot);
-        if (root && isElementVisible(root)) {
-          if (config.itemSelector) {
-            const items = Array.from(root.querySelectorAll<HTMLElement>(config.itemSelector)).filter(isElementVisible);
-            if (items.length > 0) {
-              return items.length;
+        for (const doc of documents) {
+          const root = doc.querySelector<HTMLElement>(config.sectionRoot);
+          if (root && isElementVisible(root)) {
+            if (config.itemSelector) {
+              const items = Array.from(root.querySelectorAll<HTMLElement>(config.itemSelector)).filter(isElementVisible);
+              if (items.length > 0) {
+                return items.length;
+              }
             }
           }
         }
@@ -88,15 +92,17 @@ export class SectionEngine {
     }
 
     // 1. 定位模块标题节点
-    const titleCandidates = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        'h1, h2, h3, h4, h5, h6, .section-title, .title, legend, [class*="title"], [class*="header"], .ant-form-item-label'
-      )
-    ).filter((el) => {
-      if (!isElementVisible(el)) return false;
-      const text = (el.textContent || '').trim().toLowerCase();
-      return keywords.some((k) => text.includes(k.toLowerCase()));
-    });
+    const titleCandidates = documents.flatMap((doc) =>
+      Array.from(
+        doc.querySelectorAll<HTMLElement>(
+          'h1, h2, h3, h4, h5, h6, .section-title, .title, legend, [class*="title"], [class*="header"], .ant-form-item-label'
+        )
+      ).filter((el) => {
+        if (!isElementVisible(el)) return false;
+        const text = (el.textContent || '').trim().toLowerCase();
+        return keywords.some((k) => text.includes(k.toLowerCase()));
+      })
+    );
 
     if (titleCandidates.length === 0) {
       return 1;

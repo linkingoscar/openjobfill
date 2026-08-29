@@ -59,13 +59,11 @@ export const dayeeAdapter: SiteAdapter = {
     const findThirdParty = makeFinder({ allowIdentityTerms: true });
 
     const writeText = (el: Element, value: string) => {
-      setNativeValue(el as HTMLInputElement, value);
-      return true;
+      return setNativeValue(el as HTMLInputElement, value);
     };
 
     const writeTextarea = (el: Element, value: string) => {
-      setNativeValue(el as HTMLTextAreaElement, value);
-      return true;
+      return setNativeValue(el as HTMLTextAreaElement, value);
     };
 
     // 1. 基础身份信息
@@ -93,8 +91,7 @@ export const dayeeAdapter: SiteAdapter = {
       'basics.birthDate',
       resume.basics.birthDate,
       async (el, value) => {
-        await fillDatePicker(el as HTMLInputElement, value);
-        return true;
+        return await fillDatePicker(el as HTMLInputElement, value);
       }
     );
 

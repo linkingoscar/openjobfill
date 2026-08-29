@@ -4,7 +4,8 @@ import {
   getElementWindow, 
   isInputElement, 
   isTextAreaElement, 
-  isSelectElement 
+  isSelectElement,
+  isFieldRequired,
 } from '../../utils/dom';
 
 export class PageAnalyzer {
@@ -15,35 +16,62 @@ export class PageAnalyzer {
     const descriptors: FieldDescriptor[] = [];
     const visitedElements = new Set<HTMLElement>();
 
-    // 0. 收集主容器及所有可访问的同源 iframe 页面
+    // 0. 收集主容器及所有可访问的同源 iframe 页面。
+    // ATS 常见「门户 iframe → 表单 iframe」两层甚至多层嵌套，不能只扫描
+    // container 的直接子 iframe；按文档队列递归遍历并去重。
     const documentsToScan: (Document | HTMLElement)[] = [container];
-    try {
-      const iframes = Array.from(container.querySelectorAll<HTMLIFrameElement>('iframe, frame'));
-      for (const iframe of iframes) {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (iframeDoc && iframeDoc.body) {
-            documentsToScan.push(iframeDoc);
-          }
-        } catch {
-          // 跨域 iframe (SecurityError) 静默忽略
-        }
+    const queuedDocuments = new Set<Document>();
+    const queue: (Document | HTMLElement)[] = [container];
+
+    while (queue.length > 0) {
+      const currentRoot = queue.shift()!;
+      const currentDoc = currentRoot.nodeType === 9
+        ? currentRoot as Document
+        : currentRoot.ownerDocument;
+      if (!currentDoc) continue;
+
+      // Document 根节点只需处理一次；HTMLElement 根节点则由调用方限定扫描范围，
+      // 不能为了找 iframe 把整个 ownerDocument 再加入候选。
+      if (currentRoot.nodeType === 9) {
+        if (queuedDocuments.has(currentDoc)) continue;
+        queuedDocuments.add(currentDoc);
       }
-    } catch {}
+
+      try {
+        const iframes = Array.from(currentRoot.querySelectorAll<HTMLIFrameElement>('iframe, frame'));
+        for (const iframe of iframes) {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (iframeDoc && !queuedDocuments.has(iframeDoc)) {
+              documentsToScan.push(iframeDoc);
+              queue.push(iframeDoc);
+            }
+          } catch {
+            // 跨域 iframe (SecurityError) 静默忽略，主文档和其他同源 frame 继续。
+          }
+        }
+      } catch {
+        // 页面切换期间文档可能暂时不可查询，保留已收集的候选。
+      }
+    }
 
     const allCandidateElements: HTMLElement[] = [];
+    const customComponentSelector =
+      '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]';
 
     for (const targetDoc of documentsToScan) {
       try {
         const nativeInputs = Array.from(
           targetDoc.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
         );
-        const customComponents = Array.from(
-          targetDoc.querySelectorAll<HTMLElement>(
-            '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]'
-          )
+        const customComponents = Array.from(targetDoc.querySelectorAll<HTMLElement>(customComponentSelector));
+
+        // 组件库的可搜索下拉通常同时包含一个内部 input。规划阶段只保留
+        // 组件根节点，否则同一个控件会生成两条计划并被重复操作。
+        const standaloneNativeInputs = nativeInputs.filter(
+          (el) => !customComponents.some((component) => component !== el && component.contains(el))
         );
-        allCandidateElements.push(...nativeInputs, ...customComponents);
+        allCandidateElements.push(...standaloneNativeInputs, ...customComponents);
       } catch {}
     }
 
@@ -143,19 +171,7 @@ export class PageAnalyzer {
   }
 
   private detectRequired(el: HTMLElement, labelText: string): boolean {
-    if (el.hasAttribute('required') || el.getAttribute('aria-required') === 'true') {
-      return true;
-    }
-    if (labelText.includes('*') || labelText.includes('必填')) {
-      return true;
-    }
-    const parent = el.closest('.el-form-item, .ant-form-item, .form-item, .form-group');
-    if (parent) {
-      if (parent.classList.contains('is-required') || parent.querySelector('.ant-form-item-required, [class*="required"]')) {
-        return true;
-      }
-    }
-    return false;
+    return isFieldRequired(el, labelText);
   }
 
   private readCurrentValue(el: HTMLElement, type: FieldType): any {
@@ -183,7 +199,7 @@ export class PageAnalyzer {
       const doc = el.ownerDocument || document;
       const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || doc;
       const groupRadios = name
-        ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+        ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
         : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
       if (groupRadios.length > 0) {
         return groupRadios
