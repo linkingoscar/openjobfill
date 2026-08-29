@@ -15,6 +15,7 @@ import {
   GraduationCap,
   Briefcase,
   FolderGit2,
+  Trophy,
   Activity,
   AlertTriangle,
   HelpCircle
@@ -46,11 +47,19 @@ const healthReport = computed(() => {
   if (r.basics.expectedRole) identifiedCount++;
   if (r.basics.currentLocation?.city) identifiedCount++;
   if (r.basics.nativePlace?.city) identifiedCount++;
+  if (r.basics.birthPlace?.city) identifiedCount++;
+  if (r.basics.hobbies) identifiedCount++;
   if (r.basics.selfEvaluation) identifiedCount++;
   identifiedCount += (r.educations?.length || 0) * 3;
   identifiedCount += (r.experiences?.length || 0) * 3;
   identifiedCount += (r.projects?.length || 0) * 2;
   identifiedCount += (r.skills?.length || 0);
+  identifiedCount += (r.languages?.length || 0) * 2;
+  identifiedCount += (r.certificates?.length || 0);
+  identifiedCount += (r.familyMembers?.length || 0) * 3;
+  identifiedCount += (r.awards?.length || 0) * 2;
+  identifiedCount += (r.academicAchievements?.length || 0) * 2;
+  identifiedCount += (r.campusExperiences?.length || 0) * 2;
 
   const missingItems: string[] = [];
   if (!r.basics.gender) missingItems.push('性别');
@@ -60,7 +69,7 @@ const healthReport = computed(() => {
   if (!r.basics.maritalStatus) missingItems.push('婚姻状况');
   if (!r.basics.height) missingItems.push('身高');
   if (!r.basics.expectedSalaryMin) missingItems.push('期望薪资');
-  if (!r.certificates || r.certificates.length === 0) missingItems.push('CET-4/6 英语成绩或证书');
+  if ((!r.certificates || r.certificates.length === 0) && (!r.languages || r.languages.length === 0)) missingItems.push('CET-4/6 英语成绩或证书');
   if (!r.basics.idCardNumber) missingItems.push('身份证号');
 
   const warnings: string[] = [];
@@ -366,6 +375,7 @@ const handleConfirmImport = () => {
                 <div><span class="text-slate-500">邮箱:</span> {{ parsedResume.basics.email || '未提取到' }}</div>
                 <div><span class="text-slate-500">生日:</span> {{ parsedResume.basics.birthDate || '未提取到' }}</div>
                 <div><span class="text-slate-500">政治面貌:</span> {{ parsedResume.basics.politicalStatus }}</div>
+                <div><span class="text-slate-500">出生地:</span> {{ parsedResume.basics.birthPlace?.detail || parsedResume.basics.birthPlace?.city || '未提取到' }}</div>
                 <div class="col-span-2"><span class="text-slate-500">求职意向:</span> {{ parsedResume.basics.expectedRole || '未提取到' }}</div>
               </div>
             </div>
@@ -402,6 +412,21 @@ const handleConfirmImport = () => {
               <div v-if="parsedResume.projects.length === 0" class="text-slate-500 italic">未识别到项目经历</div>
               <div v-for="(proj, idx) in parsedResume.projects" :key="idx" class="text-slate-700 truncate">
                 <span class="font-semibold text-slate-900">{{ proj.projectName }}</span> ({{ proj.role }})
+              </div>
+            </div>
+
+            <div class="col-span-2 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
+                <Trophy class="w-4 h-4 text-orange-600" aria-hidden="true" /> 校招扩展信息
+              </h3>
+              <div class="grid grid-cols-4 gap-2 text-slate-700">
+                <div>家庭成员：<b>{{ parsedResume.familyMembers?.length || 0 }}</b> 条</div>
+                <div>语言成绩：<b>{{ parsedResume.languages?.length || 0 }}</b> 条</div>
+                <div>证书：<b>{{ parsedResume.certificates?.length || 0 }}</b> 条</div>
+                <div>获奖荣誉：<b>{{ parsedResume.awards?.length || 0 }}</b> 条</div>
+                <div>学术成果：<b>{{ parsedResume.academicAchievements?.length || 0 }}</b> 条</div>
+                <div>学生干部：<b>{{ parsedResume.campusExperiences?.length || 0 }}</b> 条</div>
+                <div class="col-span-2 truncate">兴趣爱好：{{ parsedResume.basics.hobbies || '未提取到' }}</div>
               </div>
             </div>
           </div>

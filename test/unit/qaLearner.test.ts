@@ -15,7 +15,7 @@ describe('Smart Profile / QA Learner & Purity Test Suite (资料补全与纯洁�
       expect(EMPTY_RESUME.educations.length).toBe(0);
       expect(EMPTY_RESUME.experiences.length).toBe(0);
       expect(EMPTY_RESUME.projects.length).toBe(0);
-      expect(EMPTY_RESUME.schemaVersion).toBe(3);
+      expect(EMPTY_RESUME.schemaVersion).toBe(4);
     });
 
     it('DEMO_RESUME 保持张三完整演示数据，用于演示测试', () => {

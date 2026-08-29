@@ -118,6 +118,12 @@ const BASE_PERSONAL_FIELDS: FieldSynonymItem[] = [
     keywords: ['籍贯', '生源地', '家乡', '籍贯所在地', 'native place', 'birthplace', 'place of origin'],
   },
   {
+    resumeKey: 'basics.birthPlace.city',
+    name: '出生地',
+    type: 'cascader',
+    keywords: ['出生地', '出生地点', '出生所在地', 'place of birth', 'birth place'],
+  },
+  {
     resumeKey: 'basics.currentLocation.city',
     name: '现居住地 / 居住城市',
     type: 'cascader',
@@ -183,6 +189,12 @@ const BASE_PERSONAL_FIELDS: FieldSynonymItem[] = [
     name: '自我评价 / 个人优势',
     type: 'textarea',
     keywords: ['自我评价', '自我介绍', '个人总结', '关于我', '个人优势', '自我描述', 'self evaluation', 'self assessment', 'about me', 'summary', 'bio'],
+  },
+  {
+    resumeKey: 'basics.hobbies',
+    name: '兴趣爱好 / 个人特长',
+    type: 'textarea',
+    keywords: ['兴趣爱好', '爱好', '个人爱好', '特长', '兴趣及特长', 'hobbies', 'interests'],
   },
 ];
 
@@ -353,6 +365,67 @@ export function generateExperienceDictionary(maxIndex = 4): FieldSynonymItem[] {
         resumeKey: `familyMembers.${i}.phone`,
         name: `联系人电话 ${idxLabel}`.trim(),
         keywords: ['紧急联系人电话', '联系人电话', '家属电话', '亲属电话', 'emergency contact phone'],
+      },
+      {
+        resumeKey: `familyMembers.${i}.company`,
+        name: `家庭成员工作单位 ${idxLabel}`.trim(),
+        keywords: ['家庭成员工作单位', '亲属工作单位', '工作单位及职务', '家属单位', 'family employer'],
+      },
+      {
+        resumeKey: `familyMembers.${i}.jobTitle`,
+        name: `家庭成员职务 ${idxLabel}`.trim(),
+        keywords: ['家庭成员职务', '亲属职务', '家属职位', 'family job title'],
+      },
+      {
+        resumeKey: `familyMembers.${i}.hukouLocation`,
+        name: `家庭成员户籍所在地 ${idxLabel}`.trim(),
+        keywords: ['家庭成员户籍所在地', '亲属户籍', '家属户口所在地', '亲属所在地'],
+      },
+      {
+        resumeKey: `awards.${i}.name`,
+        name: `奖项名称 ${idxLabel}`.trim(),
+        keywords: ['奖项名称', '获奖名称', '荣誉名称', '奖学金名称', 'award name', 'honor'],
+      },
+      {
+        resumeKey: `awards.${i}.issueDate`,
+        name: `获奖时间 ${idxLabel}`.trim(),
+        type: 'date',
+        keywords: ['获奖时间', '授奖时间', '荣誉获得时间', 'award date'],
+      },
+      {
+        resumeKey: `awards.${i}.level`,
+        name: `授奖级别 ${idxLabel}`.trim(),
+        keywords: ['授奖级别', '奖项级别', '获奖级别', '国家级', '省级', '校级'],
+      },
+      {
+        resumeKey: `awards.${i}.grade`,
+        name: `获奖等级 ${idxLabel}`.trim(),
+        keywords: ['获奖等级', '奖项等级', '一等奖', '二等奖', '三等奖', '金奖', '银奖', '铜奖'],
+      },
+      {
+        resumeKey: `academicAchievements.${i}.title`,
+        name: `论文 / 学术成果名称 ${idxLabel}`.trim(),
+        keywords: ['论文名称', '论文题目', '学术成果', '成果名称', 'publication title', 'paper title'],
+      },
+      {
+        resumeKey: `academicAchievements.${i}.venue`,
+        name: `会议 / 期刊名称 ${idxLabel}`.trim(),
+        keywords: ['会议名称', '期刊名称', '发表刊物', 'conference', 'journal'],
+      },
+      {
+        resumeKey: `academicAchievements.${i}.authorOrder`,
+        name: `作者排序 ${idxLabel}`.trim(),
+        keywords: ['作者排序', '第几作者', '作者位次', 'author order'],
+      },
+      {
+        resumeKey: `campusExperiences.${i}.organization`,
+        name: `学生组织 / 校内单位 ${idxLabel}`.trim(),
+        keywords: ['学生组织', '校内单位', '社团名称', '组织名称', '班级名称', 'campus organization'],
+      },
+      {
+        resumeKey: `campusExperiences.${i}.title`,
+        name: `学生干部职务 ${idxLabel}`.trim(),
+        keywords: ['学生干部职务', '担任职务', '学生职务', '社团职务', 'campus title'],
       }
     );
   }
@@ -364,4 +437,3 @@ export const RESUME_DICTIONARY: FieldSynonymItem[] = [
   ...BASE_PERSONAL_FIELDS,
   ...generateExperienceDictionary(4),
 ];
-

@@ -58,7 +58,7 @@ describe('SimilarityEngine (语义相似度与混合距离计算引擎)', () => 
 
     it('政企/银行生僻字段应能准确命中', () => {
       expect(calculateSemanticSimilarity('生源地所在地', 'basics.nativePlace.city')).toBeGreaterThanOrEqual(0.9);
-      expect(calculateSemanticSimilarity('户口所在地', 'basics.nativePlace.city')).toBeGreaterThanOrEqual(0.9);
+      expect(calculateSemanticSimilarity('户口所在地', 'basics.hukouLocation.city')).toBeGreaterThanOrEqual(0.9);
       expect(calculateSemanticSimilarity('常住城市', 'basics.currentLocation.city')).toBeGreaterThanOrEqual(0.9);
       expect(calculateSemanticSimilarity('税前期望薪资', 'basics.expectedSalaryMin')).toBeGreaterThanOrEqual(0.9);
     });

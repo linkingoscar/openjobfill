@@ -29,7 +29,7 @@ const GOLD_STANDARD_BENCHMARK_DATASET: BenchmarkTestCase[] = [
   { label: '政治面貌 (中共党员/共青团员/群众)', expectedResumeKey: 'basics.politicalStatus', category: 'basics' },
   { label: '民族类别', expectedResumeKey: 'basics.ethnicity', category: 'basics' },
   { label: '生源地所在省市', expectedResumeKey: 'basics.nativePlace.city', category: 'basics' },
-  { label: '户籍所在地 (非现住址)', expectedResumeKey: 'basics.nativePlace.city', category: 'basics' },
+  { label: '户籍所在地 (非现住址)', expectedResumeKey: 'basics.hukouLocation.city', category: 'basics' },
   { label: '目前常住城市', expectedResumeKey: 'basics.currentLocation.city', category: 'basics' },
   { label: '税前期望月薪 (元/月)', expectedResumeKey: 'basics.expectedSalaryMin', category: 'basics' },
   { label: '意向应聘岗位', expectedResumeKey: 'basics.expectedRole', category: 'basics' },

@@ -6,7 +6,7 @@ export const EMPTY_RESUME: StandardResume = {
   isDefault: true,
   createdAt: Date.now(),
   updatedAt: Date.now(),
-  schemaVersion: 3,
+  schemaVersion: 4,
   basics: {
     name: '',
     firstName: '',
@@ -32,6 +32,7 @@ export const EMPTY_RESUME: StandardResume = {
     addressLine1: '',
     addressLine2: '',
     nativePlace: { province: '', city: '', district: '', detail: '' },
+    birthPlace: { province: '', city: '', district: '', detail: '' },
     currentLocation: { province: '', city: '', district: '', detail: '' },
     hukouLocation: { province: '', city: '', district: '', detail: '' },
     workingYears: 0,
@@ -43,6 +44,7 @@ export const EMPTY_RESUME: StandardResume = {
     blogUrl: '',
     portfolioUrl: '',
     selfEvaluation: '',
+    hobbies: '',
   },
   educations: [],
   experiences: [],
@@ -51,6 +53,9 @@ export const EMPTY_RESUME: StandardResume = {
   languages: [],
   certificates: [],
   familyMembers: [],
+  awards: [],
+  academicAchievements: [],
+  campusExperiences: [],
   qaBank: [],
 };
 
@@ -60,7 +65,7 @@ export const DEMO_RESUME: StandardResume = {
   isDefault: true,
   createdAt: Date.now(),
   updatedAt: Date.now(),
-  schemaVersion: 3,
+  schemaVersion: 4,
   basics: {
     name: '张三',
     gender: '男',

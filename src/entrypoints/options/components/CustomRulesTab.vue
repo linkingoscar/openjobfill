@@ -43,6 +43,8 @@ const RESUME_KEY_OPTIONS = [
     { label: '婚姻状况', value: 'basics.maritalStatus' },
     { label: '现居城市', value: 'basics.currentLocation.city' },
     { label: '籍贯', value: 'basics.nativePlace.city' },
+    { label: '出生地', value: 'basics.birthPlace.city' },
+    { label: '兴趣爱好 / 特长', value: 'basics.hobbies' },
     { label: '期望职位', value: 'basics.expectedRole' },
     { label: '期望城市', value: 'basics.expectedCity' },
     { label: '期望薪资', value: 'basics.expectedSalaryMin' },
@@ -71,6 +73,18 @@ const RESUME_KEY_OPTIONS = [
     { label: '担任角色', value: 'projects.0.role' },
     { label: '技术栈', value: 'projects.0.techStack' },
     { label: '项目描述', value: 'projects.0.description' }
+  ]},
+  { group: '成果荣誉与校园经历 (第1段)', options: [
+    { label: '获奖名称', value: 'awards.0.name' },
+    { label: '获奖级别', value: 'awards.0.level' },
+    { label: '论文 / 成果标题', value: 'academicAchievements.0.title' },
+    { label: '会议 / 期刊', value: 'academicAchievements.0.venue' },
+    { label: '校园组织', value: 'campusExperiences.0.organization' },
+    { label: '校园职务', value: 'campusExperiences.0.title' },
+    { label: '家庭成员姓名', value: 'familyMembers.0.name' },
+    { label: '家庭成员关系', value: 'familyMembers.0.relation' },
+    { label: '家庭成员工作单位', value: 'familyMembers.0.company' },
+    { label: '家庭成员户籍', value: 'familyMembers.0.hukouLocation' }
   ]}
 ];
 

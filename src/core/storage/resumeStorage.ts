@@ -18,7 +18,7 @@ function sanitizeResume(data: Partial<StandardResume> | null | undefined): Stand
     id: data.id || ('resume-' + Date.now()),
     title: data.title || '我的求职档案',
     isDefault: Boolean(data.isDefault),
-    schemaVersion: 3,
+    schemaVersion: 4,
     createdAt: Number(data.createdAt) || Date.now(),
     updatedAt: Number(data.updatedAt) || Date.now(),
     basics: {
@@ -32,6 +32,10 @@ function sanitizeResume(data: Partial<StandardResume> | null | undefined): Stand
         ...(base.basics.nativePlace || {}),
         ...(data.basics?.nativePlace || {}),
       },
+      birthPlace: {
+        ...(base.basics.birthPlace || {}),
+        ...(data.basics?.birthPlace || {}),
+      },
       hukouLocation: {
         ...(base.basics.hukouLocation || {}),
         ...(data.basics?.hukouLocation || {}),
@@ -44,6 +48,9 @@ function sanitizeResume(data: Partial<StandardResume> | null | undefined): Stand
     skills: Array.isArray(data.skills) ? data.skills : [],
     certificates: Array.isArray(data.certificates) ? data.certificates : [],
     familyMembers: Array.isArray(data.familyMembers) ? data.familyMembers : [],
+    awards: Array.isArray(data.awards) ? data.awards : [],
+    academicAchievements: Array.isArray(data.academicAchievements) ? data.academicAchievements : [],
+    campusExperiences: Array.isArray(data.campusExperiences) ? data.campusExperiences : [],
     qaBank: Array.isArray(data.qaBank) ? data.qaBank.map(item => ({
       ...item,
       scope: item.scope || (item.domain ? 'domain' : 'global'),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { StandardResume, FamilyMember, CertificateItem, LanguageProficiency } from '@/types/resume';
-import { Plus, Trash2, ShieldCheck, Heart, MapPin, DollarSign, Award, Users } from 'lucide-vue-next';
+import { Plus, Trash2, MapPin, DollarSign, Award, Users, Trophy, BookOpen, Landmark } from 'lucide-vue-next';
 
 const props = defineProps<{
   resume: StandardResume;
@@ -13,6 +13,9 @@ if (!props.resume.basics.hukouLocation) {
 if (!props.resume.basics.nativePlace) {
   props.resume.basics.nativePlace = { province: '', city: '', district: '', detail: '' };
 }
+if (!props.resume.basics.birthPlace) {
+  props.resume.basics.birthPlace = { province: '', city: '', district: '', detail: '' };
+}
 if (!props.resume.familyMembers) {
   props.resume.familyMembers = [];
 }
@@ -22,6 +25,9 @@ if (!props.resume.certificates) {
 if (!props.resume.languages) {
   props.resume.languages = [];
 }
+if (!props.resume.awards) props.resume.awards = [];
+if (!props.resume.academicAchievements) props.resume.academicAchievements = [];
+if (!props.resume.campusExperiences) props.resume.campusExperiences = [];
 
 const addFamilyMember = () => {
   props.resume.familyMembers.push({
@@ -64,6 +70,15 @@ const addLanguage = () => {
 const removeLanguage = (index: number) => {
   props.resume.languages.splice(index, 1);
 };
+
+const addAward = () => props.resume.awards!.push({ id: 'award-' + Date.now(), name: '' });
+const removeAward = (index: number) => props.resume.awards!.splice(index, 1);
+const addAcademicAchievement = () => props.resume.academicAchievements!.push({ id: 'academic-' + Date.now(), title: '' });
+const removeAcademicAchievement = (index: number) => props.resume.academicAchievements!.splice(index, 1);
+const addCampusExperience = () => props.resume.campusExperiences!.push({
+  id: 'campus-' + Date.now(), organization: '', title: '', startDate: '', endDate: '', description: '', responsibility: '',
+});
+const removeCampusExperience = (index: number) => props.resume.campusExperiences!.splice(index, 1);
 </script>
 
 <template>
@@ -92,6 +107,16 @@ const removeLanguage = (index: number) => {
             v-model="resume.basics.nativePlace!.detail"
             type="text"
             placeholder="如：山东省济南市"
+            class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+          />
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">出生地</label>
+          <input
+            v-model="resume.basics.birthPlace!.detail"
+            type="text"
+            placeholder="如：辽宁省辽阳市"
             class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
           />
         </div>
@@ -140,6 +165,16 @@ const removeLanguage = (index: number) => {
             <option value="已婚">已婚</option>
             <option value="保密">保密</option>
           </select>
+        </div>
+
+        <div class="col-span-3">
+          <label class="block font-semibold text-slate-700 mb-1">兴趣爱好 / 个人特长</label>
+          <textarea
+            v-model="resume.basics.hobbies"
+            rows="2"
+            placeholder="如：羽毛球、摄影、长跑；也可填写个人特长"
+            class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden resize-y"
+          ></textarea>
         </div>
       </div>
     </div>
@@ -327,7 +362,7 @@ const removeLanguage = (index: number) => {
               <Trash2 class="w-3.5 h-3.5" />
             </button>
           </div>
-          <div class="grid grid-cols-5 gap-3">
+          <div class="grid grid-cols-6 gap-3">
             <div>
               <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">关系</label>
               <input
@@ -373,6 +408,15 @@ const removeLanguage = (index: number) => {
                 class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
               />
             </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">户籍所在地</label>
+              <input
+                v-model="fam.hukouLocation"
+                type="text"
+                placeholder="如：辽宁省辽阳市"
+                class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -380,6 +424,87 @@ const removeLanguage = (index: number) => {
       <div v-else class="text-center py-4 text-slate-400">
         暂无家庭成员记录，如遇银行或央国企网申，可提前添加父母或配偶信息以便自动填表
       </div>
+    </div>
+
+    <!-- 5. 获奖与荣誉 -->
+    <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+        <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
+          <Trophy class="w-4 h-4 text-orange-600" />
+          <span>获奖、奖学金与荣誉称号</span>
+        </div>
+        <button type="button" @click="addAward" class="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg font-bold flex items-center gap-1">
+          <Plus class="w-3.5 h-3.5" /> 增加奖项
+        </button>
+      </div>
+      <div v-for="(awardItem, i) in resume.awards" :key="awardItem.id" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+        <div class="flex items-center gap-2">
+          <input v-model="awardItem.name" type="text" placeholder="奖项 / 奖学金 / 荣誉名称" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="awardItem.issueDate" type="text" placeholder="获奖时间" class="w-32 px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <button type="button" @click="removeAward(i)" class="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 class="w-4 h-4" /></button>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <input v-model="awardItem.level" type="text" placeholder="授奖级别：国家级 / 省级 / 校级" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="awardItem.grade" type="text" placeholder="获奖等级：一等奖 / 铜奖" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="awardItem.role" type="text" placeholder="项目角色（可选）" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+        </div>
+        <textarea v-model="awardItem.description" rows="2" placeholder="获奖说明（可选）" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg resize-y"></textarea>
+      </div>
+      <div v-if="!resume.awards?.length" class="text-center py-3 text-slate-400">暂无奖项记录</div>
+    </div>
+
+    <!-- 6. 学术成果 -->
+    <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+        <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
+          <BookOpen class="w-4 h-4 text-violet-600" />
+          <span>论文、会议与学术成果</span>
+        </div>
+        <button type="button" @click="addAcademicAchievement" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold flex items-center gap-1">
+          <Plus class="w-3.5 h-3.5" /> 增加成果
+        </button>
+      </div>
+      <div v-for="(academic, i) in resume.academicAchievements" :key="academic.id" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+        <div class="flex items-center gap-2">
+          <input v-model="academic.title" type="text" placeholder="论文 / 成果名称" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <button type="button" @click="removeAcademicAchievement(i)" class="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 class="w-4 h-4" /></button>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <input v-model="academic.venue" type="text" placeholder="会议 / 期刊名称" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="academic.authorOrder" type="text" placeholder="作者排序" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="academic.date" type="text" placeholder="发表 / 参会时间" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+        </div>
+        <input v-model="academic.url" type="url" placeholder="论文 / 成果链接" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+        <textarea v-model="academic.abstract" rows="2" placeholder="摘要（可选）" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg resize-y"></textarea>
+      </div>
+      <div v-if="!resume.academicAchievements?.length" class="text-center py-3 text-slate-400">暂无学术成果记录</div>
+    </div>
+
+    <!-- 7. 学生干部经历 -->
+    <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+        <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
+          <Landmark class="w-4 h-4 text-cyan-700" />
+          <span>学生干部与校内任职经历</span>
+        </div>
+        <button type="button" @click="addCampusExperience" class="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg font-bold flex items-center gap-1">
+          <Plus class="w-3.5 h-3.5" /> 增加经历
+        </button>
+      </div>
+      <div v-for="(campus, i) in resume.campusExperiences" :key="campus.id" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+        <div class="flex items-center gap-2">
+          <input v-model="campus.organization" type="text" placeholder="学校 / 班级 / 学生组织" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="campus.title" type="text" placeholder="担任职务" class="w-52 px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <button type="button" @click="removeCampusExperience(i)" class="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 class="w-4 h-4" /></button>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <input v-model="campus.startDate" type="text" placeholder="开始时间，如 2024-09" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+          <input v-model="campus.endDate" type="text" placeholder="结束时间或至今" class="px-2.5 py-1.5 border border-slate-200 rounded-lg" />
+        </div>
+        <textarea v-model="campus.description" rows="2" placeholder="经历描述" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg resize-y"></textarea>
+        <textarea v-model="campus.responsibility" rows="2" placeholder="主要职责" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg resize-y"></textarea>
+      </div>
+      <div v-if="!resume.campusExperiences?.length" class="text-center py-3 text-slate-400">暂无学生干部经历</div>
     </div>
   </div>
 </template>

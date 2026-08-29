@@ -93,9 +93,11 @@ const AVAILABLE_BINDING_FIELDS = [
     { label: '体重 (kg)', value: 'basics.weight' },
     { label: '健康状况', value: 'basics.healthStatus' },
     { label: '籍贯 / 生源地', value: 'basics.nativePlace.detail' },
+    { label: '出生地', value: 'basics.birthPlace.detail' },
     { label: '户籍 / 户口所在地', value: 'basics.hukouLocation.detail' },
     { label: '现居城市', value: 'basics.currentLocation.city' },
     { label: '现居详细地址', value: 'basics.currentLocation.detail' },
+    { label: '兴趣爱好 / 特长', value: 'basics.hobbies' },
   ]},
   { group: '求职与意向', options: [
     { label: '期望岗位', value: 'basics.expectedRole' },
@@ -123,6 +125,16 @@ const AVAILABLE_BINDING_FIELDS = [
     { label: '工作描述', value: 'experiences.0.description' },
     { label: '入职时间', value: 'experiences.0.startDate' },
     { label: '离职时间', value: 'experiences.0.endDate' },
+  ]},
+  { group: '成果与校园经历 (第一段)', options: [
+    { label: '获奖名称', value: 'awards.0.name' },
+    { label: '获奖级别', value: 'awards.0.level' },
+    { label: '论文 / 成果标题', value: 'academicAchievements.0.title' },
+    { label: '会议 / 期刊', value: 'academicAchievements.0.venue' },
+    { label: '校园组织', value: 'campusExperiences.0.organization' },
+    { label: '校园职务', value: 'campusExperiences.0.title' },
+    { label: '家庭成员姓名', value: 'familyMembers.0.name' },
+    { label: '家庭成员关系', value: 'familyMembers.0.relation' },
   ]},
 ];
 
@@ -384,7 +396,7 @@ const toggleDrawer = async () => {
 // 提取结构化简历平铺字段 (供速查剪贴板使用)
 interface ClipboardItem {
   id: string;
-  category: '基本信息' | '教育经历' | '工作实习' | '项目经历' | '技能证书' | '家庭成员' | '问答与评价';
+  category: '基本信息' | '教育经历' | '工作实习' | '项目经历' | '技能证书' | '家庭成员' | '成果荣誉' | '校园经历' | '问答与评价';
   label: string;
   value: string;
 }
@@ -406,12 +418,14 @@ const flatResumeFields = computed<ClipboardItem[]>(() => {
   if (r.basics.maritalStatus) list.push({ id: 'b-marital', category: '基本信息', label: '婚姻状况', value: r.basics.maritalStatus });
   if (r.basics.currentLocation?.city) list.push({ id: 'b-city', category: '基本信息', label: '现居城市', value: r.basics.currentLocation.city });
   if (r.basics.nativePlace?.city) list.push({ id: 'b-native', category: '基本信息', label: '籍贯', value: r.basics.nativePlace.city });
+  if (r.basics.birthPlace?.city) list.push({ id: 'b-birth-place', category: '基本信息', label: '出生地', value: r.basics.birthPlace.city });
   if (r.basics.expectedRole) list.push({ id: 'b-role', category: '基本信息', label: '期望职位', value: r.basics.expectedRole });
   if (r.basics.expectedCity) list.push({ id: 'b-exp-city', category: '基本信息', label: '期望工作城市', value: r.basics.expectedCity });
   if (r.basics.expectedSalaryMin) list.push({ id: 'b-salary', category: '基本信息', label: '期望月薪(k)', value: `${r.basics.expectedSalaryMin}k` });
   if (r.basics.githubUrl) list.push({ id: 'b-github', category: '基本信息', label: 'GitHub', value: r.basics.githubUrl });
   if (r.basics.linkedinUrl) list.push({ id: 'b-linkedin', category: '基本信息', label: 'LinkedIn', value: r.basics.linkedinUrl });
   if (r.basics.blogUrl) list.push({ id: 'b-blog', category: '基本信息', label: '个人网站/博客', value: r.basics.blogUrl });
+  if (r.basics.hobbies) list.push({ id: 'b-hobbies', category: '基本信息', label: '兴趣爱好 / 特长', value: r.basics.hobbies });
 
   // 教育经历 (支持所有段)
   r.educations?.forEach((edu, idx) => {
@@ -445,7 +459,7 @@ const flatResumeFields = computed<ClipboardItem[]>(() => {
 
   // 技能与证书
   r.skills?.forEach((skill, idx) => {
-    if (skill.name) list.push({ id: `skill-${idx}`, category: '技能证书', label: `专业技能: ${skill.name}`, value: `${skill.name} (${skill.level || '熟练'})` });
+    if (skill.name) list.push({ id: `skill-${idx}`, category: '技能证书', label: `专业技能: ${skill.name}`, value: skill.level ? `${skill.name} (${skill.level})` : skill.name });
   });
   r.languages?.forEach((lang, idx) => {
     if (lang.score || lang.language) list.push({ id: `lang-${idx}`, category: '技能证书', label: `${lang.language || '外语'}成绩`, value: `${lang.certificateName || ''} ${lang.score || ''}`.trim() });
@@ -459,6 +473,18 @@ const flatResumeFields = computed<ClipboardItem[]>(() => {
     const prefix = `[联系人${idx + 1}] `;
     if (fm.name) list.push({ id: `fm-${idx}-name`, category: '家庭成员', label: `${prefix}姓名 (${fm.relation})`, value: fm.name });
     if (fm.phone) list.push({ id: `fm-${idx}-phone`, category: '家庭成员', label: `${prefix}联系电话`, value: fm.phone });
+    if (fm.company) list.push({ id: `fm-${idx}-company`, category: '家庭成员', label: `${prefix}工作单位`, value: fm.company });
+    if (fm.hukouLocation) list.push({ id: `fm-${idx}-hukou`, category: '家庭成员', label: `${prefix}户籍所在地`, value: fm.hukouLocation });
+  });
+
+  r.awards?.forEach((award, idx) => {
+    if (award.name) list.push({ id: `award-${idx}`, category: '成果荣誉', label: `奖项 ${idx + 1}`, value: award.name });
+  });
+  r.academicAchievements?.forEach((achievement, idx) => {
+    if (achievement.title) list.push({ id: `academic-${idx}`, category: '成果荣誉', label: `学术成果 ${idx + 1}`, value: achievement.title });
+  });
+  r.campusExperiences?.forEach((campus, idx) => {
+    if (campus.organization) list.push({ id: `campus-${idx}`, category: '校园经历', label: `${campus.organization} · ${campus.title}`, value: campus.description || campus.responsibility || campus.title });
   });
 
   // 问答与自我评价

@@ -50,10 +50,12 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
   push('basics.ethnicity', '民族', b.ethnicity);
   push('basics.maritalStatus', '婚姻状况', b.maritalStatus);
   push('basics.nativePlace.city', '籍贯', b.nativePlace?.city);
+  push('basics.birthPlace.city', '出生地', b.birthPlace?.city);
   push('basics.currentLocation.city', '现居城市', b.currentLocation?.city);
   push('basics.expectedRole', '期望职位', b.expectedRole);
   push('basics.expectedSalaryMin', '期望薪资', b.expectedSalaryMin);
   push('basics.selfEvaluation', '自我评价', b.selfEvaluation);
+  push('basics.hobbies', '兴趣爱好', b.hobbies);
   push('basics.githubUrl', 'GitHub', b.githubUrl);
   push('basics.linkedinUrl', 'LinkedIn', b.linkedinUrl);
   push('basics.postalCode', '邮政编码', b.postalCode);
@@ -77,6 +79,34 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
     const n = i + 1;
     push(`projects.${i}.projectName`, `项目名称(${n})`, proj.projectName);
     push(`projects.${i}.role`, `项目角色(${n})`, proj.role);
+  });
+
+  resume.languages?.forEach((language, i) => {
+    push(`languages.${i}.score`, `${language.certificateName || language.language}成绩`, language.score);
+  });
+  resume.certificates?.forEach((certificate, i) => {
+    push(`certificates.${i}.name`, `证书(${i + 1})`, certificate.name);
+  });
+  resume.familyMembers?.forEach((member, i) => {
+    push(`familyMembers.${i}.name`, `家庭成员姓名(${i + 1})`, member.name);
+    push(`familyMembers.${i}.relation`, `家庭成员关系(${i + 1})`, member.relation);
+    push(`familyMembers.${i}.company`, `家庭成员单位(${i + 1})`, member.company);
+    push(`familyMembers.${i}.phone`, `家庭成员电话(${i + 1})`, member.phone);
+    push(`familyMembers.${i}.hukouLocation`, `家庭成员户籍(${i + 1})`, member.hukouLocation);
+  });
+  resume.awards?.forEach((award, i) => {
+    push(`awards.${i}.name`, `奖项名称(${i + 1})`, award.name);
+    push(`awards.${i}.level`, `授奖级别(${i + 1})`, award.level);
+    push(`awards.${i}.grade`, `获奖等级(${i + 1})`, award.grade);
+  });
+  resume.academicAchievements?.forEach((achievement, i) => {
+    push(`academicAchievements.${i}.title`, `学术成果(${i + 1})`, achievement.title);
+    push(`academicAchievements.${i}.venue`, `会议/期刊(${i + 1})`, achievement.venue);
+    push(`academicAchievements.${i}.authorOrder`, `作者排序(${i + 1})`, achievement.authorOrder);
+  });
+  resume.campusExperiences?.forEach((campus, i) => {
+    push(`campusExperiences.${i}.organization`, `学生组织(${i + 1})`, campus.organization);
+    push(`campusExperiences.${i}.title`, `学生干部职务(${i + 1})`, campus.title);
   });
 
   resume.qaBank?.forEach((qa) => {

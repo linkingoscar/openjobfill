@@ -88,6 +88,40 @@ export interface FamilyMember {
   jobTitle?: string;
   phone?: string;
   politicalStatus?: string;
+  hukouLocation?: string; // 户籍所在地 / 常住地
+}
+
+/** 校招网申中常见的奖项、奖学金与荣誉称号。 */
+export interface AwardItem {
+  id: string;
+  name: string;
+  issueDate?: string;
+  level?: string; // 国家级 / 省级 / 校级等
+  grade?: string; // 一等奖 / 铜奖 / 荣誉称号等
+  role?: string;
+  description?: string;
+}
+
+/** 论文、会议报告及其他学术成果。 */
+export interface AcademicAchievement {
+  id: string;
+  title: string;
+  venue?: string;
+  authorOrder?: string;
+  url?: string;
+  date?: string;
+  abstract?: string;
+}
+
+/** 学生干部、学生组织及校内任职经历。 */
+export interface CampusExperience {
+  id: string;
+  organization: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description?: string;
+  responsibility?: string;
 }
 
 export interface CustomQABankItem {
@@ -126,6 +160,7 @@ export interface ResumeBasics {
   addressLine1?: string; // 街道地址第一行
   addressLine2?: string; // 街道地址第二行
   nativePlace?: LocationInfo; // 籍贯 (省-市-区)
+  birthPlace?: LocationInfo; // 出生地
   currentLocation?: LocationInfo; // 现居住地 (省-市-区)
   hukouLocation?: LocationInfo; // 户口所在地
   
@@ -152,6 +187,7 @@ export interface ResumeBasics {
   
   // 自我评价
   selfEvaluation?: string;
+  hobbies?: string; // 兴趣爱好 / 个人特长
 }
 
 export interface StandardResume {
@@ -160,7 +196,7 @@ export interface StandardResume {
   isDefault: boolean;
   createdAt: number;
   updatedAt: number;
-  schemaVersion?: number; // 架构版本号，默认 3
+  schemaVersion?: number; // 架构版本号，当前为 4
   
   basics: ResumeBasics;
   educations: EducationExperience[];
@@ -170,5 +206,8 @@ export interface StandardResume {
   skills: SkillItem[];
   certificates: CertificateItem[];
   familyMembers: FamilyMember[];
+  awards?: AwardItem[];
+  academicAchievements?: AcademicAchievement[];
+  campusExperiences?: CampusExperience[];
   qaBank: CustomQABankItem[];
 }

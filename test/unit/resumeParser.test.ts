@@ -142,4 +142,113 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
     expect(withIdResume.basics.idCardNumber).toBe('110101199501011234');
     expect(withIdResume.basics.idCardType).toBe('身份证');
   });
+
+  it('应兼容 Word 转 Markdown 的转义、表格展平和项目内混排校园经历', () => {
+    const wordMarkdown = `
+__个人信息__
+
+姓名：测试姓名
+性别：女
+籍贯：辽宁辽阳
+出生地：辽宁辽阳
+现居住地：辽宁沈阳
+四六级成绩：CET4：477          CET6：492
+硕士绩点：92\\.18
+家庭成员及主要社会关系：
+姓名
+与本人关系
+工作单位及职务
+户籍所在地
+电话
+测试母亲
+母女
+某单位职员
+辽宁省辽阳市
+13700000001
+
+__联系方式__
+电话：15600000002
+邮箱：[test@example\\.com](mailto:test@example.com)
+
+__教育经历__
+硕士\\-测试大学\\-2024\\.09\\-2027\\.06\\-国际商务\\-统招全日制
+主要课程：计量经济学、战略管理。
+本科\\-示例大学\\-2020\\.09\\-2024\\.06\\-市场营销\\-统招全日制
+
+__实习经历__
+__示例公司__
+人力资源实习生
+2024\\.06\\-2024\\.09
+1\\. 分类记录候选人基本信息、求职意向及匹配情况。
+
+__项目经历__
+__1\\. 用户研究项目__
+- __项目起止时间__：2025\\.03—2025年内
+- __项目角色__：项目成员
+- __项目描述__：完成用户访谈与资料分析。
+- __个人职责__：整理访谈信息并输出报告。
+
+__2\\. 流程优化项目__
+- __项目起止时间__：2024\\.03—2024\\.09
+- __项目角色__：负责人
+- __项目描述__：优化业务流程。
+
+__3\\. 测试大学研究生会  学术部部长__
+2024\\.10—2026\\.07
+负责学术活动组织。
+
+__学术成果__
+论文题目：Responsible AI Disclosure and Trust
+会议/期刊：示例学术会议
+作者顺序：第二作者
+
+__奖项荣誉__
+1\\. 全国大学生创新大赛铜奖
+获奖时间：2025\\.08
+奖项级别：国家级
+
+__学生干部经历__
+__测试大学2024级国际商务班__
+班长
+2024\\.09—至今
+负责班级日常管理。
+
+__证书及专业技能__
+技能：Office、SPSS、Stata
+证书：普通话二级甲等、全国计算机二级
+兴趣爱好：羽毛球
+`;
+
+    const resume = parseResumeFromText(wordMarkdown, '匿名校招信息库.docx');
+
+    expect(resume.basics.name).toBe('测试姓名');
+    expect(resume.basics.phone).toBe('15600000002');
+    expect(resume.basics.email).toBe('test@example.com');
+    expect(resume.basics.birthPlace?.city).toBe('辽宁辽阳');
+    expect(resume.basics.expectedRole).toBe('');
+    expect(resume.basics.hobbies).toBe('羽毛球');
+
+    expect(resume.educations).toHaveLength(2);
+    expect(resume.educations[0]).toMatchObject({
+      schoolName: '测试大学', degree: '硕士', startDate: '2024-09', endDate: '2027-06', gpa: '92.18',
+    });
+    expect(resume.educations[0].courses).toContain('计量经济学');
+    expect(resume.experiences).toHaveLength(1);
+    expect(resume.experiences[0].description).toContain('求职意向及匹配情况');
+
+    expect(resume.projects).toHaveLength(2);
+    expect(resume.projects[0]).toMatchObject({ projectName: '用户研究项目', startDate: '2025-03', endDate: '2025' });
+    expect(resume.projects.map(project => project.projectName)).not.toContain('10—2026.07');
+
+    expect(resume.languages.map(item => [item.certificateName, item.score])).toEqual([
+      ['CET-4', '477'],
+      ['CET-6', '492'],
+    ]);
+    expect(resume.familyMembers).toHaveLength(1);
+    expect(resume.familyMembers[0]).toMatchObject({ relation: '母亲', hukouLocation: '辽宁省辽阳市' });
+    expect(resume.awards).toHaveLength(1);
+    expect(resume.academicAchievements).toHaveLength(1);
+    expect(resume.campusExperiences).toHaveLength(1);
+    expect(resume.certificates.map(item => item.name)).toContain('全国计算机二级');
+  });
 });
