@@ -221,6 +221,35 @@ export function getAllDocumentsAcrossIframes(rootDocument?: Document): Document[
 }
 
 /**
+ * 收集给定根节点及其内部所有可访问的 open ShadowRoot。
+ * closed shadow root 受浏览器封装边界限制，内容脚本无法通用穿透。
+ */
+export function getAllOpenRoots(root: Document | ShadowRoot | HTMLElement): ParentNode[] {
+  const roots: ParentNode[] = [root];
+  const visited = new Set<ShadowRoot>();
+  const queue: ParentNode[] = [root];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    let elements: Element[] = [];
+    try {
+      elements = Array.from(current.querySelectorAll('*'));
+    } catch {}
+
+    for (const element of elements) {
+      const shadow = element.shadowRoot;
+      if (shadow && !visited.has(shadow)) {
+        visited.add(shadow);
+        roots.push(shadow);
+        queue.push(shadow);
+      }
+    }
+  }
+
+  return roots;
+}
+
+/**
  * 获取主页面以及同源 Iframe 内的所有候选表单元素 (针对国企/大易/北森等 iframe 嵌套场景)
  */
 export function getAllFormElementsAcrossIframes(

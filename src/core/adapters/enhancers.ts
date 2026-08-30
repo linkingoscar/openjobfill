@@ -1,5 +1,4 @@
 import type { PlatformEnhancer } from '../../types/pipeline';
-import { autoExpandHeuristicSections } from '../engine/repeater';
 
 export const mokaEnhancer: PlatformEnhancer = {
   id: 'moka-enhancer',

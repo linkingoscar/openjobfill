@@ -1,5 +1,5 @@
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
-import { setNativeValue, setNativeRadioChecked, setRadioGroupValue, setNativeCheckboxChecked, simulateClick } from '../engine/dispatcher';
+import { setNativeValue, setRadioGroupValue, setNativeCheckboxChecked, setCustomCheckboxChecked } from '../engine/dispatcher';
 import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 import { locationResolver } from '../resolvers/locationResolver';
@@ -128,8 +128,7 @@ export class RetryLadder {
               if (isInputElement(field.element)) {
                 return setNativeCheckboxChecked(field.element, val);
               }
-              simulateClick(field.element);
-              return true;
+              return setCustomCheckboxChecked(field.element, val);
             },
           },
         ];
@@ -145,6 +144,23 @@ export class RetryLadder {
           {
             name: 'Native Prototype Date String Setter Fallback',
             execute: (field, val) => setNativeValue(field.element, String(val)),
+          },
+        ];
+
+      case 'date-range':
+        return [
+          {
+            name: 'Date Range Structured Picker Driver',
+            execute: async (field, val) => {
+              const range = typeof val === 'object' && val
+                ? val as { startDate?: string; endDate?: string }
+                : { startDate: String(val || ''), endDate: '' };
+              const inputs = Array.from(field.element.querySelectorAll<HTMLInputElement>('input'));
+              if (inputs.length < 2) return false;
+              const startOk = !range.startDate || await dateEngine.injectSemanticDate(inputs[0], range.startDate);
+              const endOk = !range.endDate || await dateEngine.injectSemanticDate(inputs[1], range.endDate);
+              return startOk && endOk;
+            },
           },
         ];
 

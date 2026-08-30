@@ -74,6 +74,15 @@ describe('Resolvers & Domain Engines (核心结构化解析器套件)', () => {
 
       const d3 = dateEngine.parseSemanticDate('至今');
       expect(d3.isPresent).toBe(true);
+
+      const d4 = dateEngine.parseSemanticDate('07/2024');
+      expect(d4.year).toBe(2024);
+      expect(d4.month).toBe(7);
+      expect(d4.valid).toBe(true);
+
+      expect(dateEngine.parseSemanticDate('2024-19').valid).toBe(false);
+      expect(dateEngine.parseSemanticDate('2023-02-29').valid).toBe(false);
+      expect(dateEngine.parseSemanticDate('2024-02-29').valid).toBe(true);
     });
 
     it('formatDate 应该能输出各种格式要求', () => {

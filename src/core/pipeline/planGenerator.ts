@@ -133,7 +133,7 @@ export class PlanGenerator {
             id: `plan_${field.id}`,
             field,
             semanticKey: customMatch.resumeKey,
-            targetValue: String(val),
+            targetValue: this.toFieldTargetValue(field, resume, customMatch.resumeKey, val),
             confidence: 1.0,
             action: 'FILL',
             source: 'user_rule',
@@ -161,7 +161,7 @@ export class PlanGenerator {
                 id: `plan_${field.id}`,
                 field,
                 semanticKey: targetKey,
-                targetValue: String(val),
+                targetValue: this.toFieldTargetValue(field, resume, targetKey, val),
                 confidence: 0.98,
                 action: 'FILL',
                 source: 'platform_rule',
@@ -217,6 +217,7 @@ export class PlanGenerator {
         });
         highConfidenceCount++;
         matchedSemanticKeys.add(semanticMatch.resumeKey);
+        for (const relatedKey of semanticMatch.relatedKeys || []) matchedSemanticKeys.add(relatedKey);
         continue;
       }
 
@@ -257,10 +258,22 @@ export class PlanGenerator {
     if (field.type === 'select') return 'select';
     if (field.type === 'cascader') return 'cascader';
     if (field.type === 'date') return 'date';
+    if (field.type === 'date-range') return 'date-range';
     if (field.type === 'radio') return 'radio';
     if (field.type === 'checkbox') return 'checkbox';
     if (field.type === 'contenteditable') return 'contenteditable';
     return 'input';
+  }
+
+  private toFieldTargetValue(field: FieldDescriptor, resume: StandardResume, resumeKey: string, value: any): any {
+    if (field.type === 'date-range' && /\.(startDate|endDate)$/.test(resumeKey)) {
+      const baseKey = resumeKey.replace(/\.(startDate|endDate)$/, '');
+      return {
+        startDate: String(getValueByPath(resume, `${baseKey}.startDate`) || ''),
+        endDate: String(getValueByPath(resume, `${baseKey}.endDate`) || ''),
+      };
+    }
+    return String(value);
   }
 
   private matchQABank(
@@ -315,7 +328,7 @@ export class PlanGenerator {
     field: FieldDescriptor,
     resume: StandardResume,
     alreadyMatchedKeys: Set<string>
-  ): { resumeKey: string; name: string; targetValue: any; confidence: number } | null {
+  ): { resumeKey: string; name: string; targetValue: any; confidence: number; relatedKeys?: string[] } | null {
     let bestKey = '';
     let bestName = '';
     let highestScore = 0;
@@ -372,6 +385,23 @@ export class PlanGenerator {
           const parentLoc = getValueByPath(resume, parentLocKey) as any;
           if (parentLoc && typeof parentLoc === 'object') {
             stringVal = [parentLoc.province, parentLoc.city, parentLoc.district].filter(Boolean).join('-');
+          }
+        }
+
+        if (field.type === 'date-range' && /\.(startDate|endDate)$/.test(bestKey)) {
+          const baseKey = bestKey.replace(/\.(startDate|endDate)$/, '');
+          const startKey = `${baseKey}.startDate`;
+          const endKey = `${baseKey}.endDate`;
+          const startDate = getValueByPath(resume, startKey);
+          const endDate = getValueByPath(resume, endKey);
+          if (hasUsableValue(startDate) || hasUsableValue(endDate)) {
+            return {
+              resumeKey: startKey,
+              name: bestName,
+              targetValue: { startDate: String(startDate || ''), endDate: String(endDate || '') },
+              confidence: highestScore,
+              relatedKeys: [endKey],
+            };
           }
         }
 

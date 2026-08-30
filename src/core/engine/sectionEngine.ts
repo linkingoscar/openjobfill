@@ -1,6 +1,6 @@
 import type { StandardResume } from '../../types/resume';
 import type { PlatformEnhancer } from '../../types/pipeline';
-import { autoExpandHeuristicSections } from './repeater';
+import { autoExpandHeuristicSections, ensureSectionRows } from './repeater';
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 
 export class SectionEngine {
@@ -16,7 +16,7 @@ export class SectionEngine {
       const needed = resume.educations.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await autoExpandHeuristicSections(['教育', '学历', 'education'], delta + 1);
+        const expanded = await this.expandSection('education', ['教育', '学历', 'education'], needed, delta, enhancer);
         if (expanded) anyExpanded = true;
       }
     }
@@ -27,7 +27,7 @@ export class SectionEngine {
       const needed = resume.experiences.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await autoExpandHeuristicSections(['工作', '实习', 'experience'], delta + 1);
+        const expanded = await this.expandSection('experience', ['工作', '实习', 'experience'], needed, delta, enhancer);
         if (expanded) anyExpanded = true;
       }
     }
@@ -38,7 +38,7 @@ export class SectionEngine {
       const needed = resume.projects.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await autoExpandHeuristicSections(['项目', 'project'], delta + 1);
+        const expanded = await this.expandSection('project', ['项目', 'project'], needed, delta, enhancer);
         if (expanded) anyExpanded = true;
       }
     }
@@ -49,7 +49,7 @@ export class SectionEngine {
       const needed = resume.familyMembers.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await autoExpandHeuristicSections(['家庭', 'family'], delta + 1);
+        const expanded = await this.expandSection('family', ['家庭', 'family'], needed, delta, enhancer);
         if (expanded) anyExpanded = true;
       }
     }
@@ -60,6 +60,29 @@ export class SectionEngine {
     }
 
     return anyExpanded;
+  }
+
+  private async expandSection(
+    sectionKey: 'education' | 'experience' | 'project' | 'family',
+    keywords: string[],
+    requiredCount: number,
+    delta: number,
+    enhancer?: PlatformEnhancer | null,
+  ): Promise<boolean> {
+    const config = enhancer?.repeaterConfigs?.[sectionKey];
+    if (config?.sectionRoot && config.itemSelector && config.addButton) {
+      const rows = await ensureSectionRows({
+        containerSelector: config.sectionRoot,
+        itemSelector: config.itemSelector,
+        addButtonSelector: config.addButton,
+        itemFields: {},
+      }, requiredCount);
+      if (rows.length >= requiredCount) return true;
+      if (rows.length > 0) delta = Math.max(0, requiredCount - rows.length);
+    }
+
+    if (delta <= 0) return true;
+    return autoExpandHeuristicSections(keywords, delta + 1);
   }
 
   /**

@@ -176,8 +176,28 @@ export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolea
     }
   }
 
+  const customContainer = el.closest('[role="radiogroup"], .radio-group, .el-radio-group, .ant-radio-group, .semi-radio-group, .form-item, .form-group') || el.parentElement || doc;
+  const customRadios = Array.from(customContainer.querySelectorAll<HTMLElement>('[role="radio"], [aria-pressed]'));
+  if ((el.matches('[role="radio"], [aria-pressed]')) && !customRadios.includes(el)) customRadios.push(el);
+  for (const radio of customRadios) {
+    const radioVal = (radio.getAttribute('data-value') || radio.getAttribute('value') || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+    const radioLabel = (radio.textContent || radio.getAttribute('aria-label') || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+    if (radioVal === stringVal || radioLabel === stringVal || radioLabel.includes(stringVal)) {
+      simulateClick(radio);
+      return true;
+    }
+  }
+
   // 严格匹配失败：严禁盲点传入的 radio，直接返回 false 转入 RemainingTask
   return false;
+}
+
+export function setCustomCheckboxChecked(checkboxEl: HTMLElement, checkedOrVal: boolean | string | number): boolean {
+  const targetChecked = parseBoolean(checkedOrVal);
+  if (targetChecked === null) return false;
+  const currentChecked = checkboxEl.getAttribute('aria-checked') === 'true' || checkboxEl.getAttribute('aria-pressed') === 'true';
+  if (currentChecked !== targetChecked) simulateClick(checkboxEl);
+  return true;
 }
 
 /**

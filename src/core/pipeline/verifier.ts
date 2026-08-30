@@ -40,6 +40,9 @@ export class Verifier {
       if (isInputElement(el) && el.type === 'radio' && el.checked) {
         return el.value || el.parentElement?.textContent?.trim() || true;
       }
+      const customContainer = el.closest('[role="radiogroup"], .radio-group, .form-item, .form-group') || el.parentElement || el;
+      const selectedCustom = customContainer.querySelector<HTMLElement>('[role="radio"][aria-checked="true"], [aria-pressed="true"]');
+      if (selectedCustom) return selectedCustom.getAttribute('data-value') || selectedCustom.textContent?.trim() || true;
       return false;
     }
 
@@ -47,7 +50,7 @@ export class Verifier {
       if (isInputElement(el)) {
         return el.checked;
       }
-      return false;
+      return el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-pressed') === 'true';
     }
 
     if (driverType === 'select' || driverType === 'cascader') {
@@ -69,7 +72,27 @@ export class Verifier {
       if (isInputElement(el)) {
         return el.value;
       }
+      const input = el.querySelector<HTMLInputElement>('input');
+      if (input) return input.value;
+      const selects = Array.from(el.querySelectorAll<HTMLSelectElement>('select'));
+      if (selects.length > 0) return selects.map((select) => select.value).filter(Boolean).join('-');
       return el.textContent?.trim() || '';
+    }
+
+    if (driverType === 'date-range') {
+      const inputs = Array.from(el.querySelectorAll<HTMLInputElement>('input'));
+      const presentControl = Array.from(el.querySelectorAll<HTMLElement>(
+        'label, button, [role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"], [aria-pressed]'
+      )).find((candidate) => {
+        const text = candidate.textContent || candidate.getAttribute('aria-label') || '';
+        if (!/至今|目前|现在|present|current/i.test(text)) return false;
+        if (isInputElement(candidate)) return candidate.checked;
+        return candidate.getAttribute('aria-checked') === 'true' || candidate.getAttribute('aria-pressed') === 'true';
+      });
+      return {
+        startDate: inputs[0]?.value || '',
+        endDate: inputs[1]?.value || (presentControl ? '至今' : ''),
+      };
     }
 
     if (driverType === 'contenteditable') {
@@ -86,6 +109,11 @@ export class Verifier {
     if (actual === expected) return true;
     if (actual === undefined || actual === null || expected === undefined || expected === null) {
       return false;
+    }
+
+    if (driverType === 'date-range' && typeof actual === 'object' && typeof expected === 'object') {
+      return this.isSemanticEquivalent(actual.startDate || '', expected.startDate || '', 'date') &&
+        this.isSemanticEquivalent(actual.endDate || '', expected.endDate || '', 'date');
     }
 
     // 1. Boolean 场景 (Checkbox / Radio)

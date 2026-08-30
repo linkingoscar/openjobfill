@@ -1,4 +1,4 @@
-import { sleep, isElementVisible, getElementWindow, isInputElement, isSelectElement } from '../../utils/dom';
+import { sleep, isElementVisible, getElementWindow, getAllOpenRoots, isInputElement, isSelectElement } from '../../utils/dom';
 import { setNativeValue, simulateClick } from './dispatcher';
 import { getFormalUniversityVariants, getFormalMajorVariants } from '../matcher/aliasDictionary';
 
@@ -27,6 +27,8 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
   const startTime = Date.now();
   const ownerDocument = triggerEl?.ownerDocument || (typeof document !== 'undefined' ? document : null);
   if (!ownerDocument) return [];
+  let searchRoots: ParentNode[] = [];
+  let rootsRefreshedAt = 0;
 
   // 1. 尝试从 triggerEl 或内部 input 提取关联的 popup ID
   const popupId =
@@ -39,22 +41,31 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
   while (Date.now() - startTime < timeoutMs) {
     const candidates: HTMLElement[] = [];
 
-    // 优先在关联的 popup 作用域内查找
-    let searchRoot: ParentNode = ownerDocument;
+    // ShadowRoot 枚举需要遍历页面 DOM。缓存一小段时间，既能发现点击后新挂载的
+    // Portal / ShadowRoot，又避免在大型招聘页面每 50ms 全量扫描一次。
+    if (searchRoots.length === 0 || Date.now() - rootsRefreshedAt >= 250) {
+      searchRoots = getAllOpenRoots(ownerDocument);
+      rootsRefreshedAt = Date.now();
+    }
+    let scopedRoots = searchRoots;
     if (popupId) {
-      const popupEl = ownerDocument.getElementById(popupId) || ownerDocument.querySelector(`[id="${CSS.escape(popupId)}"]`);
+      const popupEl = scopedRoots
+        .map((root) => root.querySelector<HTMLElement>(`[id="${CSS.escape(popupId)}"]`))
+        .find((candidate): candidate is HTMLElement => !!candidate);
       if (!popupEl || !isElementVisible(popupEl as HTMLElement)) {
         await sleep(50);
         continue; // 声明了 popupId 时必须只等待自身 Popup 挂载，严禁中途退回 document 全局误拿其他下拉
       }
-      searchRoot = popupEl;
+      scopedRoots = [popupEl];
     }
 
-    for (const selector of OPTION_SELECTORS) {
-      const found = Array.from(searchRoot.querySelectorAll<HTMLElement>(selector));
-      for (const el of found) {
-        if (isElementVisible(el)) {
-          candidates.push(el);
+    for (const searchRoot of scopedRoots) {
+      for (const selector of OPTION_SELECTORS) {
+        const found = Array.from(searchRoot.querySelectorAll<HTMLElement>(selector));
+        for (const el of found) {
+          if (isElementVisible(el) && !candidates.includes(el)) {
+            candidates.push(el);
+          }
         }
       }
     }
@@ -137,60 +148,52 @@ async function trySelectCustomOptionOnce(
   }
 
   // 4. 动态等待 Portal 选项列表渲染挂载到 DOM (优先在 trigger 关联作用域查找)
-  const candidateElements = await waitForDropdownCandidates(triggerEl, 700);
+  let candidateElements = await waitForDropdownCandidates(triggerEl, 1200);
   if (candidateElements.length === 0) {
     return false;
   }
 
-  const candidateTexts = candidateElements.map((el) => (el.textContent || '').trim()).filter(Boolean);
-
-  // 5. 动态调用 OptionResolver / LocationResolver 解析最优 Option 文本
-  let canonicalMatchedText: string | null = null;
-  const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
-  for (const d of domains) {
-    const resolved = optionResolver.resolveOptionValue(candidateTexts, d, targetText);
-    if (resolved) {
-      canonicalMatchedText = resolved;
-      break;
+  const findBestMatch = (items: HTMLElement[]): HTMLElement | null => {
+    const candidateTexts = items.map((item) => (item.textContent || '').trim()).filter(Boolean);
+    let canonicalMatchedText: string | null = null;
+    const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
+    for (const domain of domains) {
+      canonicalMatchedText = optionResolver.resolveOptionValue(candidateTexts, domain, targetText);
+      if (canonicalMatchedText) break;
     }
-  }
-  if (!canonicalMatchedText) {
-    canonicalMatchedText = locationResolver.matchLocationOption(candidateTexts, targetText);
-  }
+    if (!canonicalMatchedText) canonicalMatchedText = locationResolver.matchLocationOption(candidateTexts, targetText);
 
-  // 6. 遍历可见选项，比对文本内容 (Canonical 优先 -> 精准匹配 -> 模糊匹配)
-  let bestMatch: HTMLElement | null = null;
-
-  if (canonicalMatchedText) {
-    for (const item of candidateElements) {
-      if ((item.textContent || '').trim() === canonicalMatchedText) {
-        bestMatch = item;
-        break;
-      }
+    if (canonicalMatchedText) {
+      const canonical = items.find((item) => (item.textContent || '').trim() === canonicalMatchedText);
+      if (canonical) return canonical;
     }
-  }
+    const exact = items.find((item) => (item.textContent || '').trim().toLowerCase() === targetLower);
+    if (exact) return exact;
+    if (!fuzzy) return null;
+    return items.find((item) => {
+      const text = (item.textContent || '').trim().toLowerCase();
+      return !!text && (text.includes(targetLower) || targetLower.includes(text));
+    }) || null;
+  };
 
-  if (!bestMatch) {
-    for (const item of candidateElements) {
-      const itemText = (item.textContent || '').trim().toLowerCase();
-      if (!itemText) continue;
+  let bestMatch = findBestMatch(candidateElements);
 
-      if (itemText === targetLower) {
-        bestMatch = item;
-        break;
-      }
-    }
-  }
-
-  if (!bestMatch && fuzzy) {
-    for (const item of candidateElements) {
-      const itemText = (item.textContent || '').trim().toLowerCase();
-      if (!itemText) continue;
-
-      if (itemText.includes(targetLower) || targetLower.includes(itemText)) {
-        bestMatch = item;
-        break;
-      }
+  // 6. 虚拟列表只渲染当前窗口；未命中时逐屏滚动并重新收集可见选项。
+  const scrollContainer = candidateElements[0]?.closest<HTMLElement>(
+    '[role="listbox"], .rc-virtual-list-holder, .el-select-dropdown__wrap, .semi-portal-inner, [class*="virtual-list"], [class*="menu-list"]'
+  );
+  if (!bestMatch && scrollContainer) {
+    let previousTop = -1;
+    for (let attempt = 0; attempt < 10 && !bestMatch; attempt++) {
+      const nextTop = Math.min(scrollContainer.scrollHeight, scrollContainer.scrollTop + Math.max(120, scrollContainer.clientHeight * 0.8));
+      if (nextTop === previousTop || nextTop === scrollContainer.scrollTop) break;
+      previousTop = scrollContainer.scrollTop;
+      scrollContainer.scrollTop = nextTop;
+      const ScrollEvent = (getElementWindow(scrollContainer) as any).Event || Event;
+      scrollContainer.dispatchEvent(new ScrollEvent('scroll', { bubbles: true }));
+      await sleep(100);
+      candidateElements = await waitForDropdownCandidates(triggerEl, 300);
+      bestMatch = findBestMatch(candidateElements);
     }
   }
 

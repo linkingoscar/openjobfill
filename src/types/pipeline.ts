@@ -9,6 +9,7 @@ export type FieldType =
   | 'select'
   | 'cascader'
   | 'date'
+  | 'date-range'
   | 'contenteditable'
   | 'file'
   | 'unknown';
@@ -40,7 +41,7 @@ export interface FieldDescriptor {
 }
 
 export type PlanAction = 'FILL' | 'NEEDS_USER' | 'SKIP';
-export type DriverType = 'input' | 'select' | 'cascader' | 'date' | 'radio' | 'checkbox' | 'contenteditable';
+export type DriverType = 'input' | 'select' | 'cascader' | 'date' | 'date-range' | 'radio' | 'checkbox' | 'contenteditable';
 
 /**
  * 单个字段的填表规划决策

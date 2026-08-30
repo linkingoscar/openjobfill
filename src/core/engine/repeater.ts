@@ -28,8 +28,14 @@ export async function ensureSectionRows(
       (container.ownerDocument || document).querySelector<HTMLElement>(rule.addButtonSelector);
 
     if (addBtn && isElementVisible(addBtn)) {
+      const previousCount = currentItems.length;
       simulateClick(addBtn);
-      await sleep(400); // 等待 DOM 新行渲染
+      const waitStartedAt = Date.now();
+      while (Date.now() - waitStartedAt < 1200) {
+        await sleep(80);
+        const nextItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(isElementVisible);
+        if (nextItems.length > previousCount) break;
+      }
     } else {
       break;
     }
@@ -56,7 +62,7 @@ export async function autoExpandHeuristicSections(
   const buttons = getAllDocumentsAcrossIframes().flatMap((doc) =>
     Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
   );
-  const matchAddButtons = buttons.filter(btn => {
+  const findAddButtons = () => buttons.filter(btn => {
     if (!isElementVisible(btn)) return false;
     const text = (btn.textContent || '').trim().toLowerCase();
     if (text.length > 30) return false;
@@ -65,13 +71,23 @@ export async function autoExpandHeuristicSections(
     return hasAdd && (hasSection || sectionTitleKeywords.length === 0);
   });
 
+  const matchAddButtons = findAddButtons();
+
   if (matchAddButtons.length > 0) {
-    const targetBtn = matchAddButtons[0];
     let clickedCount = 0;
     // 点击并等待每行渲染
     for (let i = 1; i < requiredCount && i <= 6; i++) {
+      const liveButtons = getAllDocumentsAcrossIframes().flatMap((doc) =>
+        Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
+      ).filter((btn) => {
+        if (!isElementVisible(btn)) return false;
+        const text = (btn.textContent || '').trim().toLowerCase();
+        return text.length <= 30 && /添加|新增|增加|\+|add|create/i.test(text) && sectionTitleKeywords.some((k) => text.includes(k.toLowerCase()));
+      });
+      const targetBtn = liveButtons[0] || matchAddButtons[0];
+      if (!targetBtn || !isElementVisible(targetBtn)) break;
       simulateClick(targetBtn);
-      await sleep(300);
+      await sleep(450);
       clickedCount++;
     }
     // 等待 SPA 响应式框架 (Vue / React) 批量虚拟 DOM 更新

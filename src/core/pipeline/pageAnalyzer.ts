@@ -6,6 +6,7 @@ import {
   isTextAreaElement, 
   isSelectElement,
   isFieldRequired,
+  getAllOpenRoots,
 } from '../../utils/dom';
 
 export class PageAnalyzer {
@@ -56,22 +57,35 @@ export class PageAnalyzer {
     }
 
     const allCandidateElements: HTMLElement[] = [];
-    const customComponentSelector =
-      '.el-select, .ant-select, .semi-select, [role="combobox"], [class*="select-selection"], .el-cascader, .ant-cascader, .semi-cascader, [class*="cascader"]';
+    const customComponentSelector = [
+      '.el-select', '.ant-select', '.semi-select', '[role="combobox"]', '[class*="select-selection"]',
+      '.el-cascader', '.ant-cascader', '.semi-cascader', '[class*="cascader"]',
+      '.el-date-editor', '.ant-picker', '.semi-datepicker', '[class*="date-picker"]', '[class*="datepicker"]',
+      '[class*="date-range"]', '[class*="daterange"]', '[data-openjobfill-date-group]',
+      '[role="radio"]', '[role="checkbox"]', '[aria-pressed]',
+    ].join(',');
 
     for (const targetDoc of documentsToScan) {
       try {
-        const nativeInputs = Array.from(
-          targetDoc.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
+        const roots = getAllOpenRoots(targetDoc);
+        const nativeInputs = roots.flatMap((root) => Array.from(
+          root.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
+        ));
+        const customComponents = roots.flatMap((root) =>
+          Array.from(root.querySelectorAll<HTMLElement>(customComponentSelector))
         );
-        const customComponents = Array.from(targetDoc.querySelectorAll<HTMLElement>(customComponentSelector));
+
+        // 外层日期/选择组件已经代表一个逻辑字段时，移除它内部重复命中的组件根。
+        const topLevelCustomComponents = customComponents.filter(
+          (component) => !customComponents.some((other) => other !== component && other.contains(component))
+        );
 
         // 组件库的可搜索下拉通常同时包含一个内部 input。规划阶段只保留
         // 组件根节点，否则同一个控件会生成两条计划并被重复操作。
         const standaloneNativeInputs = nativeInputs.filter(
-          (el) => !customComponents.some((component) => component !== el && component.contains(el))
+          (el) => !topLevelCustomComponents.some((component) => component !== el && component.contains(el))
         );
-        allCandidateElements.push(...standaloneNativeInputs, ...customComponents);
+        allCandidateElements.push(...standaloneNativeInputs, ...topLevelCustomComponents);
       } catch {}
     }
 
@@ -148,6 +162,22 @@ export class PageAnalyzer {
     if (isSelectElement(el)) {
       return 'select';
     }
+    const className = typeof el.className === 'string' ? el.className.toLowerCase() : '';
+    const dateInputs = el.querySelectorAll?.('input[type="date"], input[type="month"], input') || [];
+    const dateSelects = el.querySelectorAll?.('select, .el-select, .ant-select, .semi-select') || [];
+    const isDateComponent =
+      /date|picker/.test(className) ||
+      el.hasAttribute('data-openjobfill-date-group') ||
+      el.getAttribute('role') === 'dialog';
+
+    if (isDateComponent && dateInputs.length >= 2 && /range|daterange/.test(className)) {
+      return 'date-range';
+    }
+    if (isDateComponent && (dateInputs.length > 0 || dateSelects.length >= 2)) {
+      return 'date';
+    }
+    if (el.getAttribute('role') === 'radio' || el.hasAttribute('aria-pressed')) return 'radio';
+    if (el.getAttribute('role') === 'checkbox') return 'checkbox';
     if (
       el.classList.contains('el-cascader') ||
       el.classList.contains('ant-cascader') ||
@@ -156,13 +186,23 @@ export class PageAnalyzer {
     ) {
       return 'cascader';
     }
-    if (el.classList.contains('el-select') || el.classList.contains('ant-select') || el.getAttribute('role') === 'combobox') {
+    if (
+      el.classList.contains('el-select') ||
+      el.classList.contains('ant-select') ||
+      el.classList.contains('semi-select') ||
+      el.getAttribute('role') === 'combobox'
+    ) {
       return 'select';
     }
     if (isInputElement(el)) {
       if (el.type === 'radio') return 'radio';
       if (el.type === 'checkbox') return 'checkbox';
-      if (el.type === 'date' || el.type === 'month' || el.classList.contains('datepicker') || el.placeholder.includes('年') || el.placeholder.includes('YYYY')) {
+      if (
+        el.type === 'date' ||
+        el.type === 'month' ||
+        el.classList.contains('datepicker') ||
+        /日期|时间|年月|date|month|year|yyyy/i.test(`${el.placeholder} ${el.name} ${el.getAttribute('aria-label') || ''}`)
+      ) {
         return 'date';
       }
       return 'text';
@@ -186,6 +226,13 @@ export class PageAnalyzer {
     }
     if (type === 'contenteditable') {
       return el.innerText || el.textContent || '';
+    }
+    if (type === 'date' || type === 'date-range') {
+      const inputs = Array.from(el.querySelectorAll<HTMLInputElement>('input'));
+      if (type === 'date-range') return inputs.map((input) => input.value).filter(Boolean);
+      if (inputs.length > 0) return inputs[0].value;
+      const selects = Array.from(el.querySelectorAll<HTMLSelectElement>('select'));
+      return selects.map((select) => select.value).filter(Boolean).join('-');
     }
     return '';
   }
