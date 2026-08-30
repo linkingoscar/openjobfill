@@ -44,6 +44,11 @@ import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/ut
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
+import {
+  calculateFloatingBallLayout,
+  clampFloatingBallPosition,
+  type FloatingBallPosition,
+} from '@/core/ui/floatingBallPosition';
 
 const isFilling = ref(false);
 const isDrawerOpen = ref(false);
@@ -54,6 +59,92 @@ const operationError = ref('');
 const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
+const isHiddenOnCurrentPage = ref(false);
+
+const FLOATING_POSITION_KEY = 'openjobfill_floating_ball_position';
+const viewportWidth = ref(window.innerWidth);
+const viewportHeight = ref(window.innerHeight);
+const floatingPosition = ref<FloatingBallPosition>(clampFloatingBallPosition(
+  { x: window.innerWidth, bottom: 96 },
+  window.innerWidth,
+  window.innerHeight,
+));
+let isDraggingBall = false;
+let dragMoved = false;
+let suppressNextBubbleClick = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragStartPosition: FloatingBallPosition = { ...floatingPosition.value };
+
+const loadFloatingPosition = () => {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  chrome.storage.local.get([FLOATING_POSITION_KEY], (result) => {
+    const saved = result[FLOATING_POSITION_KEY] as Partial<FloatingBallPosition> | undefined;
+    if (typeof saved?.x !== 'number' || typeof saved?.bottom !== 'number') return;
+    floatingPosition.value = clampFloatingBallPosition(
+      { x: saved.x, bottom: saved.bottom },
+      viewportWidth.value,
+      viewportHeight.value,
+    );
+  });
+};
+
+const saveFloatingPosition = () => {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  chrome.storage.local.set({ [FLOATING_POSITION_KEY]: floatingPosition.value });
+};
+
+const handleViewportResize = () => {
+  viewportWidth.value = window.innerWidth;
+  viewportHeight.value = window.innerHeight;
+  floatingPosition.value = clampFloatingBallPosition(
+    floatingPosition.value,
+    viewportWidth.value,
+    viewportHeight.value,
+  );
+};
+
+const stopBallDrag = () => {
+  if (!isDraggingBall) return;
+  isDraggingBall = false;
+  window.removeEventListener('pointermove', handleBallDragMove);
+  window.removeEventListener('pointerup', stopBallDrag);
+  window.removeEventListener('pointercancel', stopBallDrag);
+  if (dragMoved) {
+    suppressNextBubbleClick = true;
+    saveFloatingPosition();
+    window.setTimeout(() => { suppressNextBubbleClick = false; }, 0);
+  }
+};
+
+const handleBallDragMove = (event: PointerEvent) => {
+  if (!isDraggingBall) return;
+  const deltaX = event.clientX - dragStartX;
+  const deltaY = event.clientY - dragStartY;
+  if (!dragMoved && Math.hypot(deltaX, deltaY) < 5) return;
+  dragMoved = true;
+  floatingPosition.value = clampFloatingBallPosition({
+    x: dragStartPosition.x + deltaX,
+    bottom: dragStartPosition.bottom - deltaY,
+  }, viewportWidth.value, viewportHeight.value);
+};
+
+const startBallDrag = (event: PointerEvent) => {
+  if (event.button !== 0 || isFilling.value) return;
+  isDraggingBall = true;
+  dragMoved = false;
+  dragStartX = event.clientX;
+  dragStartY = event.clientY;
+  dragStartPosition = { ...floatingPosition.value };
+  window.addEventListener('pointermove', handleBallDragMove);
+  window.addEventListener('pointerup', stopBallDrag);
+  window.addEventListener('pointercancel', stopBallDrag);
+};
+
+const handleHideFloatingBall = () => {
+  isDrawerOpen.value = false;
+  isHiddenOnCurrentPage.value = true;
+};
 
 // 多步向导与待办核对提示
 const stepNotification = ref({ show: false, text: '' });
@@ -218,11 +309,22 @@ const handleSwitchResume = async (e: Event) => {
 // 抽屉尺寸自定义与拖拽调节
 const drawerWidth = ref(Number(localStorage.getItem('openjobfill_drawer_width')) || 384);
 const drawerHeight = ref(Number(localStorage.getItem('openjobfill_drawer_height')) || 620);
+const floatingLayout = computed(() => calculateFloatingBallLayout(
+  floatingPosition.value,
+  viewportWidth.value,
+  isDrawerOpen.value,
+  drawerWidth.value,
+));
+const floatingRootStyle = computed(() => ({
+  left: `${floatingLayout.value.left}px`,
+  bottom: `${floatingLayout.value.bottom}px`,
+}));
 let isResizing = false;
 let resizeStartX = 0;
 let resizeStartY = 0;
 let initialWidth = 384;
 let initialHeight = 620;
+let resizeHorizontalDirection = -1;
 
 const startResize = (e: MouseEvent) => {
   isResizing = true;
@@ -230,6 +332,7 @@ const startResize = (e: MouseEvent) => {
   resizeStartY = e.clientY;
   initialWidth = drawerWidth.value;
   initialHeight = drawerHeight.value;
+  resizeHorizontalDirection = floatingLayout.value.opensLeft ? -1 : 1;
   document.addEventListener('mousemove', handleResizeMove);
   document.addEventListener('mouseup', stopResize);
   e.preventDefault();
@@ -237,7 +340,7 @@ const startResize = (e: MouseEvent) => {
 
 const handleResizeMove = (e: MouseEvent) => {
   if (!isResizing) return;
-  const deltaX = resizeStartX - e.clientX;
+  const deltaX = (e.clientX - resizeStartX) * resizeHorizontalDirection;
   const deltaY = resizeStartY - e.clientY;
   drawerWidth.value = Math.max(320, Math.min(680, initialWidth + deltaX));
   drawerHeight.value = Math.max(400, Math.min(window.innerHeight - 80, initialHeight + deltaY));
@@ -253,19 +356,24 @@ const stopResize = () => {
 };
 
 onMounted(async () => {
+  loadFloatingPosition();
   const adapter = getAdapterForUrl(window.location.href);
   currentAdapterName.value = adapter.name;
   await loadActiveResume();
   window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('resize', handleViewportResize);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
+  window.removeEventListener('resize', handleViewportResize);
+  stopBallDrag();
   document.removeEventListener('mousemove', handleResizeMove);
   document.removeEventListener('mouseup', stopResize);
 });
 
 const handleQuickFill = async () => {
+  isHiddenOnCurrentPage.value = false;
   if (isFilling.value) return { fillCount: 0, needsUserCount: 0 };
   isFilling.value = true;
   fillResult.value = null;
@@ -307,6 +415,14 @@ const handleQuickFill = async () => {
   } finally {
     isFilling.value = false;
   }
+};
+
+const handleBubbleClick = () => {
+  if (suppressNextBubbleClick) {
+    suppressNextBubbleClick = false;
+    return;
+  }
+  void handleQuickFill();
 };
 
 const handleAnalyzeJD = () => {
@@ -635,7 +751,13 @@ defineExpose({
 </script>
 
 <template>
-  <aside class="openjobfill-root fixed right-5 bottom-24 z-[2147483647] font-sans select-none flex items-end gap-3 pointer-events-auto" aria-label="OpenJobFill 悬浮填表工具">
+  <aside
+    v-if="!isHiddenOnCurrentPage"
+    :style="floatingRootStyle"
+    :class="floatingLayout.opensLeft ? 'flex-row' : 'flex-row-reverse'"
+    class="openjobfill-root fixed z-[2147483647] font-sans select-none flex items-end gap-3 pointer-events-auto"
+    aria-label="OpenJobFill 悬浮填表工具"
+  >
     <!-- Collapsible Side Drawer Panel -->
     <transition
       enter-active-class="transition duration-300 ease-out transform"
@@ -660,10 +782,11 @@ defineExpose({
         <!-- Left/Top Resizing Handles -->
         <div 
           @mousedown="startResize"
-          class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors z-40 group"
+          :class="floatingLayout.opensLeft ? 'left-0' : 'right-0'"
+          class="absolute top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors z-40 group"
           title="拖拽调节面板宽度"
         >
-          <div class="w-0.5 h-8 bg-slate-300 group-hover:bg-blue-500 rounded-full absolute left-0.5 top-1/2 -translate-y-1/2"></div>
+          <div class="w-0.5 h-8 bg-slate-300 group-hover:bg-blue-500 rounded-full absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"></div>
         </div>
         <div 
           @mousedown="startResize"
@@ -1337,7 +1460,7 @@ defineExpose({
       <div 
         v-if="stepNotification.show"
         @click="handleQuickFill"
-        class="cursor-pointer max-w-[220px] bg-slate-900/95 text-white text-xs px-3 py-2 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-center gap-2 hover:bg-blue-900 transition mb-1"
+        class="absolute bottom-full right-0 cursor-pointer max-w-[220px] bg-slate-900/95 text-white text-xs px-3 py-2 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-center gap-2 hover:bg-blue-900 transition mb-2"
       >
         <Sparkles class="w-4 h-4 text-amber-400 flex-shrink-0 animate-bounce" />
         <span class="text-[11px] font-medium leading-tight">{{ stepNotification.text }}</span>
@@ -1345,16 +1468,17 @@ defineExpose({
     </transition>
 
     <!-- Main Floating Bubble Button -->
-    <div class="flex flex-col items-center gap-1.5">
+    <div class="w-[74px] flex flex-col items-center gap-1.5">
       <button
         type="button"
-        @click="handleQuickFill"
+        @pointerdown="startBallDrag"
+        @click="handleBubbleClick"
         :class="[
-          'w-12 h-12 rounded-full shadow-2xl flex items-center justify-center text-white transition-all transform hover:scale-110 active:scale-95 group relative focus-visible:ring-4 focus-visible:ring-blue-400',
+          'w-12 h-12 rounded-full shadow-2xl flex items-center justify-center text-white transition-all transform hover:scale-110 active:scale-95 group relative focus-visible:ring-4 focus-visible:ring-blue-400 touch-none cursor-move',
           isFilling ? 'bg-blue-700 animate-pulse' : 'bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-blue-500/50 shadow-blue-600/30'
         ]"
-        title="点击一键自动填表 (Alt+Shift+F)"
-        aria-label="一键自动填写当前页面 (快捷键 Alt+Shift+F)"
+        title="点击一键自动填表；按住可拖动位置 (Alt+Shift+F)"
+        aria-label="一键自动填写当前页面；按住可拖动位置 (快捷键 Alt+Shift+F)"
       >
         <Zap v-if="!isFilling" class="w-6 h-6 fill-white" aria-hidden="true" />
         <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1366,15 +1490,26 @@ defineExpose({
       </button>
 
       <!-- Toggle Drawer Button -->
-      <button
-        type="button"
-        @click="toggleDrawer"
-        :aria-expanded="isDrawerOpen"
-        aria-controls="openjobfill-drawer-panel"
-        class="px-2.5 py-1 min-h-[26px] bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-white flex items-center justify-center gap-0.5 transition focus-visible:ring-2 focus-visible:ring-blue-500"
-      >
-        <span>{{ isDrawerOpen ? '收起' : '面板' }}</span>
-      </button>
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          @click="toggleDrawer"
+          :aria-expanded="isDrawerOpen"
+          aria-controls="openjobfill-drawer-panel"
+          class="px-2.5 py-1 min-h-[26px] bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-white flex items-center justify-center gap-0.5 transition focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <span>{{ isDrawerOpen ? '收起' : '面板' }}</span>
+        </button>
+        <button
+          type="button"
+          @click="handleHideFloatingBall"
+          class="w-6 h-6 bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-slate-500 hover:text-rose-600 hover:bg-white flex items-center justify-center transition focus-visible:ring-2 focus-visible:ring-rose-500"
+          title="在当前页面隐藏悬浮球（刷新或使用快捷键可恢复）"
+          aria-label="在当前页面隐藏悬浮球"
+        >
+          <X class="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   </aside>
 </template>
