@@ -27,11 +27,14 @@ import {
   BookmarkPlus,
   TrendingUp,
   Pipette,
-  Highlighter
+  Highlighter,
+  History,
+  Trash2
 } from 'lucide-vue-next';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
+import { fillHistoryStorage, MAX_FILL_HISTORY_RECORDS } from '@/core/storage/fillHistoryStorage';
 import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { getAdapterForUrl } from '@/core/adapters';
@@ -44,6 +47,7 @@ import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/ut
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
+import type { FillHistoryRecord } from '@/types/fillHistory';
 import {
   calculateFloatingBallLayout,
   clampFloatingBallPosition,
@@ -60,6 +64,8 @@ const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
 const isHiddenOnCurrentPage = ref(false);
+const fillHistoryRecords = ref<FillHistoryRecord[]>([]);
+const isHistoryLoading = ref(false);
 
 const FLOATING_POSITION_KEY = 'openjobfill_floating_ball_position';
 const viewportWidth = ref(window.innerWidth);
@@ -355,11 +361,102 @@ const stopResize = () => {
   localStorage.setItem('openjobfill_drawer_height', String(drawerHeight.value));
 };
 
+const loadFillHistory = async () => {
+  isHistoryLoading.value = true;
+  try {
+    fillHistoryRecords.value = await fillHistoryStorage.getRecords();
+  } catch (err) {
+    console.warn('[OpenJobFill] 读取填表历史失败:', err);
+  } finally {
+    isHistoryLoading.value = false;
+  }
+};
+
+const persistFillHistory = async (result: FillResult) => {
+  try {
+    const record = fillHistoryStorage.createRecord(result, {
+      pageUrl: window.location.href,
+      pageTitle: document.title,
+    });
+    fillHistoryRecords.value = await fillHistoryStorage.append(record);
+  } catch (err) {
+    // 历史记录属于辅助能力，存储失败不能让已经完成的填表被误报为失败。
+    console.warn('[OpenJobFill] 保存填表历史失败:', err);
+  }
+};
+
+const persistOperationError = async (phase: 'analysis' | 'execution', error: unknown) => {
+  try {
+    const record = fillHistoryStorage.createErrorRecord({
+      pageUrl: window.location.href,
+      pageTitle: document.title,
+      adapterName: currentAdapterName.value,
+      phase,
+      error,
+    });
+    fillHistoryRecords.value = await fillHistoryStorage.append(record);
+  } catch (storageError) {
+    console.warn('[OpenJobFill] 保存异常诊断失败:', storageError);
+  }
+};
+
+const formatHistoryTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+};
+
+const showHistoryToast = (message: string) => {
+  copyToastMessage.value = message;
+  setTimeout(() => { copyToastMessage.value = ''; }, 2500);
+};
+
+const handleCopyDiagnosticHistory = async () => {
+  if (fillHistoryRecords.value.length === 0) {
+    showHistoryToast('暂无可复制的填表历史');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(await fillHistoryStorage.exportJSON());
+    showHistoryToast(`已复制 ${fillHistoryRecords.value.length} 次脱敏诊断记录`);
+  } catch (err) {
+    console.error('[OpenJobFill] 复制诊断记录失败:', err);
+    showHistoryToast('复制失败，请改用导出 JSON');
+  }
+};
+
+const handleExportDiagnosticHistory = async () => {
+  if (fillHistoryRecords.value.length === 0) {
+    showHistoryToast('暂无可导出的填表历史');
+    return;
+  }
+  const blob = new Blob([await fillHistoryStorage.exportJSON()], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `openjobfill-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  showHistoryToast(`已导出 ${fillHistoryRecords.value.length} 次脱敏诊断记录`);
+};
+
+const handleClearFillHistory = async () => {
+  if (fillHistoryRecords.value.length === 0) return;
+  if (!window.confirm(`确认清空最近 ${fillHistoryRecords.value.length} 次填表历史？此操作无法撤销。`)) return;
+  await fillHistoryStorage.clear();
+  fillHistoryRecords.value = [];
+  showHistoryToast('填表历史已清空');
+};
+
 onMounted(async () => {
   loadFloatingPosition();
   const adapter = getAdapterForUrl(window.location.href);
   currentAdapterName.value = adapter.name;
-  await loadActiveResume();
+  await Promise.all([loadActiveResume(), loadFillHistory()]);
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', handleViewportResize);
 });
@@ -409,6 +506,7 @@ const handleQuickFill = async () => {
   } catch (err: any) {
     console.error('[OpenJobFill] Analyze error:', err);
     operationError.value = err?.message || '页面识别失败，请刷新网页后重试';
+    await persistOperationError('analysis', operationError.value);
     drawerTab.value = 'logs';
     isDrawerOpen.value = true;
     throw err;
@@ -502,7 +600,7 @@ const handleStartPicker = () => {
 const toggleDrawer = async () => {
   isDrawerOpen.value = !isDrawerOpen.value;
   if (isDrawerOpen.value) {
-    await loadActiveResume();
+    await Promise.all([loadActiveResume(), loadFillHistory()]);
     if (drawerTab.value === 'jdMatch' && !jdAnalysis.value) {
       handleAnalyzeJD();
     }
@@ -721,11 +819,13 @@ const confirmFill = async () => {
   try {
     const result = await formFillerEngine.executePlan(previewPlan.value);
     fillResult.value = result;
+    await persistFillHistory(result);
     previewPlan.value = null;
     drawerTab.value = 'logs';
   } catch (err: any) {
     console.error('[OpenJobFill] Execute fill error:', err);
     operationError.value = err?.message || '填写执行失败，请重新识别后再试';
+    await persistOperationError('execution', operationError.value);
   } finally {
     isFilling.value = false;
   }
@@ -1084,6 +1184,111 @@ defineExpose({
                 </div>
               </div>
             </div>
+
+            <!-- 持久化脱敏填表历史 -->
+            <section class="pt-3 mt-3 border-t border-slate-200" aria-labelledby="fill-history-title">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <History class="w-4 h-4 text-blue-600 flex-shrink-0" aria-hidden="true" />
+                  <h3 id="fill-history-title" class="text-xs font-bold text-slate-700">
+                    填表历史（{{ fillHistoryRecords.length }}/{{ MAX_FILL_HISTORY_RECORDS }}）
+                  </h3>
+                  <span class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5">已脱敏</span>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    type="button"
+                    @click="handleCopyDiagnosticHistory"
+                    :disabled="fillHistoryRecords.length === 0"
+                    class="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500"
+                    title="复制脱敏诊断信息"
+                    aria-label="复制脱敏诊断信息"
+                  >
+                    <Copy class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    @click="handleExportDiagnosticHistory"
+                    :disabled="fillHistoryRecords.length === 0"
+                    class="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500"
+                    title="导出脱敏诊断 JSON"
+                    aria-label="导出脱敏诊断 JSON"
+                  >
+                    <Download class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    @click="handleClearFillHistory"
+                    :disabled="fillHistoryRecords.length === 0"
+                    class="p-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-rose-500"
+                    title="清空填表历史"
+                    aria-label="清空填表历史"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <p class="text-[10px] text-slate-400 mb-2 leading-relaxed">
+                不保存字段实际填写值；错误文本中的联系方式、证件号和期望/实际值会自动隐藏。
+              </p>
+
+              <div v-if="isHistoryLoading" role="status" class="text-center py-3 text-xs text-slate-400">
+                正在读取历史记录…
+              </div>
+              <div v-else-if="fillHistoryRecords.length === 0" class="text-center py-3 text-xs text-slate-400 bg-slate-50 rounded-lg">
+                完成一次自动填写后，诊断记录会保存在这里
+              </div>
+              <div v-else class="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                <details
+                  v-for="record in fillHistoryRecords"
+                  :key="record.id"
+                  class="group rounded-lg border border-slate-200 bg-white overflow-hidden"
+                >
+                  <summary class="cursor-pointer list-none p-2 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="text-xs font-semibold text-slate-700 truncate" :title="record.pageTitle || record.hostname">
+                          {{ record.pageTitle || record.hostname || '未知页面' }}
+                        </div>
+                        <div class="text-[10px] text-slate-400 truncate mt-0.5" :title="record.pageUrl">
+                          {{ formatHistoryTime(record.createdAt) }} · {{ record.hostname || '本地页面' }}
+                        </div>
+                      </div>
+                      <div class="flex gap-1 text-[10px] font-bold flex-shrink-0">
+                        <span class="text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">成功 {{ record.filledCount }}</span>
+                        <span v-if="record.failedCount" class="text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">失败 {{ record.failedCount }}</span>
+                      </div>
+                    </div>
+                  </summary>
+                  <div class="border-t border-slate-100 p-2 bg-slate-50/60 space-y-1">
+                    <div class="text-[10px] text-slate-500 flex justify-between gap-2">
+                      <span class="truncate">引擎：{{ record.adapterName }} · {{ record.phase === 'analysis' ? '页面分析' : '填写执行' }}</span>
+                      <span class="flex-shrink-0">{{ record.durationMs }}ms</span>
+                    </div>
+                    <p v-if="record.operationError" class="text-[10px] text-rose-700 bg-rose-50 border border-rose-100 rounded px-2 py-1 break-words">
+                      {{ record.operationError }}
+                    </p>
+                    <div
+                      v-for="(field, fieldIndex) in record.fields"
+                      :key="`${record.id}-${fieldIndex}`"
+                      class="text-[10px] rounded bg-white border border-slate-100 px-2 py-1"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-slate-700 font-medium truncate">{{ field.label }}</span>
+                        <span :class="[
+                          'font-bold flex-shrink-0',
+                          field.status === 'success' ? 'text-emerald-600' : field.status === 'failed' ? 'text-rose-600' : 'text-amber-600'
+                        ]">
+                          {{ field.status === 'success' ? '成功' : field.status === 'failed' ? '失败' : '跳过' }}
+                        </span>
+                      </div>
+                      <p v-if="field.message" class="text-slate-400 mt-0.5 break-words">{{ field.message }}</p>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </section>
           </div>
 
           <!-- Footer Action Button：预览确认态 -->
