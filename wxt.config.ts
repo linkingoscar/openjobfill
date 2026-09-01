@@ -14,8 +14,9 @@ export default defineConfig({
       '48': 'icon-48.png',
       '128': 'icon-128.png',
     },
-    permissions: ['storage', 'activeTab', 'webNavigation'],
-    // AI 兜底所需的网络访问：localhost 供本地 Ollama，https 供用户自带 Key 的云端接口
+    permissions: ['storage', 'activeTab', 'webNavigation', 'scripting'],
+    // 静态探测器覆盖所有页面，确认招聘页后由 scripting 按需注入重型运行时；
+    // 因此这里保留 https 主机权限以支持未知招聘站点和用户自带 AI 接口，默认不会上传简历内容。
     host_permissions: ['http://localhost/*', 'https://*/*'],
     action: {
       default_icon: {

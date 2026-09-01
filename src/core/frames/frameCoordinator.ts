@@ -75,6 +75,9 @@ export function serializeAnalyzedPlan(
   return {
     frameId,
     analysisId,
+    resumeId: analyzed.resumeId,
+    resumeUpdatedAt: analyzed.resumeUpdatedAt,
+    pageUrl: analyzed.pageUrl || url,
     url,
     adapterName: analyzed.adapterName,
     items,

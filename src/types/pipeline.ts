@@ -87,6 +87,11 @@ export interface RemoteFillPlanItem {
 export interface RemoteFramePlan {
   frameId: number;
   analysisId: string;
+  /** 生成计划时使用的简历快照，用于执行前的失效校验。 */
+  resumeId: string;
+  resumeUpdatedAt: number;
+  /** 生成计划时所在的 frame URL。 */
+  pageUrl: string;
   url: string;
   adapterName: string;
   items: RemoteFillPlanItem[];

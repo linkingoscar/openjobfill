@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { resumeStorage } from '@/core/storage/resumeStorage';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  RESUME_STORAGE_ENTRY_PREFIX,
+  RESUME_STORAGE_INDEX_KEY,
+  resumeStorage,
+} from '@/core/storage/resumeStorage';
 import { DEFAULT_RESUME } from '@/core/storage/defaultData';
 import type { StandardResume } from '@/types/resume';
 import { saveCustomDomains } from '@/core/whitelist';
@@ -41,6 +45,36 @@ const resumes = ref<StandardResume[]>([]);
 const currentResume = ref<StandardResume>(JSON.parse(JSON.stringify(DEFAULT_RESUME)));
 const activeTab = ref<'basics' | 'appExtra' | 'education' | 'experience' | 'projects' | 'qa' | 'tracker' | 'customRules' | 'settings'>('basics');
 const saveSuccess = ref(false);
+const autoSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+let isHydratingResume = true;
+let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let saveQueue: Promise<void> = Promise.resolve();
+let saveGeneration = 0;
+let persistedResumeSnapshot: StandardResume | null = null;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** 只发送管理页真正改动的字段，避免旧的完整快照覆盖 content script 的并发更新。 */
+const collectChangedFields = (
+  previous: unknown,
+  next: unknown,
+  path = '',
+  result: Record<string, unknown> = {},
+): Record<string, unknown> => {
+  if (Object.is(previous, next)) return result;
+  if (Array.isArray(previous) || Array.isArray(next) || !isRecord(previous) || !isRecord(next)) {
+    if (path) result[path] = next;
+    return result;
+  }
+
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  for (const key of keys) {
+    const childPath = path ? `${path}.${key}` : key;
+    collectChangedFields(previous[key], next[key], childPath, result);
+  }
+  return result;
+};
 
 // Toast 状态管理
 const toasts = ref<ToastMessage[]>([]);
@@ -54,6 +88,74 @@ const showToast = (type: 'success' | 'error' | 'info', text: string) => {
 const dismissToast = (id: string) => {
   const idx = toasts.value.findIndex(t => t.id === id);
   if (idx !== -1) toasts.value.splice(idx, 1);
+};
+
+const handleExternalResumeChange = (
+  changes: Record<string, chrome.storage.StorageChange>,
+  areaName: string,
+) => {
+  if (areaName !== 'local' || isHydratingResume || autoSaveTimer || autoSaveStatus.value === 'saving') return;
+  const changedResumeData = Object.keys(changes).some((key) =>
+    key === RESUME_STORAGE_INDEX_KEY || key.startsWith(RESUME_STORAGE_ENTRY_PREFIX)
+  );
+  if (changedResumeData) void loadResumes();
+};
+
+const cloneResume = (resume: StandardResume): StandardResume => JSON.parse(JSON.stringify(resume));
+
+const queueResumeSave = (snapshot: StandardResume): Promise<void> => {
+  const generation = ++saveGeneration;
+  autoSaveStatus.value = 'saving';
+
+  const operation = saveQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const previous = persistedResumeSnapshot && persistedResumeSnapshot.id === snapshot.id
+        ? persistedResumeSnapshot
+        : null;
+      const changedFields = previous
+        ? collectChangedFields(previous, snapshot)
+        : {};
+      if (!previous) {
+        await resumeStorage.saveResume(snapshot);
+      } else if (Object.keys(changedFields).length > 0) {
+        await resumeStorage.updateResumeFields(snapshot.id, changedFields);
+      }
+    });
+  saveQueue = operation;
+
+  operation.then(() => {
+    const index = resumes.value.findIndex((resume) => resume.id === snapshot.id);
+    if (index >= 0) resumes.value[index] = cloneResume(snapshot);
+    persistedResumeSnapshot = cloneResume(snapshot);
+    if (generation === saveGeneration) autoSaveStatus.value = 'saved';
+  }).catch((error) => {
+    if (generation !== saveGeneration) return;
+    autoSaveStatus.value = 'error';
+    console.error('[OpenJobFill] Auto-save resume failed:', error);
+    showToast('error', error instanceof Error ? error.message : '自动保存失败，请重试');
+  });
+
+  return operation;
+};
+
+const scheduleResumeSave = () => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveStatus.value = 'idle';
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = undefined;
+    void queueResumeSave(cloneResume(currentResume.value));
+  }, 250);
+};
+
+const flushPendingResumeSave = async () => {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+    await queueResumeSave(cloneResume(currentResume.value));
+    return;
+  }
+  await saveQueue;
 };
 
 // Confirm Modal 状态管理 (替代 window.confirm)
@@ -107,9 +209,17 @@ const handleRemoveDomain = async (index: number) => {
 };
 
 const loadResumes = async () => {
-  resumes.value = await resumeStorage.getAllResumes();
-  const active = await resumeStorage.getActiveResume();
-  currentResume.value = JSON.parse(JSON.stringify(active));
+  isHydratingResume = true;
+  try {
+    resumes.value = await resumeStorage.getAllResumes();
+    const active = await resumeStorage.getActiveResume();
+    currentResume.value = cloneResume(active);
+    persistedResumeSnapshot = cloneResume(active);
+    autoSaveStatus.value = 'saved';
+    await nextTick();
+  } finally {
+    isHydratingResume = false;
+  }
 };
 
 const handleDataRestored = async () => {
@@ -117,9 +227,14 @@ const handleDataRestored = async () => {
   await loadCustomDomains();
 };
 
-onMounted(() => {
-  loadResumes();
-  loadCustomDomains();
+onMounted(async () => {
+  try {
+    await Promise.all([loadResumes(), loadCustomDomains()]);
+    chrome.storage?.onChanged?.addListener(handleExternalResumeChange);
+  } catch (error) {
+    console.error('[OpenJobFill] Load resume failed:', error);
+    showToast('error', error instanceof Error ? error.message : '读取简历失败，请刷新后重试');
+  }
 
   const hash = window.location.hash.replace('#', '');
   if (hash && ['basics', 'education', 'experience', 'projects', 'qa', 'tracker', 'customRules', 'settings'].includes(hash)) {
@@ -127,19 +242,41 @@ onMounted(() => {
   }
 });
 
+watch(currentResume, () => {
+  if (!isHydratingResume) scheduleResumeSave();
+}, { deep: true });
+
+onBeforeUnmount(() => {
+  chrome.storage?.onChanged?.removeListener(handleExternalResumeChange);
+  void flushPendingResumeSave();
+});
+
 const selectResume = async (r: StandardResume) => {
-  await resumeStorage.setActiveResumeId(r.id);
-  currentResume.value = JSON.parse(JSON.stringify(r));
+  await flushPendingResumeSave();
+  isHydratingResume = true;
+  try {
+    await resumeStorage.setActiveResumeId(r.id);
+    currentResume.value = cloneResume(r);
+    persistedResumeSnapshot = cloneResume(r);
+    await nextTick();
+  } finally {
+    isHydratingResume = false;
+  }
 };
 
 const handleSave = async () => {
-  await resumeStorage.saveResume(currentResume.value);
-  await loadResumes();
-  saveSuccess.value = true;
-  showToast('success', '简历配置已成功保存！');
-  setTimeout(() => {
-    saveSuccess.value = false;
-  }, 2500);
+  try {
+    await flushPendingResumeSave();
+    await queueResumeSave(cloneResume(currentResume.value));
+    await loadResumes();
+    saveSuccess.value = true;
+    showToast('success', '简历配置已成功保存！');
+    setTimeout(() => {
+      saveSuccess.value = false;
+    }, 2500);
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : '保存失败，请重试');
+  }
 };
 
 const showImportModal = ref(false);
@@ -147,7 +284,12 @@ const showImportModal = ref(false);
 const handleResumeImported = async (imported: StandardResume) => {
   try {
     showImportModal.value = false;
-    currentResume.value = JSON.parse(JSON.stringify(imported));
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+    await saveQueue.catch(() => undefined);
+    isHydratingResume = true;
+    currentResume.value = cloneResume(imported);
+    persistedResumeSnapshot = cloneResume(imported);
     await resumeStorage.saveResume(imported);
     await resumeStorage.setActiveResumeId(imported.id);
     await loadResumes();
@@ -155,6 +297,7 @@ const handleResumeImported = async (imported: StandardResume) => {
     showToast('success', `已成功解析并导入新简历：${imported.title}`);
     setTimeout(() => { saveSuccess.value = false; }, 2500);
   } catch (e: any) {
+    isHydratingResume = false;
     console.error('[OpenJobFill] Import resume failed:', e);
     showToast('error', `导入简历失败: ${e?.message || '未知异常'}`);
   }
@@ -173,6 +316,7 @@ const handleCreateNewResume = async () => {
   await resumeStorage.setActiveResumeId(newResume.id);
   await loadResumes();
   currentResume.value = JSON.parse(JSON.stringify(newResume));
+  persistedResumeSnapshot = cloneResume(newResume);
   showToast('success', `已创建新简历：${newResume.title}`);
 };
 
@@ -206,8 +350,10 @@ const handleImportJson = (e: Event) => {
     try {
       const content = event.target?.result as string;
       const imported = await resumeStorage.importResumeFromJson(content);
+      // 导入后的新档案必须成为激活项，否则刷新页面会重新载入旧档案，
+      // 用户会误以为刚上传解析的内容丢失。
+      await resumeStorage.setActiveResumeId(imported.id);
       await loadResumes();
-      currentResume.value = imported;
       showToast('success', '简历 JSON 导入成功！');
     } catch (err) {
       showToast('error', '导入失败，请检查 JSON 数据格式是否完整');
@@ -228,7 +374,7 @@ const handleImportJson = (e: Event) => {
           </div>
           <div>
             <h1 class="text-base font-bold text-slate-900 leading-tight">OpenJobFill 简历管理中心</h1>
-            <p class="text-xs text-slate-500">自用版智能填表数据配置台 (100% 浏览器本地存储)</p>
+            <p class="text-xs text-slate-500">自用版智能填表数据配置台（本地优先存储）</p>
           </div>
         </div>
 
@@ -266,6 +412,14 @@ const handleImportJson = (e: Event) => {
             <Download class="w-3.5 h-3.5" aria-hidden="true" />
             <span>导出 JSON</span>
           </button>
+
+          <span
+            class="min-w-[64px] text-right text-[11px]"
+            :class="autoSaveStatus === 'error' ? 'text-red-600' : 'text-slate-500'"
+            aria-live="polite"
+          >
+            {{ autoSaveStatus === 'saving' ? '保存中…' : autoSaveStatus === 'error' ? '保存失败' : autoSaveStatus === 'saved' ? '已自动保存' : '待保存' }}
+          </span>
 
           <button
             type="button"

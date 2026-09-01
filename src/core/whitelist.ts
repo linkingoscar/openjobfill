@@ -261,25 +261,32 @@ export async function isRecruitmentPage(url: string = window.location.href): Pro
 }
 
 /**
- * 周期性观测页面变化 (带热重载自毁机制，彻底杜绝 context invalidated 报错)
+ * 观测页面变化。
+ *
+ * 以前这里在所有 iframe、所有页面上每 2.5 秒扫描一次 DOM；现在改为一次立即
+ * 检测 + 只关注新增表单节点的 MutationObserver，并用 debounce 合并同一批变化。
+ * 这样动态加载网申表单仍能被识别，但普通页面不再持续读取 computed style/body 文本。
  */
 export function observeRecruitmentPage(
   onDetected: () => void,
   onLeft?: () => void,
-  intervalMs = 2500
+  intervalMs = 500
 ): () => void {
   let wasRecruiting = false;
-  let timer: any = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
 
   const check = async () => {
+    if (disposed) return;
     // 扩展上下文失效检测：如果扩展在管理页被重新加载，立即自毁当前标签页的旧定时器
     if (typeof chrome !== 'undefined' && !chrome.runtime?.id) {
-      if (timer) clearInterval(timer);
+      cleanup();
       return;
     }
 
     try {
       const isRecruiting = await isRecruitmentPage();
+      if (disposed) return;
       if (isRecruiting && !wasRecruiting) {
         onDetected();
       } else if (!isRecruiting && wasRecruiting && onLeft) {
@@ -287,14 +294,42 @@ export function observeRecruitmentPage(
       }
       wasRecruiting = isRecruiting;
     } catch {
-      if (timer) clearInterval(timer);
+      // 页面导航或扩展重载期间读取 DOM/storage 失败时等待下一次相关变化。
     }
   };
 
-  timer = setInterval(check, intervalMs);
-  check();
-
-  return () => {
-    if (timer) clearInterval(timer);
+  const scheduleCheck = () => {
+    if (disposed || timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void check();
+    }, intervalMs);
   };
+
+  const isRelevantNode = (node: Node): boolean => {
+    if (!(node instanceof Element)) return false;
+    try {
+      return node.matches('form, input, textarea, select, [role="textbox"], [contenteditable="true"]')
+        || !!node.querySelector('form, input, textarea, select, [role="textbox"], [contenteditable="true"]');
+    } catch {
+      return false;
+    }
+  };
+
+  const observer = typeof MutationObserver !== 'undefined' && document.body
+    ? new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => Array.from(mutation.addedNodes).some(isRelevantNode))) scheduleCheck();
+    })
+    : null;
+  observer?.observe(document.body, { childList: true, subtree: true });
+  void check();
+
+  function cleanup() {
+    disposed = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    observer?.disconnect();
+  }
+
+  return cleanup;
 }

@@ -283,15 +283,8 @@ export function initSmartQALearner(): () => void {
           value,
           async () => {
             if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
-            // 写入 Profile
-            const keyParts = profileMatch.key.split('.');
-            let curr: any = resume;
-            for (let i = 0; i < keyParts.length - 1; i++) {
-              if (!curr[keyParts[i]]) curr[keyParts[i]] = {};
-              curr = curr[keyParts[i]];
-            }
-            curr[keyParts[keyParts.length - 1]] = value;
-            await resumeStorage.saveResume(resume);
+            // 通过 background 的串行更新入口写入 Profile，避免覆盖管理页刚保存的其它字段。
+            await resumeStorage.updateResumeFields(resume.id, { [profileMatch.key]: value });
             console.log(`[OpenJobFill] 资料已自动补全到简历 Profile: ${profileMatch.key} = "${value}"`);
           },
           () => {}
@@ -318,15 +311,14 @@ export function initSmartQALearner(): () => void {
         value,
         async () => {
           if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
-          if (!resume.qaBank) resume.qaBank = [];
-          resume.qaBank.push({
+          const qaItem = {
             id: `qa-${Date.now()}`,
             keyword: label,
             answer: value,
             scope: 'domain', // 默认专属当前域名
             domain: currentHost,
-          });
-          await resumeStorage.saveResume(resume);
+          } as const;
+          await resumeStorage.appendResumeArrayItem(resume.id, 'qaBank', qaItem);
           console.log(`[OpenJobFill] 智能问答已存入 QA 库 (Domain: ${currentHost}): 【${label}】 -> ${value}`);
         },
         () => {}

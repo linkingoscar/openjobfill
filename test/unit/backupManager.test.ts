@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { backupManager } from '@/core/storage/backupManager';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
@@ -184,5 +184,95 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
     const rules = await ruleStorage.getCustomRules();
     expect(rules.some(r => r.id === 'new-rule-1')).toBe(true);
     expect(rules.some(r => r.id === 'old-rule-1')).toBe(false); // 旧规则被清空
+  });
+
+  it('遇到任一模块格式错误时应在写入前拒绝，避免部分导入', async () => {
+    await resumeStorage.saveResume({
+      ...EMPTY_RESUME,
+      id: 'safe-resume',
+      basics: { ...EMPTY_RESUME.basics, name: '原始用户' },
+    });
+
+    const malformed = {
+      app: 'OpenJobFill',
+      version: 1,
+      data: {
+        resumes: [{ ...EMPTY_RESUME, id: 'incoming-resume' }],
+        customRules: [{ id: 'broken-rule', domainPattern: 'example.com', fields: 'not-an-array' }],
+        customDomains: ['safe.example.com'],
+        jobApplications: [],
+      },
+    };
+
+    await expect(backupManager.importFullBackup(JSON.stringify(malformed), 'overwrite'))
+      .rejects.toThrow('自定义规则');
+    const resumes = await resumeStorage.getAllResumes();
+    expect(resumes.some((resume) => resume.id === 'safe-resume')).toBe(true);
+    expect(resumes.some((resume) => resume.id === 'incoming-resume')).toBe(false);
+  });
+
+  it('简历嵌套字段类型错误时也应在写入前拒绝', async () => {
+    const malformed = {
+      app: 'OpenJobFill',
+      version: 1,
+      data: {
+        resumes: [{
+          ...EMPTY_RESUME,
+          id: 'bad-resume',
+          basics: { ...EMPTY_RESUME.basics },
+          educations: [{ id: 'edu-1', schoolName: 123, degree: '本科', major: '', startDate: '', endDate: '' }],
+        }],
+        customRules: [],
+        customDomains: [],
+        jobApplications: [],
+      },
+    };
+
+    await expect(backupManager.importFullBackup(JSON.stringify(malformed), 'overwrite'))
+      .rejects.toThrow('schoolName');
+    expect((await resumeStorage.getAllResumes()).some((resume) => resume.id === 'bad-resume')).toBe(false);
+  });
+
+  it('覆盖恢复中途写入失败时应回滚所有已写入模块', async () => {
+    await resumeStorage.saveResume({
+      ...EMPTY_RESUME,
+      id: 'before-resume',
+      basics: { ...EMPTY_RESUME.basics, name: '恢复前用户' },
+    });
+    await saveCustomDomains(['before.example.com']);
+
+    const incoming = {
+      app: 'OpenJobFill',
+      version: 1,
+      data: {
+        resumes: [{ ...EMPTY_RESUME, id: 'after-resume', basics: { ...EMPTY_RESUME.basics, name: '恢复后用户' } }],
+        customRules: [{
+          id: 'after-rule',
+          name: '恢复后规则',
+          domainPattern: 'after.example.com',
+          enabled: true,
+          fields: [{ id: 'after-field', selector: '#name', resumeKey: 'basics.name' }],
+        }],
+        customDomains: ['after.example.com'],
+        jobApplications: [],
+      },
+    };
+
+    const originalSaveApplications = trackerStorage.saveApplications.bind(trackerStorage);
+    const saveApplicationsSpy = vi.spyOn(trackerStorage, 'saveApplications')
+      .mockImplementationOnce(async () => {
+        throw new Error('模拟投递记录写入失败');
+      })
+      .mockImplementation(originalSaveApplications);
+
+    await expect(backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite'))
+      .rejects.toThrow('已回滚原数据');
+
+    const resumes = await resumeStorage.getAllResumes();
+    expect(resumes.some((resume) => resume.id === 'before-resume')).toBe(true);
+    expect(resumes.some((resume) => resume.id === 'after-resume')).toBe(false);
+    expect(await getCustomDomains()).toEqual(['before.example.com']);
+    expect(saveApplicationsSpy).toHaveBeenCalledTimes(2);
+    saveApplicationsSpy.mockRestore();
   });
 });

@@ -341,5 +341,37 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(result.filledCount).toBe(1);
       expect(result.durationMs).toBeLessThan(120);
     });
+
+    it('表单节点被刷新后，不应继续执行旧预览计划', async () => {
+      document.body.innerHTML = `
+        <form>
+          <div class="form-item">
+            <label>姓名 *</label>
+            <input name="name" type="text" />
+          </div>
+        </form>
+      `;
+
+      const analyzed = await formFillerEngine.analyze(MOCK_RESUME);
+      document.body.innerHTML = '<form><input name="name" type="text" /></form>';
+
+      await expect(formFillerEngine.executePlan(analyzed)).rejects.toThrow('表单已刷新');
+      expect(document.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('');
+    });
+
+    it('SPA 步骤地址变化后，不应继续执行旧预览计划', async () => {
+      document.body.innerHTML = `
+        <form><label>姓名 *</label><input name="name" type="text" /></form>
+      `;
+
+      const analyzed = await formFillerEngine.analyze(MOCK_RESUME);
+      const originalUrl = window.location.href;
+      try {
+        window.history.pushState({}, '', `${originalUrl}#next-step`);
+        await expect(formFillerEngine.executePlan(analyzed)).rejects.toThrow('页面步骤已变化');
+      } finally {
+        window.history.replaceState({}, '', originalUrl);
+      }
+    });
   });
 });

@@ -7,6 +7,7 @@ import { pipelineExecutor } from '../pipeline/executor';
 import { sectionEngine } from './sectionEngine';
 import { getEnhancerForUrl } from '../adapters/enhancers';
 import { ruleStorage } from '../storage/ruleStorage';
+import { resumeStorage } from '../storage/resumeStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 import { applyAIFallbackToPlan } from '../ai/aiFallback';
 import { executeRemoteFrames } from '../frames/frameCoordinator';
@@ -15,7 +16,63 @@ import { executeRemoteFrames } from '../frames/frameCoordinator';
 export interface AnalyzedPlan {
   plan: FillPlan;
   adapterName: string;
+  /** 用于防止简历编辑或切换后继续执行旧预览。 */
+  resumeId: string;
+  resumeUpdatedAt: number;
+  /** 用于防止 SPA 步骤切换或页面替换后继续执行旧预览。 */
+  pageUrl: string;
   remoteFrames?: RemoteFramePlan[];
+}
+
+/** 预览期间页面或简历发生变化时，阻止写入旧计划。 */
+export class AnalyzedPlanStaleError extends Error {
+  constructor(reason = '当前页面或简历已发生变化，预览已失效，请重新识别后再试') {
+    super(reason);
+    this.name = 'AnalyzedPlanStaleError';
+  }
+}
+
+function isExtensionStorageAvailable(): boolean {
+  return typeof chrome !== 'undefined'
+    && !!chrome.runtime?.id
+    && !!chrome.storage?.local;
+}
+
+function isAttachedElement(element: HTMLElement): boolean {
+  if (typeof element.isConnected === 'boolean') return element.isConnected;
+  return !!element.ownerDocument?.contains(element);
+}
+
+/**
+ * 在任何 DOM 写入前验证分析快照仍然适用。
+ *
+ * 页面地址和节点连接性在所有运行环境都校验；简历更新时间只在真实扩展
+ * 上下文读取持久化数据，避免单元测试或独立调用方被强制绑定到 Chrome API。
+ */
+async function assertAnalyzedPlanIsCurrent(analyzed: AnalyzedPlan): Promise<void> {
+  if (analyzed.pageUrl && typeof window !== 'undefined' && window.location.href !== analyzed.pageUrl) {
+    throw new AnalyzedPlanStaleError('当前页面步骤已变化，预览已失效，请重新识别后再试');
+  }
+
+  const detachedField = analyzed.plan.items.find(
+    (item) => item.action !== 'SKIP' && !isAttachedElement(item.field.element),
+  );
+  if (detachedField) {
+    throw new AnalyzedPlanStaleError('当前表单已刷新，预览已失效，请重新识别后再试');
+  }
+
+  if (!isExtensionStorageAvailable() || !analyzed.resumeId) return;
+
+  let currentResume: StandardResume | undefined;
+  try {
+    currentResume = (await resumeStorage.getAllResumes()).find((resume) => resume.id === analyzed.resumeId);
+  } catch {
+    throw new AnalyzedPlanStaleError('暂时无法校验当前简历，请重新识别后再试');
+  }
+
+  if (!currentResume || currentResume.updatedAt !== analyzed.resumeUpdatedAt) {
+    throw new AnalyzedPlanStaleError('当前简历已更新或切换，预览已失效，请重新识别后再试');
+  }
 }
 
 export class FormFillerEngine {
@@ -71,6 +128,9 @@ export class FormFillerEngine {
     return {
       plan,
       adapterName: enhancer ? enhancer.name : '智能通用决策引擎 (Pipeline v2)',
+      resumeId: resume.id,
+      resumeUpdatedAt: resume.updatedAt,
+      pageUrl: currentUrl,
     };
   }
 
@@ -79,6 +139,9 @@ export class FormFillerEngine {
    */
   async executePlan(analyzed: AnalyzedPlan): Promise<FillResult> {
     const { plan, adapterName } = analyzed;
+
+    // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
+    await assertAnalyzedPlanIsCurrent(analyzed);
 
     const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan);
     const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || []);

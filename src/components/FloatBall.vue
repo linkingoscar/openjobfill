@@ -6,10 +6,7 @@ import {
   CheckCircle, 
   X, 
   Copy, 
-  Check, 
-  Search, 
   Settings, 
-  ExternalLink,
   User,
   GraduationCap,
   Briefcase,
@@ -28,13 +25,16 @@ import {
   TrendingUp,
   Pipette,
   Highlighter,
-  History,
-  Trash2
 } from 'lucide-vue-next';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
-import { fillHistoryStorage, MAX_FILL_HISTORY_RECORDS } from '@/core/storage/fillHistoryStorage';
+import { useFillHistory } from './composables/useFillHistory';
+import { useFillPreview } from './composables/useFillPreview';
+import { useJDAnalysis } from './composables/useJDAnalysis';
+import DrawerHistoryTab from './DrawerHistoryTab.vue';
+import DrawerReviewTab from './DrawerReviewTab.vue';
+import DrawerClipboardTab from './DrawerClipboardTab.vue';
 import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { getAdapterForUrl } from '@/core/adapters';
@@ -42,17 +42,12 @@ import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
 import { startManualFill } from '@/core/engine/manualFill';
-import { analyzeJDMatch, highlightJDOnWebpage, clearJDHighlights, type JDAnalysisResult } from '@/core/matcher/jdMatcher';
 import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
-import type { FillHistoryRecord } from '@/types/fillHistory';
-import {
-  calculateFloatingBallLayout,
-  clampFloatingBallPosition,
-  type FloatingBallPosition,
-} from '@/core/ui/floatingBallPosition';
+import type { ClipboardItem } from '@/types/floatingBall';
+import { useFloatingPosition } from './composables/useFloatingPosition';
 
 const isFilling = ref(false);
 const isDrawerOpen = ref(false);
@@ -64,88 +59,23 @@ const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
 const isHiddenOnCurrentPage = ref(false);
-const fillHistoryRecords = ref<FillHistoryRecord[]>([]);
-const isHistoryLoading = ref(false);
 
-const FLOATING_POSITION_KEY = 'openjobfill_floating_ball_position';
-const viewportWidth = ref(window.innerWidth);
-const viewportHeight = ref(window.innerHeight);
-const floatingPosition = ref<FloatingBallPosition>(clampFloatingBallPosition(
-  { x: window.innerWidth, bottom: 96 },
-  window.innerWidth,
-  window.innerHeight,
-));
-let isDraggingBall = false;
-let dragMoved = false;
-let suppressNextBubbleClick = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let dragStartPosition: FloatingBallPosition = { ...floatingPosition.value };
-
-const loadFloatingPosition = () => {
-  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-  chrome.storage.local.get([FLOATING_POSITION_KEY], (result) => {
-    const saved = result[FLOATING_POSITION_KEY] as Partial<FloatingBallPosition> | undefined;
-    if (typeof saved?.x !== 'number' || typeof saved?.bottom !== 'number') return;
-    floatingPosition.value = clampFloatingBallPosition(
-      { x: saved.x, bottom: saved.bottom },
-      viewportWidth.value,
-      viewportHeight.value,
-    );
-  });
-};
-
-const saveFloatingPosition = () => {
-  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-  chrome.storage.local.set({ [FLOATING_POSITION_KEY]: floatingPosition.value });
-};
-
-const handleViewportResize = () => {
-  viewportWidth.value = window.innerWidth;
-  viewportHeight.value = window.innerHeight;
-  floatingPosition.value = clampFloatingBallPosition(
-    floatingPosition.value,
-    viewportWidth.value,
-    viewportHeight.value,
-  );
-};
-
-const stopBallDrag = () => {
-  if (!isDraggingBall) return;
-  isDraggingBall = false;
-  window.removeEventListener('pointermove', handleBallDragMove);
-  window.removeEventListener('pointerup', stopBallDrag);
-  window.removeEventListener('pointercancel', stopBallDrag);
-  if (dragMoved) {
-    suppressNextBubbleClick = true;
-    saveFloatingPosition();
-    window.setTimeout(() => { suppressNextBubbleClick = false; }, 0);
-  }
-};
-
-const handleBallDragMove = (event: PointerEvent) => {
-  if (!isDraggingBall) return;
-  const deltaX = event.clientX - dragStartX;
-  const deltaY = event.clientY - dragStartY;
-  if (!dragMoved && Math.hypot(deltaX, deltaY) < 5) return;
-  dragMoved = true;
-  floatingPosition.value = clampFloatingBallPosition({
-    x: dragStartPosition.x + deltaX,
-    bottom: dragStartPosition.bottom - deltaY,
-  }, viewportWidth.value, viewportHeight.value);
-};
-
-const startBallDrag = (event: PointerEvent) => {
-  if (event.button !== 0 || isFilling.value) return;
-  isDraggingBall = true;
-  dragMoved = false;
-  dragStartX = event.clientX;
-  dragStartY = event.clientY;
-  dragStartPosition = { ...floatingPosition.value };
-  window.addEventListener('pointermove', handleBallDragMove);
-  window.addEventListener('pointerup', stopBallDrag);
-  window.addEventListener('pointercancel', stopBallDrag);
-};
+const {
+  responsiveDrawerWidth,
+  responsiveDrawerHeight,
+  floatingLayout,
+  floatingRootStyle,
+  loadFloatingPosition,
+  handleViewportResize,
+  startBallDrag,
+  stopBallDrag,
+  startResize,
+  handleResizeMove,
+  stopResize,
+  cleanup: cleanupFloatingPosition,
+  suppressNextBubbleClick,
+  clearSuppressNextBubbleClick,
+} = useFloatingPosition(isDrawerOpen, isFilling);
 
 const handleHideFloatingBall = () => {
   isDrawerOpen.value = false;
@@ -263,22 +193,37 @@ const handleSaveTaskMapping = async (task: any) => {
 const notifyStepChange = (newUrl: string) => {
   stepNotification.value = {
     show: true,
-    text: '💡 检测到网申已进入新步骤，点击可一键规划并填充当前页'
+    text: '点击即可重新规划并填充当前页'
   };
   setTimeout(() => {
     stepNotification.value.show = false;
   }, 8000);
 };
 
-// 岗位 JD 分析与荧光笔状态
-const jdAnalysis = ref<JDAnalysisResult | null>(null);
-const isAnalyzingJD = ref(false);
-const isHighlightingJD = ref(false);
-
 // 剪贴板快速搜索与复制提示
 const searchQuery = ref('');
 const copiedFieldKey = ref<string | null>(null);
 const copyToastMessage = ref('');
+const {
+  jdAnalysis,
+  isAnalyzingJD,
+  isHighlightingJD,
+  handleAnalyzeJD,
+  handleSwitchToJDTab,
+  handleToggleJDHighlight,
+} = useJDAnalysis(currentResume, drawerTab, copyToastMessage);
+const {
+  fillHistoryRecords,
+  isHistoryLoading,
+  MAX_FILL_HISTORY_RECORDS,
+  loadFillHistory,
+  persistFillHistory,
+  persistOperationError,
+  formatHistoryTime,
+  handleCopyDiagnosticHistory,
+  handleExportDiagnosticHistory,
+  handleClearFillHistory,
+} = useFillHistory(copyToastMessage, currentAdapterName);
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && isDrawerOpen.value) {
@@ -312,146 +257,6 @@ const handleSwitchResume = async (e: Event) => {
   }, 2500);
 };
 
-// 抽屉尺寸自定义与拖拽调节
-const drawerWidth = ref(Number(localStorage.getItem('openjobfill_drawer_width')) || 384);
-const drawerHeight = ref(Number(localStorage.getItem('openjobfill_drawer_height')) || 620);
-const floatingLayout = computed(() => calculateFloatingBallLayout(
-  floatingPosition.value,
-  viewportWidth.value,
-  isDrawerOpen.value,
-  drawerWidth.value,
-));
-const floatingRootStyle = computed(() => ({
-  left: `${floatingLayout.value.left}px`,
-  bottom: `${floatingLayout.value.bottom}px`,
-}));
-let isResizing = false;
-let resizeStartX = 0;
-let resizeStartY = 0;
-let initialWidth = 384;
-let initialHeight = 620;
-let resizeHorizontalDirection = -1;
-
-const startResize = (e: MouseEvent) => {
-  isResizing = true;
-  resizeStartX = e.clientX;
-  resizeStartY = e.clientY;
-  initialWidth = drawerWidth.value;
-  initialHeight = drawerHeight.value;
-  resizeHorizontalDirection = floatingLayout.value.opensLeft ? -1 : 1;
-  document.addEventListener('mousemove', handleResizeMove);
-  document.addEventListener('mouseup', stopResize);
-  e.preventDefault();
-};
-
-const handleResizeMove = (e: MouseEvent) => {
-  if (!isResizing) return;
-  const deltaX = (e.clientX - resizeStartX) * resizeHorizontalDirection;
-  const deltaY = resizeStartY - e.clientY;
-  drawerWidth.value = Math.max(320, Math.min(680, initialWidth + deltaX));
-  drawerHeight.value = Math.max(400, Math.min(window.innerHeight - 80, initialHeight + deltaY));
-};
-
-const stopResize = () => {
-  if (!isResizing) return;
-  isResizing = false;
-  document.removeEventListener('mousemove', handleResizeMove);
-  document.removeEventListener('mouseup', stopResize);
-  localStorage.setItem('openjobfill_drawer_width', String(drawerWidth.value));
-  localStorage.setItem('openjobfill_drawer_height', String(drawerHeight.value));
-};
-
-const loadFillHistory = async () => {
-  isHistoryLoading.value = true;
-  try {
-    fillHistoryRecords.value = await fillHistoryStorage.getRecords();
-  } catch (err) {
-    console.warn('[OpenJobFill] 读取填表历史失败:', err);
-  } finally {
-    isHistoryLoading.value = false;
-  }
-};
-
-const persistFillHistory = async (result: FillResult) => {
-  try {
-    const record = fillHistoryStorage.createRecord(result, {
-      pageUrl: window.location.href,
-      pageTitle: document.title,
-    });
-    fillHistoryRecords.value = await fillHistoryStorage.append(record);
-  } catch (err) {
-    // 历史记录属于辅助能力，存储失败不能让已经完成的填表被误报为失败。
-    console.warn('[OpenJobFill] 保存填表历史失败:', err);
-  }
-};
-
-const persistOperationError = async (phase: 'analysis' | 'execution', error: unknown) => {
-  try {
-    const record = fillHistoryStorage.createErrorRecord({
-      pageUrl: window.location.href,
-      pageTitle: document.title,
-      adapterName: currentAdapterName.value,
-      phase,
-      error,
-    });
-    fillHistoryRecords.value = await fillHistoryStorage.append(record);
-  } catch (storageError) {
-    console.warn('[OpenJobFill] 保存异常诊断失败:', storageError);
-  }
-};
-
-const formatHistoryTime = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
-};
-
-const showHistoryToast = (message: string) => {
-  copyToastMessage.value = message;
-  setTimeout(() => { copyToastMessage.value = ''; }, 2500);
-};
-
-const handleCopyDiagnosticHistory = async () => {
-  if (fillHistoryRecords.value.length === 0) {
-    showHistoryToast('暂无可复制的填表历史');
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(await fillHistoryStorage.exportJSON());
-    showHistoryToast(`已复制 ${fillHistoryRecords.value.length} 次脱敏诊断记录`);
-  } catch (err) {
-    console.error('[OpenJobFill] 复制诊断记录失败:', err);
-    showHistoryToast('复制失败，请改用导出 JSON');
-  }
-};
-
-const handleExportDiagnosticHistory = async () => {
-  if (fillHistoryRecords.value.length === 0) {
-    showHistoryToast('暂无可导出的填表历史');
-    return;
-  }
-  const blob = new Blob([await fillHistoryStorage.exportJSON()], { type: 'application/json;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `openjobfill-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-  showHistoryToast(`已导出 ${fillHistoryRecords.value.length} 次脱敏诊断记录`);
-};
-
-const handleClearFillHistory = async () => {
-  if (fillHistoryRecords.value.length === 0) return;
-  if (!window.confirm(`确认清空最近 ${fillHistoryRecords.value.length} 次填表历史？此操作无法撤销。`)) return;
-  await fillHistoryStorage.clear();
-  fillHistoryRecords.value = [];
-  showHistoryToast('填表历史已清空');
-};
-
 onMounted(async () => {
   loadFloatingPosition();
   const adapter = getAdapterForUrl(window.location.href);
@@ -464,9 +269,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('resize', handleViewportResize);
-  stopBallDrag();
-  document.removeEventListener('mousemove', handleResizeMove);
-  document.removeEventListener('mouseup', stopResize);
+  cleanupFloatingPosition();
 });
 
 const handleQuickFill = async () => {
@@ -516,30 +319,11 @@ const handleQuickFill = async () => {
 };
 
 const handleBubbleClick = () => {
-  if (suppressNextBubbleClick) {
-    suppressNextBubbleClick = false;
+  if (suppressNextBubbleClick.value) {
+    clearSuppressNextBubbleClick();
     return;
   }
   void handleQuickFill();
-};
-
-const handleAnalyzeJD = () => {
-  if (!currentResume.value) return;
-  isAnalyzingJD.value = true;
-  try {
-    jdAnalysis.value = analyzeJDMatch(currentResume.value);
-  } catch (e) {
-    console.error('JD Match error:', e);
-  } finally {
-    isAnalyzingJD.value = false;
-  }
-};
-
-const handleSwitchToJDTab = () => {
-  drawerTab.value = 'jdMatch';
-  if (!jdAnalysis.value) {
-    handleAnalyzeJD();
-  }
 };
 
 const handleClearBadges = () => {
@@ -573,20 +357,6 @@ const handleArchiveJob = async () => {
   setTimeout(() => { copyToastMessage.value = ''; }, 3000);
 };
 
-const handleToggleJDHighlight = () => {
-  if (!currentResume.value) return;
-  if (!isHighlightingJD.value) {
-    const res = highlightJDOnWebpage(currentResume.value);
-    isHighlightingJD.value = true;
-    copyToastMessage.value = `🖍️ 已在网页标注技能词 (命中 ${res.matchedCount} / 缺失 ${res.missingCount})`;
-  } else {
-    clearJDHighlights();
-    isHighlightingJD.value = false;
-    copyToastMessage.value = '已清除网页 JD 荧光笔标记';
-  }
-  setTimeout(() => { copyToastMessage.value = ''; }, 2500);
-};
-
 const handleStartPicker = () => {
   isDrawerOpen.value = false;
   startElementPicking((result) => {
@@ -608,13 +378,6 @@ const toggleDrawer = async () => {
 };
 
 // 提取结构化简历平铺字段 (供速查剪贴板使用)
-interface ClipboardItem {
-  id: string;
-  category: '基本信息' | '教育经历' | '工作实习' | '项目经历' | '技能证书' | '家庭成员' | '成果荣誉' | '校园经历' | '问答与评价';
-  label: string;
-  value: string;
-}
-
 const flatResumeFields = computed<ClipboardItem[]>(() => {
   if (!currentResume.value) return [];
   const r = currentResume.value;
@@ -790,58 +553,22 @@ const handleManualFill = async () => {
 };
 
 // ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
-const previewPlan = ref<AnalyzedPlan | null>(null);
-
-const getRemotePreviewItems = (action: 'FILL' | 'NEEDS_USER') =>
-  (previewPlan.value?.remoteFrames || []).flatMap((frame) =>
-    frame.items
-      .filter((item) => item.action === action)
-      .map((item) => ({
-        ...item,
-        id: `frame-${frame.frameId}-${item.id}`,
-        field: { label: `${item.label}（子页面）` },
-      }))
-  );
-
-const previewFillItems = computed(() => [
-  ...(previewPlan.value?.plan.items.filter((item) => item.action === 'FILL') ?? []),
-  ...getRemotePreviewItems('FILL'),
-]);
-const previewNeedsUserItems = computed(() => [
-  ...(previewPlan.value?.plan.items.filter((item) => item.action === 'NEEDS_USER') ?? []),
-  ...getRemotePreviewItems('NEEDS_USER'),
-]);
-
-const confirmFill = async () => {
-  if (!previewPlan.value || previewFillItems.value.length === 0 || isFilling.value) return;
-  isFilling.value = true;
-  operationError.value = '';
-  try {
-    const result = await formFillerEngine.executePlan(previewPlan.value);
-    fillResult.value = result;
-    await persistFillHistory(result);
-    previewPlan.value = null;
-    drawerTab.value = 'logs';
-  } catch (err: any) {
-    console.error('[OpenJobFill] Execute fill error:', err);
-    operationError.value = err?.message || '填写执行失败，请重新识别后再试';
-    await persistOperationError('execution', operationError.value);
-  } finally {
-    isFilling.value = false;
-  }
-};
-
-const cancelPreview = async () => {
-  if (previewPlan.value?.remoteFrames?.length) {
-    await cancelRemoteFrames(previewPlan.value.remoteFrames);
-  }
-  previewPlan.value = null;
-};
-
-const handlePreviewManualFill = async () => {
-  await cancelPreview();
-  await handleManualFill();
-};
+const {
+  previewPlan,
+  previewFillItems,
+  previewNeedsUserItems,
+  confirmFill,
+  cancelPreview,
+  handlePreviewManualFill,
+} = useFillPreview(
+  isFilling,
+  fillResult,
+  operationError,
+  drawerTab,
+  persistFillHistory,
+  persistOperationError,
+  handleManualFill,
+);
 
 defineExpose({
   handleQuickFill,
@@ -873,9 +600,9 @@ defineExpose({
         aria-label="OpenJobFill 填表控制面板"
         v-if="isDrawerOpen"
         :style="{
-          width: `${drawerWidth}px`,
-          maxHeight: `${drawerHeight}px`,
-          height: `${drawerHeight}px`
+          width: `${responsiveDrawerWidth}px`,
+          maxHeight: `${responsiveDrawerHeight}px`,
+          height: `${responsiveDrawerHeight}px`
         }"
         class="bg-white rounded-2xl shadow-2xl border border-slate-200/90 flex flex-col overflow-hidden text-slate-800 text-xs backdrop-blur-md relative transition-[width,height] duration-75"
       >
@@ -1185,110 +912,15 @@ defineExpose({
               </div>
             </div>
 
-            <!-- 持久化脱敏填表历史 -->
-            <section class="pt-3 mt-3 border-t border-slate-200" aria-labelledby="fill-history-title">
-              <div class="flex items-center justify-between gap-2 mb-2">
-                <div class="flex items-center gap-1.5 min-w-0">
-                  <History class="w-4 h-4 text-blue-600 flex-shrink-0" aria-hidden="true" />
-                  <h3 id="fill-history-title" class="text-xs font-bold text-slate-700">
-                    填表历史（{{ fillHistoryRecords.length }}/{{ MAX_FILL_HISTORY_RECORDS }}）
-                  </h3>
-                  <span class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5">已脱敏</span>
-                </div>
-                <div class="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    type="button"
-                    @click="handleCopyDiagnosticHistory"
-                    :disabled="fillHistoryRecords.length === 0"
-                    class="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500"
-                    title="复制脱敏诊断信息"
-                    aria-label="复制脱敏诊断信息"
-                  >
-                    <Copy class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    @click="handleExportDiagnosticHistory"
-                    :disabled="fillHistoryRecords.length === 0"
-                    class="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500"
-                    title="导出脱敏诊断 JSON"
-                    aria-label="导出脱敏诊断 JSON"
-                  >
-                    <Download class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    @click="handleClearFillHistory"
-                    :disabled="fillHistoryRecords.length === 0"
-                    class="p-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-rose-500"
-                    title="清空填表历史"
-                    aria-label="清空填表历史"
-                  >
-                    <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-
-              <p class="text-[10px] text-slate-400 mb-2 leading-relaxed">
-                不保存字段实际填写值；错误文本中的联系方式、证件号和期望/实际值会自动隐藏。
-              </p>
-
-              <div v-if="isHistoryLoading" role="status" class="text-center py-3 text-xs text-slate-400">
-                正在读取历史记录…
-              </div>
-              <div v-else-if="fillHistoryRecords.length === 0" class="text-center py-3 text-xs text-slate-400 bg-slate-50 rounded-lg">
-                完成一次自动填写后，诊断记录会保存在这里
-              </div>
-              <div v-else class="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                <details
-                  v-for="record in fillHistoryRecords"
-                  :key="record.id"
-                  class="group rounded-lg border border-slate-200 bg-white overflow-hidden"
-                >
-                  <summary class="cursor-pointer list-none p-2 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="min-w-0">
-                        <div class="text-xs font-semibold text-slate-700 truncate" :title="record.pageTitle || record.hostname">
-                          {{ record.pageTitle || record.hostname || '未知页面' }}
-                        </div>
-                        <div class="text-[10px] text-slate-400 truncate mt-0.5" :title="record.pageUrl">
-                          {{ formatHistoryTime(record.createdAt) }} · {{ record.hostname || '本地页面' }}
-                        </div>
-                      </div>
-                      <div class="flex gap-1 text-[10px] font-bold flex-shrink-0">
-                        <span class="text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">成功 {{ record.filledCount }}</span>
-                        <span v-if="record.failedCount" class="text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">失败 {{ record.failedCount }}</span>
-                      </div>
-                    </div>
-                  </summary>
-                  <div class="border-t border-slate-100 p-2 bg-slate-50/60 space-y-1">
-                    <div class="text-[10px] text-slate-500 flex justify-between gap-2">
-                      <span class="truncate">引擎：{{ record.adapterName }} · {{ record.phase === 'analysis' ? '页面分析' : '填写执行' }}</span>
-                      <span class="flex-shrink-0">{{ record.durationMs }}ms</span>
-                    </div>
-                    <p v-if="record.operationError" class="text-[10px] text-rose-700 bg-rose-50 border border-rose-100 rounded px-2 py-1 break-words">
-                      {{ record.operationError }}
-                    </p>
-                    <div
-                      v-for="(field, fieldIndex) in record.fields"
-                      :key="`${record.id}-${fieldIndex}`"
-                      class="text-[10px] rounded bg-white border border-slate-100 px-2 py-1"
-                    >
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="text-slate-700 font-medium truncate">{{ field.label }}</span>
-                        <span :class="[
-                          'font-bold flex-shrink-0',
-                          field.status === 'success' ? 'text-emerald-600' : field.status === 'failed' ? 'text-rose-600' : 'text-amber-600'
-                        ]">
-                          {{ field.status === 'success' ? '成功' : field.status === 'failed' ? '失败' : '跳过' }}
-                        </span>
-                      </div>
-                      <p v-if="field.message" class="text-slate-400 mt-0.5 break-words">{{ field.message }}</p>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            </section>
+            <DrawerHistoryTab
+              :records="fillHistoryRecords"
+              :loading="isHistoryLoading"
+              :max-records="MAX_FILL_HISTORY_RECORDS"
+              :format-time="formatHistoryTime"
+              @copy="handleCopyDiagnosticHistory"
+              @export="handleExportDiagnosticHistory"
+              @clear="handleClearFillHistory"
+            />
           </div>
 
           <!-- Footer Action Button：预览确认态 -->
@@ -1345,97 +977,17 @@ defineExpose({
         </div>
 
         <!-- TAB: 待办与核对 (Review) -->
-        <div 
-          id="drawer-panel-review"
-          role="tabpanel"
-          aria-labelledby="drawer-tab-review"
-          v-if="drawerTab === 'review'" 
-          class="flex-1 flex flex-col min-h-0 overflow-hidden"
-        >
-          <div class="p-3 bg-amber-50/70 border-b border-amber-100 flex items-center justify-between">
-            <div class="flex items-center gap-1.5 text-amber-900 font-bold">
-              <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <span>需人工确认 / 待办清单 ({{ fillResult?.remainingTasks?.length || 0 }})</span>
-            </div>
-          </div>
-
-          <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
-            <div v-if="!fillResult || !fillResult.remainingTasks || fillResult.remainingTasks.length === 0" class="text-center py-10 text-slate-400">
-              <CheckCircle class="w-10 h-10 mx-auto text-emerald-500/40 mb-2" />
-              <p class="font-bold text-slate-600">当前没有需要人工确认的待办项</p>
-              <p class="text-[11px] mt-1 text-slate-400">点击“一键填表”后，未匹配的必填项将在此展示并支持一键定位</p>
-            </div>
-
-            <div 
-              v-for="task in fillResult?.remainingTasks || []" 
-              :key="task.id"
-              class="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/30 hover:bg-amber-50 transition flex flex-col gap-2"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-1.5">
-                    <span v-if="task.required" class="px-1 py-0.2 bg-red-100 text-red-700 rounded text-[10px] font-bold">必填</span>
-                    <span class="font-bold text-slate-800 text-xs truncate">{{ task.label }}</span>
-                  </div>
-                  <p class="text-[11px] text-amber-800/80 mt-1 font-medium">{{ task.reason }}</p>
-                </div>
-                <div class="flex items-center gap-1.5 flex-shrink-0">
-                  <span
-                    v-if="!task.element"
-                    class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-bold"
-                    :title="task.frameUrl || '位于跨域子页面'"
-                  >
-                    子页面待办
-                  </span>
-                  <button
-                    v-if="task.element"
-                    type="button"
-                    @click="handleFocusTaskElement(task)"
-                    class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"
-                    title="在网页中滚动并高亮定位此输入框"
-                  >
-                    定位
-                  </button>
-                  <button
-                    v-if="task.element"
-                    type="button"
-                    @click="handleToggleTaskMapping(task)"
-                    class="px-2 py-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs"
-                    title="将此未识别字段永久绑定到简历属性"
-                  >
-                    记住映射
-                  </button>
-                </div>
-              </div>
-
-              <!-- 内嵌字段绑定选择器 -->
-              <div 
-                v-if="activeTaskMappingId === task.id"
-                class="pt-2 mt-1 border-t border-amber-200/60 flex items-center gap-2 text-xs"
-              >
-                <select 
-                  v-model="selectedMappingKey"
-                  class="flex-1 px-2 py-1 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
-                >
-                  <option value="" disabled>请选择此字段对应的简历属性...</option>
-                  <optgroup v-for="grp in AVAILABLE_BINDING_FIELDS" :key="grp.group" :label="grp.group">
-                    <option v-for="opt in grp.options" :key="opt.value" :value="opt.value">
-                      {{ opt.label }}
-                    </option>
-                  </optgroup>
-                </select>
-                <button
-                  type="button"
-                  :disabled="!selectedMappingKey"
-                  @click="handleSaveTaskMapping(task)"
-                  class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs transition"
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DrawerReviewTab
+          v-if="drawerTab === 'review'"
+          :fill-result="fillResult"
+          :active-task-mapping-id="activeTaskMappingId"
+          :selected-mapping-key="selectedMappingKey"
+          :available-binding-fields="AVAILABLE_BINDING_FIELDS"
+          @focus-task="handleFocusTaskElement"
+          @toggle-mapping="handleToggleTaskMapping"
+          @save-mapping="handleSaveTaskMapping"
+          @update:selected-mapping-key="selectedMappingKey = $event"
+        />
 
         <!-- TAB 2: 岗位 JD 匹配度分析 -->
         <div 
@@ -1572,84 +1124,16 @@ defineExpose({
         </div>
 
         <!-- TAB 3: 简历速查剪贴板 -->
-        <div 
-          id="drawer-panel-clipboard"
-          role="tabpanel"
-          aria-labelledby="drawer-tab-clipboard"
-          v-if="drawerTab === 'clipboard'" 
-          class="flex-1 flex flex-col min-h-0 overflow-hidden"
-        >
-          <!-- Search Bar -->
-          <div class="p-3 border-b border-slate-100 bg-slate-50">
-            <div class="relative flex items-center">
-              <Search class="w-3.5 h-3.5 absolute left-2.5 text-slate-400" aria-hidden="true" />
-              <input
-                v-model="searchQuery"
-                type="text"
-                aria-label="搜索简历字段"
-                placeholder="搜索字段 (如: 姓名, 电话, GPA, 问答, 自我评价)..."
-                class="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-
-          <!-- Copy Toast Banner -->
-          <div 
-            v-if="copyToastMessage" 
-            role="status" 
-            aria-live="polite" 
-            class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold text-center animate-fade-in flex items-center justify-center gap-1"
-          >
-            <Check class="w-3.5 h-3.5" aria-hidden="true" />
-            <span>{{ copyToastMessage }}</span>
-          </div>
-
-          <!-- Fields List -->
-          <div class="p-3 flex-1 overflow-y-auto space-y-2">
-            <div v-if="filteredFields.length === 0" class="text-center py-8 text-slate-500 text-xs">
-              没有找到匹配的简历字段
-            </div>
-
-            <button
-              v-for="item in filteredFields"
-              :key="item.id"
-              type="button"
-              @click="handleCopyField(item)"
-              class="w-full text-left p-2.5 bg-slate-50 hover:bg-blue-50/80 border border-slate-100 hover:border-blue-200 rounded-xl cursor-pointer transition flex items-center justify-between group focus-visible:ring-2 focus-visible:ring-blue-500"
-              :title="`点击复制【${item.label}】(若输入框聚焦则自动填入)`"
-              :aria-label="`复制 ${item.category} ${item.label}: ${item.value}`"
-            >
-              <div class="min-w-0 flex-1 pr-2">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-xs text-slate-500 font-medium px-1.5 py-0.5 bg-white border border-slate-200 rounded">
-                    {{ item.category }}
-                  </span>
-                  <span class="font-bold text-slate-800 text-xs">{{ item.label }}</span>
-                </div>
-                <div class="text-xs text-slate-600 truncate mt-0.5">
-                  {{ item.value }}
-                </div>
-              </div>
-
-              <div class="w-6 h-6 rounded-lg bg-white border border-slate-200 group-hover:border-blue-300 group-hover:text-blue-600 flex items-center justify-center text-slate-400 shadow-xs flex-shrink-0">
-                <Check v-if="copiedFieldKey === item.id" class="w-3.5 h-3.5 text-emerald-600 animate-scale" aria-hidden="true" />
-                <Copy v-else class="w-3.5 h-3.5" aria-hidden="true" />
-              </div>
-            </button>
-          </div>
-
-          <footer class="p-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>💡 点击任意字段直接复制或点填</span>
-            <button 
-              type="button"
-              @click="handleOpenOptions" 
-              class="text-blue-600 font-semibold hover:underline flex items-center gap-0.5 focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-            >
-              <span>编辑简历</span>
-              <ExternalLink class="w-3 h-3" aria-hidden="true" />
-            </button>
-          </footer>
-        </div>
+        <DrawerClipboardTab
+          v-if="drawerTab === 'clipboard'"
+          :items="filteredFields"
+          :search-query="searchQuery"
+          :copied-field-key="copiedFieldKey"
+          :copy-toast-message="copyToastMessage"
+          @update:search-query="searchQuery = $event"
+          @copy-field="handleCopyField"
+          @open-options="handleOpenOptions"
+        />
       </div>
     </transition>
 
@@ -1665,10 +1149,17 @@ defineExpose({
       <div 
         v-if="stepNotification.show"
         @click="handleQuickFill"
-        class="absolute bottom-full right-0 cursor-pointer max-w-[220px] bg-slate-900/95 text-white text-xs px-3 py-2 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-center gap-2 hover:bg-blue-900 transition mb-2"
+        class="absolute bottom-full right-0 cursor-pointer w-[248px] max-w-[calc(100vw-24px)] bg-slate-900/95 text-white px-3 py-2.5 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-start gap-2.5 hover:bg-blue-900 transition mb-2"
+        role="button"
+        tabindex="0"
+        @keydown.enter.prevent="handleQuickFill"
+        @keydown.space.prevent="handleQuickFill"
       >
-        <Sparkles class="w-4 h-4 text-amber-400 flex-shrink-0 animate-bounce" />
-        <span class="text-[11px] font-medium leading-tight">{{ stepNotification.text }}</span>
+        <Sparkles class="w-4 h-4 mt-0.5 text-amber-400 flex-shrink-0 animate-bounce" aria-hidden="true" />
+        <span class="min-w-0 text-left">
+          <strong class="block text-xs font-semibold leading-4">检测到网申新步骤</strong>
+          <span class="block mt-0.5 text-[11px] text-slate-200 leading-4 whitespace-normal break-words">{{ stepNotification.text }}</span>
+        </span>
       </div>
     </transition>
 

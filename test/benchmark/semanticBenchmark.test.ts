@@ -9,7 +9,8 @@ interface BenchmarkTestCase {
 }
 
 /**
- * 涵盖中国互联网大厂、国企央企、金融银行系统、外企 ATS 真实网申场景的 100+ 变体标签基准测试集
+ * 当前为 38 个脱敏网申标签的回归集。它用于保护词典变更，不代表真实站点总体准确率；
+ * 真实站点留出集应在取得脱敏样本后单独维护，避免把词典开发样本当成泛化评测。
  */
 const GOLD_STANDARD_BENCHMARK_DATASET: BenchmarkTestCase[] = [
   // 1. 基础信息类
@@ -59,8 +60,10 @@ const GOLD_STANDARD_BENCHMARK_DATASET: BenchmarkTestCase[] = [
   { label: 'Project Name / Title', expectedResumeKey: 'projects.0.projectName', category: 'project' },
 ];
 
-describe('Semantic Similarity Gold Benchmark (500+ 网申变体字段混淆矩阵与 F1-Score 评测)', () => {
-  it('应在大规模真实网申测试集上达到 >= 95% 的综合召回率与 F1-Score', () => {
+const BENCHMARK_SAMPLE_COUNT = GOLD_STANDARD_BENCHMARK_DATASET.length;
+
+describe(`Semantic Similarity Gold Benchmark (${BENCHMARK_SAMPLE_COUNT} 个脱敏标签回归集)`, () => {
+  it(`应在 ${BENCHMARK_SAMPLE_COUNT} 个回归样本上达到 >= 95% 的综合召回率与 F1-Score`, () => {
     let truePositives = 0;
     let falsePositives = 0;
     let falseNegatives = 0;

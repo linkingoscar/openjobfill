@@ -38,3 +38,34 @@ a:focus:not(:focus-visible) {
 .animate-fade-in {
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/*
+ * The shadow root prevents selector collisions, but the host element still
+ * inherits typography and other user-agent styles from the recruitment page.
+ * Keep the widget's physical and text layout stable on pages that use an
+ * unusually large root font-size (or redefine form-control defaults).
+ */
+:host {
+  all: initial !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  isolation: isolate !important;
+  color: #0f172a !important;
+  color-scheme: light !important;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+
+:host *,
+:host *::before,
+:host *::after {
+  box-sizing: border-box;
+}
+
+:host button,
+:host input,
+:host select,
+:host textarea {
+  font: inherit;
+}

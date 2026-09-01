@@ -36,3 +36,9 @@ jobs:
 
       - name: Run Extension Build Check
         run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Real Extension Smoke Flow
+        run: xvfb-run -a pnpm test:e2e
