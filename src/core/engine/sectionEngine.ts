@@ -2,6 +2,7 @@ import type { StandardResume } from '../../types/resume';
 import type { PlatformEnhancer } from '../../types/pipeline';
 import { autoExpandHeuristicSections, ensureSectionRows } from './repeater';
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
+import { prepareEditableSections } from './expansionHelper';
 
 export class SectionEngine {
   /**
@@ -9,6 +10,7 @@ export class SectionEngine {
    */
   async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null): Promise<boolean> {
     let anyExpanded = false;
+    if (await prepareEditableSections() > 0) anyExpanded = true;
 
     // 1. 教育经历卡片
     if (resume.educations && resume.educations.length > 1) {

@@ -4,6 +4,7 @@ import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Databas
 import { backupManager } from '@/core/storage/backupManager';
 import { getAISettings, saveAISettings } from '@/core/storage/aiSettingsStorage';
 import type { AIProviderType } from '@/types/ai';
+import { AI_PROVIDER_PRESETS, type AIProviderPresetId } from '@/core/ai/providerPresets';
 
 defineProps<{
   customDomains: string[];
@@ -26,6 +27,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 // ── AI 兜底配置（本地优先：默认关闭，纯本地规则即可用；配置后启用 AI 增强）──
 const aiEnabled = ref(false);
 const aiProvider = ref<AIProviderType>('ollama');
+const aiPreset = ref<AIProviderPresetId>('ollama');
 const aiBaseUrl = ref('http://localhost:11434');
 const aiModel = ref('qwen2.5:7b');
 const aiApiKey = ref('');
@@ -39,15 +41,16 @@ onMounted(async () => {
   aiBaseUrl.value = s.baseUrl;
   aiModel.value = s.model;
   aiApiKey.value = s.apiKey || '';
+  const matchedPreset = (Object.entries(AI_PROVIDER_PRESETS) as [AIProviderPresetId, (typeof AI_PROVIDER_PRESETS)[AIProviderPresetId]][])
+    .find(([, preset]) => preset.baseUrl === s.baseUrl);
+  aiPreset.value = matchedPreset?.[0] || (s.provider === 'ollama' ? 'ollama' : 'custom');
 });
 
-const onProviderChange = () => {
-  if (aiProvider.value === 'ollama' && !aiBaseUrl.value.includes('localhost')) {
-    aiBaseUrl.value = 'http://localhost:11434';
-  }
-  if (aiProvider.value === 'openai-compatible' && aiBaseUrl.value.includes('localhost')) {
-    aiBaseUrl.value = 'https://api.deepseek.com';
-  }
+const onPresetChange = () => {
+  const preset = AI_PROVIDER_PRESETS[aiPreset.value];
+  aiProvider.value = preset.provider;
+  aiBaseUrl.value = preset.baseUrl;
+  aiModel.value = preset.defaultModel;
 };
 
 const buildSettings = () => ({
@@ -231,10 +234,9 @@ const handleImportFile = async (e: Event) => {
       <div v-if="aiEnabled" class="space-y-3 pt-1">
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">提供方</label>
-            <select v-model="aiProvider" @change="onProviderChange" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500">
-              <option value="ollama">Ollama 本地模型（推荐）</option>
-              <option value="openai-compatible">OpenAI 兼容云端接口</option>
+            <label class="block text-xs font-medium text-slate-600 mb-1">提供方快速配置</label>
+            <select v-model="aiPreset" @change="onPresetChange" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500">
+              <option v-for="(preset, id) in AI_PROVIDER_PRESETS" :key="id" :value="id">{{ preset.name }}</option>
             </select>
           </div>
           <div>

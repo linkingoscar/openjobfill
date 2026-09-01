@@ -18,7 +18,30 @@ const OPTION_SELECTORS = [
   '.beisen-select-option',
   '.dayee-option',
   '.tencent-select-option',
+  '.mtd-select-item',
+  '.mtd-dropdown-item',
+  '.layui-form-select dl dd',
+  '.ivu-select-item',
+  '.ivu-cascader-menu-item',
+  '.moka-select-item',
+  '.moka-option',
+  '.cascader-modal li',
+  '.my-cascader-modal li',
+  '.e_layer li',
+  '.layer_content li',
+  '.pop-panel td',
+  '.dialog-box li',
 ];
+
+function confirmKnownLegacyPopup(selected: HTMLElement): void {
+  const popup = selected.closest<HTMLElement>(
+    '.e_layer, .layer_content, .pop-panel, .dialog-box, .layui-layer, .cascader-modal, .my-cascader-modal'
+  );
+  if (!popup) return;
+  const button = Array.from(popup.querySelectorAll<HTMLElement>('button, [role="button"], .btn, a'))
+    .find((candidate) => /^(确定|确认|完成|应用)$/.test((candidate.textContent || '').trim()));
+  if (button && isElementVisible(button)) simulateClick(button);
+}
 
 /**
  * 动态等待下拉菜单或选项在 DOM 中渲染并可见 (支持 aria-controls / aria-owns 作用域精准隔离)
@@ -180,7 +203,7 @@ async function trySelectCustomOptionOnce(
 
   // 6. 虚拟列表只渲染当前窗口；未命中时逐屏滚动并重新收集可见选项。
   const scrollContainer = candidateElements[0]?.closest<HTMLElement>(
-    '[role="listbox"], .rc-virtual-list-holder, .el-select-dropdown__wrap, .semi-portal-inner, [class*="virtual-list"], [class*="menu-list"]'
+    '[role="listbox"], .rc-virtual-list-holder, .el-select-dropdown__wrap, .semi-portal-inner, .mtd-dropdown-menu, .ivu-select-dropdown-list, [class*="virtual-list"], [class*="menu-list"]'
   );
   if (!bestMatch && scrollContainer) {
     let previousTop = -1;
@@ -201,6 +224,7 @@ async function trySelectCustomOptionOnce(
   if (bestMatch) {
     simulateClick(bestMatch);
     await sleep(120);
+    confirmKnownLegacyPopup(bestMatch);
     return true;
   }
 
@@ -270,6 +294,13 @@ export async function selectCascaderOptions(
     '.el-cascader-node', // Element Plus
     '.ant-cascader-menu-item', // Ant Design
     '.semi-cascader-item',
+    '.ivu-cascader-menu-item',
+    '.mtd-cascader-menu-item',
+    '.layui-form-select dl dd',
+    '.cascader-modal li',
+    '.my-cascader-modal li',
+    '.e_layer li',
+    '.layer_content li',
     '[class*="cascader-node"]',
     '[class*="cascader-item"]',
     '[role="menuitem"]',

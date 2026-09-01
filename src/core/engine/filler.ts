@@ -11,6 +11,7 @@ import { resumeStorage } from '../storage/resumeStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 import { applyAIFallbackToPlan } from '../ai/aiFallback';
 import { executeRemoteFrames } from '../frames/frameCoordinator';
+import { compactFieldSnapshot, compactPlanSnapshot, SnapshotRecorder } from '../pipeline/snapshotRecorder';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
 export interface AnalyzedPlan {
@@ -84,6 +85,8 @@ export class FormFillerEngine {
    */
   async analyze(resume: StandardResume): Promise<AnalyzedPlan> {
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
+    const analysisStartedAt = Date.now();
+    SnapshotRecorder.start(currentUrl, typeof document !== 'undefined' ? document.title : '');
     // 1. 获取当前页面匹配的平台增强器 (Platform Enhancer)
     const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
     if (enhancer) {
@@ -106,6 +109,10 @@ export class FormFillerEngine {
 
     // 4. 阶段一：页面全要素深度扫描 (Page Analyzer 重新扫描最新挂载的 DOM 节点)
     const descriptors = pageAnalyzer.analyzePage(document);
+    SnapshotRecorder.record('scan', {
+      totalCandidateCount: descriptors.length,
+      fields: compactFieldSnapshot(descriptors),
+    }, Date.now() - analysisStartedAt);
     console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
     // 5. 阶段二：生成全局填表规划 (Fill Plan)
@@ -124,6 +131,8 @@ export class FormFillerEngine {
     } catch (err) {
       console.warn('[OpenJobFill Pipeline] AI fallback warning:', err);
     }
+
+    SnapshotRecorder.record('plan', compactPlanSnapshot(plan), Date.now() - analysisStartedAt);
 
     return {
       plan,
@@ -172,6 +181,21 @@ export class FormFillerEngine {
     } catch (e) {
       console.warn('[OpenJobFill Pipeline] scanMissingRequiredFields error:', e);
     }
+
+
+    SnapshotRecorder.record('fill', {
+      filledCount: executionResult.filledCount,
+      skippedCount: executionResult.skippedCount,
+      failedCount: executionResult.failedCount,
+      verifiedCount: executionResult.verifiedCount,
+      fields: executionResult.logs.map((log) => ({
+        status: log.status,
+        label: log.label,
+        field: log.field,
+        message: log.message,
+      })),
+    }, executionResult.durationMs);
+    await SnapshotRecorder.finish(executionResult, plan.totalFieldsCount);
 
     return {
       success: executionResult.filledCount > 0,

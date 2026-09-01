@@ -236,7 +236,52 @@ const removeCampusExperience = (index: number) => props.resume.campusExperiences
       </div>
     </div>
 
-    <!-- 3. 外语能力与专业证书 (CET-4/6, 计算机等级等) -->
+    <!-- 3. 意愿、合规与紧急联系人 -->
+    <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+      <div class="flex items-center gap-2 font-bold text-slate-800 text-sm border-b border-slate-200 pb-2">
+        <Landmark class="w-4 h-4 text-amber-600" />
+        <span>国企 / 银行意愿矩阵与紧急联系人</span>
+      </div>
+      <p class="text-[11px] text-slate-500">“未填写”不会被自动推断，避免对加班、调剂、处分等问题盲猜。</p>
+      <div class="grid grid-cols-3 gap-4">
+        <div v-for="item in [
+          { key: 'acceptOvertime', label: '是否接受加班' },
+          { key: 'acceptBusinessTrip', label: '是否接受出差 / 外派' },
+          { key: 'adjustable', label: '是否服从岗位调剂' },
+          { key: 'cityFlexible', label: '是否服从地点调配' },
+          { key: 'hasRelatives', label: '是否有亲属在本单位' },
+          { key: 'hasPunishment', label: '是否受过处分 / 违法记录' },
+        ]" :key="item.key">
+          <label class="block font-semibold text-slate-700 mb-1">{{ item.label }}</label>
+          <select
+            v-model="(resume.basics as any)[item.key]"
+            class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+          >
+            <option :value="undefined">未填写</option>
+            <option :value="true">是</option>
+            <option :value="false">否</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">驾驶证</label>
+          <input v-model="resume.basics.driverLicense" type="text" placeholder="如：C1 / 无" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden" />
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">紧急联系人姓名</label>
+          <input v-model="resume.basics.emergencyContactName" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden" />
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">紧急联系人电话</label>
+          <input v-model="resume.basics.emergencyContactPhone" type="tel" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden" />
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">与联系人关系</label>
+          <input v-model="resume.basics.emergencyContactRelation" type="text" placeholder="如：父亲" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden" />
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 外语能力与专业证书 (CET-4/6, 计算机等级等) -->
     <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
       <div class="flex items-center justify-between border-b border-slate-200 pb-2">
         <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">

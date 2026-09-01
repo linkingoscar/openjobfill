@@ -59,7 +59,9 @@ export class PageAnalyzer {
     const allCandidateElements: HTMLElement[] = [];
     const customComponentSelector = [
       '.el-select', '.ant-select', '.semi-select', '[role="combobox"]', '[class*="select-selection"]',
-      '.el-cascader', '.ant-cascader', '.semi-cascader', '[class*="cascader"]',
+      '.el-cascader', '.ant-cascader', '.semi-cascader', '.ivu-cascader', '[class*="cascader"]',
+      '.mtd-select', '.mtd-picker', '.layui-form-select', '.ivu-select',
+      '.pop-input', '.datepicker-input', '.input-layer',
       '.el-date-editor', '.ant-picker', '.semi-datepicker', '[class*="date-picker"]', '[class*="datepicker"]',
       '[class*="date-range"]', '[class*="daterange"]', '[data-openjobfill-date-group]',
       '[role="radio"]', '[role="checkbox"]', '[aria-pressed]',
@@ -163,6 +165,16 @@ export class PageAnalyzer {
       return 'select';
     }
     const className = typeof el.className === 'string' ? el.className.toLowerCase() : '';
+    // Cascader 组件名中也常带 picker（如 ant-cascader-picker），必须先于日期判断。
+    if (/cascader/.test(className) || el.getAttribute('role') === 'cascader') {
+      return 'cascader';
+    }
+    if (
+      /(^|\s)(el-select|ant-select|semi-select|mtd-select|layui-form-select|ivu-select)(\s|$)/.test(className) ||
+      el.getAttribute('role') === 'combobox'
+    ) {
+      return 'select';
+    }
     const dateInputs = el.querySelectorAll?.('input[type="date"], input[type="month"], input') || [];
     const dateSelects = el.querySelectorAll?.('select, .el-select, .ant-select, .semi-select') || [];
     const isDateComponent =
@@ -178,22 +190,6 @@ export class PageAnalyzer {
     }
     if (el.getAttribute('role') === 'radio' || el.hasAttribute('aria-pressed')) return 'radio';
     if (el.getAttribute('role') === 'checkbox') return 'checkbox';
-    if (
-      el.classList.contains('el-cascader') ||
-      el.classList.contains('ant-cascader') ||
-      el.classList.contains('semi-cascader') ||
-      el.getAttribute('role') === 'cascader'
-    ) {
-      return 'cascader';
-    }
-    if (
-      el.classList.contains('el-select') ||
-      el.classList.contains('ant-select') ||
-      el.classList.contains('semi-select') ||
-      el.getAttribute('role') === 'combobox'
-    ) {
-      return 'select';
-    }
     if (isInputElement(el)) {
       if (el.type === 'radio') return 'radio';
       if (el.type === 'checkbox') return 'checkbox';

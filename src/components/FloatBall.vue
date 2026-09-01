@@ -25,6 +25,8 @@ import {
   TrendingUp,
   Pipette,
   Highlighter,
+  Paperclip,
+  RefreshCw,
 } from 'lucide-vue-next';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
@@ -42,6 +44,9 @@ import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
 import { startManualFill } from '@/core/engine/manualFill';
+import { uploadResumeToPage } from '@/core/engine/attachmentUploader';
+import { extractPageJobSnapshot } from '@/core/tracker/pageJobExtractor';
+import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
 import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
@@ -59,6 +64,7 @@ const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
 const isHiddenOnCurrentPage = ref(false);
+const canSyncCurrentPlatform = computed(() => canImportPlatformProfile(window.location.href));
 
 const {
   responsiveDrawerWidth,
@@ -332,22 +338,39 @@ const handleClearBadges = () => {
   setTimeout(() => { copyToastMessage.value = ''; }, 2000);
 };
 
+const handleUploadResume = () => {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  picker.addEventListener('change', async () => {
+    const file = picker.files?.[0];
+    if (!file) return;
+    const uploaded = await uploadResumeToPage(file);
+    copyToastMessage.value = uploaded
+      ? `📎 已将【${file.name}】放入页面简历上传区，请核对上传结果`
+      : '未找到可用的简历附件上传区，请在网页中手动上传';
+    setTimeout(() => { copyToastMessage.value = ''; }, 3500);
+  }, { once: true });
+  picker.click();
+};
+
 const handleArchiveJob = async () => {
   if (!jdAnalysis.value && currentResume.value) {
     handleAnalyzeJD();
   }
-  const jobTitle = jdAnalysis.value?.jobTitle || document.title.replace(/[-_].*$/, '').trim() || '求职岗位';
-  const companyGuess = document.title.includes('-') ? document.title.split('-')[1].trim() : window.location.hostname.replace('www.', '');
+  const pageJob = extractPageJobSnapshot();
+  const jobTitle = jdAnalysis.value?.jobTitle || pageJob.jobTitle;
 
   const record: JobApplicationRecord = {
     id: `app-${Date.now()}`,
-    companyName: companyGuess || '目标企业',
+    companyName: pageJob.companyName,
     jobTitle: jobTitle,
     appliedDate: new Date().toISOString().slice(0, 10),
     status: 'applied',
-    jobUrl: window.location.href,
-    salary: currentResume.value?.basics.expectedSalaryMin ? `${currentResume.value.basics.expectedSalaryMin}k` : '',
+    jobUrl: pageJob.jobUrl,
+    salary: pageJob.salary || (currentResume.value?.basics.expectedSalaryMin ? `${currentResume.value.basics.expectedSalaryMin}k` : ''),
     resumeVersionTitle: currentResume.value?.title || '默认简历',
+    jdSummary: pageJob.description,
     notes: `通过 OpenJobFill 一键填表完成投递。综合技能匹配度: ${jdAnalysis.value?.matchScore || 0}%`,
     updatedAt: new Date().toISOString()
   };
@@ -355,6 +378,28 @@ const handleArchiveJob = async () => {
   await trackerStorage.saveApplication(record);
   copyToastMessage.value = `📌 已归档【${record.companyName} - ${record.jobTitle}】至投递看板！`;
   setTimeout(() => { copyToastMessage.value = ''; }, 3000);
+};
+
+const handleSyncPlatformProfile = async () => {
+  const active = await resumeStorage.getActiveResume();
+  const extracted = extractPlatformProfile(document, window.location.href);
+  const count = Object.keys(extracted.basics).length + extracted.educations.length + extracted.experiences.length;
+  if (!count) {
+    copyToastMessage.value = '当前页面没有识别到可同步的个人资料，请先打开平台的简历详情页';
+    return;
+  }
+  if (!window.confirm(`识别到 ${count} 组资料。是否合并到当前简历“${active.title}”？现有非空基本信息不会被空值覆盖。`)) return;
+  const next: StandardResume = {
+    ...active,
+    basics: { ...active.basics, ...extracted.basics },
+    educations: [...active.educations, ...extracted.educations.filter((incoming) => !active.educations.some((item) => item.schoolName === incoming.schoolName && item.degree === incoming.degree))],
+    experiences: [...active.experiences, ...extracted.experiences.filter((incoming) => !active.experiences.some((item) => item.company === incoming.company && item.title === incoming.title && item.startDate === incoming.startDate))],
+    updatedAt: Date.now(),
+  };
+  await resumeStorage.saveResume(next);
+  await loadActiveResume();
+  copyToastMessage.value = `已从${extracted.platform === 'boss' ? ' BOSS 直聘' : '智联招聘'}页面合并 ${count} 组资料`;
+  setTimeout(() => { copyToastMessage.value = ''; }, 3500);
 };
 
 const handleStartPicker = () => {
@@ -633,11 +678,21 @@ defineExpose({
             <button 
               type="button"
               @click="handleStartPicker"
-              class="p-1 hover:bg-white/20 rounded-md transition focus-visible:ring-2 focus-visible:ring-white" 
+              class="p-1 hover:bg-white/20 rounded-md transition focus-visible:ring-2 focus-visible:ring-white"
               title="元素吸管 (点击网页输入框自动生成选择器)"
               aria-label="元素吸管"
             >
               <Pipette class="w-4 h-4" aria-hidden="true" />
+            </button>
+            <button
+              v-if="canSyncCurrentPlatform"
+              type="button"
+              @click="handleSyncPlatformProfile"
+              class="p-1 hover:bg-white/20 rounded-md transition focus-visible:ring-2 focus-visible:ring-white"
+              title="从当前平台个人简历页同步可见资料"
+              aria-label="从当前平台个人简历页同步可见资料"
+            >
+              <RefreshCw class="w-4 h-4" aria-hidden="true" />
             </button>
             <button 
               type="button"
@@ -972,6 +1027,15 @@ defineExpose({
             >
               <Pipette class="w-3.5 h-3.5" aria-hidden="true" />
               <span>手动</span>
+            </button>
+            <button
+              type="button"
+              @click="handleUploadResume"
+              title="选择本地 PDF/Word 简历，并注入当前网页的简历附件上传区"
+              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-1.5 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <Paperclip class="w-3.5 h-3.5" aria-hidden="true" />
+              <span>附件</span>
             </button>
           </footer>
         </div>

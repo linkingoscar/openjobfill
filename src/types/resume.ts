@@ -188,6 +188,19 @@ export interface ResumeBasics {
   // 自我评价
   selfEvaluation?: string;
   hobbies?: string; // 兴趣爱好 / 个人特长
+  driverLicense?: string; // 驾照类型，如 C1 / 无
+
+  // 国企、银行和大型集团网申中的意愿 / 合规矩阵。undefined 表示用户未回答，禁止盲猜。
+  acceptOvertime?: boolean;
+  acceptBusinessTrip?: boolean;
+  adjustable?: boolean;
+  cityFlexible?: boolean;
+  hasRelatives?: boolean;
+  hasPunishment?: boolean;
+
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
 }
 
 export interface StandardResume {

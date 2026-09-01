@@ -4,6 +4,8 @@ import { calculateSemanticSimilarity } from '../matcher/similarityEngine';
 import { RESUME_DICTIONARY } from '../matcher/dictionary';
 import { calculateTextMatchScore } from '../matcher/heuristic';
 import { isInputElement } from '../../utils/dom';
+import { inferLocationPath, inferMajorHierarchy } from '../resolvers/profileNormalizer';
+import { deriveLanguageSummary } from '../derivation/profileDeriver';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -13,6 +15,7 @@ const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
 
 function getValueByPath(obj: any, path: string): any {
   if (!obj || !path) return undefined;
+  if (path === 'derived.languageSummary') return deriveLanguageSummary(obj as StandardResume);
   const parts = path.split('.');
   let curr = obj;
   for (const part of parts) {
@@ -273,6 +276,19 @@ export class PlanGenerator {
         endDate: String(getValueByPath(resume, `${baseKey}.endDate`) || ''),
       };
     }
+    if (typeof value === 'boolean') {
+      return field.type === 'checkbox' ? value : value ? '是' : '否';
+    }
+    if (field.type === 'cascader' && /educations\.\d+\.major$/.test(resumeKey)) {
+      return inferMajorHierarchy(String(value)).join('-');
+    }
+    if (field.type === 'cascader' && value && typeof value === 'object' && ('city' in value || 'province' in value)) {
+      const location = value as { province?: string; city?: string; district?: string };
+      const path = location.province
+        ? [location.province, location.city, location.district].filter(Boolean)
+        : [...inferLocationPath(location.city || ''), location.district].filter(Boolean);
+      return path.join('-');
+    }
     return String(value);
   }
 
@@ -374,9 +390,9 @@ export class PlanGenerator {
     if (bestKey && highestScore >= 0.6) {
       const val = getValueByPath(resume, bestKey);
       if (hasUsableValue(val)) {
-        let stringVal = String(val);
+        let stringVal: any = this.toFieldTargetValue(field, resume, bestKey, val);
         // 如果是 Location 对象，序列化为省-市-区
-        if (typeof val === 'object' && val !== null && ('province' in val || 'city' in val)) {
+        if (field.type !== 'cascader' && typeof val === 'object' && val !== null && ('province' in val || 'city' in val)) {
           const loc = val as any;
           stringVal = [loc.province, loc.city, loc.district].filter(Boolean).join('-');
         } else if (field.type === 'cascader' && bestKey.startsWith('basics.') && (bestKey.includes('Location') || bestKey.includes('nativePlace'))) {

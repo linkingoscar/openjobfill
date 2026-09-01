@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { extractTextFromFile } from '@/core/parser/textExtractor';
-import { parseResumeFromText } from '@/core/parser/resumeParser';
+import { importResumeText } from '@/core/importers/jsonResumeImporter';
 import type { StandardResume } from '@/types/resume';
 import { 
   UploadCloud, 
@@ -130,7 +130,7 @@ const processFile = async (file: File) => {
       throw new Error('未能在文件中提取到有效文本，请确认该 PDF 不是纯图片扫描件');
     }
     const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
-    parsedResume.value = parseResumeFromText(text, cleanTitle);
+    parsedResume.value = importResumeText(text, cleanTitle);
   } catch (err: any) {
     errorMessage.value = err?.message || '文件解析失败，请检查文件格式';
   } finally {
@@ -146,7 +146,7 @@ const handleParsePastedText = () => {
   isParsing.value = true;
   errorMessage.value = '';
   try {
-    parsedResume.value = parseResumeFromText(rawText.value, '粘贴文本导入简历');
+    parsedResume.value = importResumeText(rawText.value, '粘贴文本导入简历');
   } catch (err: any) {
     errorMessage.value = err?.message || '文本解析异常';
   } finally {
@@ -177,7 +177,7 @@ const handleConfirmImport = () => {
           </div>
           <div>
             <h2 id="import-modal-title" class="text-base font-bold leading-tight">智能简历解析导入</h2>
-            <p class="text-xs text-blue-100">支持 PDF / Word / 文本，100% 浏览器纯本地解析，不上传任何云端</p>
+            <p class="text-xs text-blue-100">支持 PDF / Word / Markdown / JSON Resume，100% 浏览器纯本地解析</p>
           </div>
         </div>
         <button 
@@ -246,9 +246,9 @@ const handleConfirmImport = () => {
             <input
               id="resume-file-input"
               type="file"
-              accept=".pdf,.docx,.txt,.md"
+              accept=".pdf,.docx,.txt,.md,.json,application/json"
               @change="handleFileUpload"
-              aria-label="上传简历文件 (支持 PDF, DOCX, TXT, MD)"
+              aria-label="上传简历文件 (支持 PDF, DOCX, TXT, MD, JSON)"
               class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
             <div class="w-14 h-14 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shadow-inner">
@@ -256,7 +256,7 @@ const handleConfirmImport = () => {
             </div>
             <div>
               <p class="text-sm font-bold text-slate-800">拖拽简历文件到此处，或 <span class="text-blue-600 underline">点击上传</span></p>
-              <p class="text-xs text-slate-500 mt-1">支持格式：.pdf (矢量文字版)、.docx、.txt、.md</p>
+              <p class="text-xs text-slate-500 mt-1">支持格式：.pdf (文字版)、.docx、.txt、.md、JSON Resume</p>
             </div>
           </div>
         </div>

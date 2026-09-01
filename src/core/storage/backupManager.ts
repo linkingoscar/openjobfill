@@ -136,9 +136,10 @@ function validateResumeBasics(value: UnknownRecord): void {
       'postalCode', 'addressLine1', 'addressLine2', 'workAuthorization', 'veteranStatus',
       'disabilityStatus', 'jobStatus', 'expectedRole', 'expectedCity', 'availableTime',
       'githubUrl', 'linkedinUrl', 'blogUrl', 'portfolioUrl', 'selfEvaluation', 'hobbies',
+      'driverLicense', 'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation',
     ],
     ['age', 'workingYears', 'expectedSalaryMin', 'expectedSalaryMax'],
-    ['visaSponsorship'],
+    ['visaSponsorship', 'acceptOvertime', 'acceptBusinessTrip', 'adjustable', 'cityFlexible', 'hasRelatives', 'hasPunishment'],
     '简历 basics',
   );
   validateLocation(value.nativePlace, '简历 basics.nativePlace');

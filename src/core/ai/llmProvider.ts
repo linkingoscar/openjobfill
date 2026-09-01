@@ -12,6 +12,7 @@ import type { AISettings } from '../../types/ai';
 
 // AI 兜底是可选能力，网络或本地模型不可用时不能让整次填写一直转圈。
 const AI_REQUEST_TIMEOUT_MS = 10_000;
+const AI_MAX_ATTEMPTS = 3;
 
 export async function callChatCompletion(settings: AISettings, prompt: string): Promise<string> {
   if (settings.provider === 'ollama') {
@@ -29,7 +30,7 @@ async function callOllama(settings: AISettings, prompt: string): Promise<string>
   }
   const url = `${normalizeBaseUrl(settings.baseUrl)}/api/chat`;
 
-  const resp = await fetchWithTimeout(url, {
+  const resp = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -63,13 +64,15 @@ async function callOpenAICompatible(settings: AISettings, prompt: string): Promi
     throw new Error('云端接口模型未配置');
   }
 
-  const url = `${normalizeBaseUrl(settings.baseUrl)}/chat/completions`;
+  const url = normalizeChatCompletionUrl(settings.baseUrl);
+  const isOpenRouter = /(^|\.)openrouter\.ai$/i.test(new URL(url).hostname);
 
-  const resp = await fetchWithTimeout(url, {
+  const resp = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${settings.apiKey}`,
+      ...(isOpenRouter ? { 'HTTP-Referer': 'https://github.com/openjobfill/openjobfill', 'X-Title': 'OpenJobFill' } : {}),
     },
     body: JSON.stringify({
       model: settings.model,
@@ -92,6 +95,31 @@ async function callOpenAICompatible(settings: AISettings, prompt: string): Promi
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
+}
+
+export function normalizeChatCompletionUrl(baseUrl: string): string {
+  const normalized = normalizeBaseUrl(baseUrl.trim());
+  return /\/chat\/completions$/i.test(normalized) ? normalized : `${normalized}/chat/completions`;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= AI_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetchWithTimeout(input, init);
+      if (!shouldRetryStatus(response.status) || attempt === AI_MAX_ATTEMPTS) return response;
+    } catch (error: any) {
+      // 超时已经消耗了完整的 10 秒预算，立即回退；短暂网络故障则允许有限重试。
+      if (error?.message?.includes('AI 请求超时') || attempt === AI_MAX_ATTEMPTS) throw error;
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+  }
+  throw lastError instanceof Error ? lastError : new Error('AI 请求失败');
 }
 
 /** 带超时的 fetch：让 AI 失败快速回退到本地规则与待办清单。 */

@@ -13,6 +13,12 @@ export interface FieldSynonymItem {
 
 // 基础个人字段模板
 const BASE_PERSONAL_FIELDS: FieldSynonymItem[] = [
+  {
+    resumeKey: 'derived.languageSummary',
+    name: '语言能力概述',
+    type: 'textarea',
+    keywords: ['语言能力', '外语能力', '语言技能', '外语水平概述', 'language skills', 'language proficiency summary'],
+  },
   // 1. 基础个人信息
   {
     resumeKey: 'basics.firstName',
@@ -195,6 +201,64 @@ const BASE_PERSONAL_FIELDS: FieldSynonymItem[] = [
     name: '兴趣爱好 / 个人特长',
     type: 'textarea',
     keywords: ['兴趣爱好', '爱好', '个人爱好', '特长', '兴趣及特长', 'hobbies', 'interests'],
+  },
+  {
+    resumeKey: 'basics.driverLicense',
+    name: '驾驶证 / 驾照',
+    type: 'select',
+    keywords: ['驾照', '驾驶证', '准驾车型', 'driver license', 'driving license'],
+  },
+  {
+    resumeKey: 'basics.acceptOvertime',
+    name: '是否接受加班',
+    type: 'radio',
+    keywords: ['是否接受加班', '接受加班', '同意加班', '愿意加班', 'accept overtime', 'overtime'],
+  },
+  {
+    resumeKey: 'basics.acceptBusinessTrip',
+    name: '是否接受出差或外派',
+    type: 'radio',
+    keywords: ['是否接受出差', '接受出差', '服从外派', '愿意出差', 'business trip', 'relocation'],
+  },
+  {
+    resumeKey: 'basics.adjustable',
+    name: '是否服从调剂',
+    type: 'radio',
+    keywords: ['是否服从调剂', '服从调剂', '接受调剂', '服从分配', 'adjustable', 'reassignment'],
+  },
+  {
+    resumeKey: 'basics.cityFlexible',
+    name: '工作地点是否可调配',
+    type: 'radio',
+    keywords: ['工作地点是否灵活', '服从工作地点安排', '地点可调配', '工作地点调剂', 'location flexible'],
+  },
+  {
+    resumeKey: 'basics.hasRelatives',
+    name: '是否有亲属在本单位',
+    type: 'radio',
+    keywords: ['是否有亲属在本公司', '是否有亲属在本单位', '亲属回避', '亲友关系', 'relatives in company'],
+  },
+  {
+    resumeKey: 'basics.hasPunishment',
+    name: '是否受过处分',
+    type: 'radio',
+    keywords: ['是否受过处分', '违纪违法', '违法犯罪记录', '纪律处分', 'punishment', 'criminal record'],
+  },
+  {
+    resumeKey: 'basics.emergencyContactName',
+    name: '紧急联系人姓名',
+    keywords: ['紧急联系人姓名', '紧急联系人', 'emergency contact name'],
+  },
+  {
+    resumeKey: 'basics.emergencyContactPhone',
+    name: '紧急联系人电话',
+    keywords: ['紧急联系人电话', '紧急联系电话', 'emergency contact phone'],
+  },
+  {
+    resumeKey: 'basics.emergencyContactRelation',
+    name: '与紧急联系人关系',
+    type: 'select',
+    keywords: ['与紧急联系人关系', '紧急联系人关系', 'emergency contact relationship'],
   },
 ];
 

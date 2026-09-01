@@ -159,6 +159,25 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       const compliancePlan = plan.items.find((p) => p.field.label.includes('合规项'));
       expect(compliancePlan?.action).toBe('NEEDS_USER');
     });
+
+    it('应保留 false 问项并为专业级联生成完整路径', () => {
+      document.body.innerHTML = `
+        <div class="form-item"><label>是否接受加班</label><input type="radio" name="overtime" value="是"><input type="radio" name="overtime" value="否"></div>
+        <div class="form-item"><label>所学专业</label><div class="ant-cascader-picker"><input name="major"></div></div>
+      `;
+      const resume: StandardResume = {
+        ...MOCK_RESUME,
+        basics: { ...MOCK_RESUME.basics, acceptOvertime: false },
+      };
+      const descriptors = pageAnalyzer.analyzePage(document);
+      const plan = planGenerator.generatePlan(descriptors, resume);
+      const overtime = plan.items.find((item) => item.field.label.includes('加班'));
+      const major = plan.items.find((item) => item.field.label.includes('专业'));
+
+      expect(overtime?.action).toBe('FILL');
+      expect(overtime?.targetValue).toBe('否');
+      expect(major?.targetValue).toBe('工学-计算机类-计算机科学与技术');
+    });
   });
 
   describe('Verifier (写后读回验证与语义等价性)', () => {
