@@ -72,18 +72,20 @@ export function validateJobVariantSuggestions(suggestions: JobVariantSuggestion[
   const projectIds = resume.projects.map((item) => item.id);
   const experienceIds = resume.experiences.map((item) => item.id);
   const knownSkills = new Map(resume.skills.map((item) => [item.name.trim().toLowerCase(), item.name]));
-  const availableLinks = new Set(LINK_PATHS.filter((path) => {
+  const availableLinks = new Set<string>(LINK_PATHS.filter((path) => {
     const value = getPathValue(resume, path);
     return typeof value === 'string' && value.trim().length > 0;
   }));
+  const validated: JobVariantSuggestion[] = [];
 
-  return suggestions.flatMap((raw) => {
-    if (!raw || typeof raw !== 'object' || !raw.suggestion?.trim()) return [];
-    if (!Array.isArray(raw.evidenceResumeKeys) || raw.evidenceResumeKeys.length === 0) return [];
-    const evidenceResumeKeys = Array.from(new Set(raw.evidenceResumeKeys.filter((key) =>
-      typeof key === 'string' && !SENSITIVE_PATH.test(key) && getPathValue(resume, key) !== undefined && getPathValue(resume, key) !== null && getPathValue(resume, key) !== '',
-    ))).slice(0, 16);
-    if (!evidenceResumeKeys.length) return [];
+  for (const raw of suggestions) {
+    if (!raw?.suggestion?.trim() || !Array.isArray(raw.evidenceResumeKeys) || raw.evidenceResumeKeys.length === 0) continue;
+    const evidenceResumeKeys = Array.from(new Set(raw.evidenceResumeKeys.filter((key) => {
+      if (typeof key !== 'string' || SENSITIVE_PATH.test(key)) return false;
+      const value = getPathValue(resume, key);
+      return value !== undefined && value !== null && value !== '';
+    }))).slice(0, 16);
+    if (!evidenceResumeKeys.length) continue;
 
     const base: JobVariantSuggestion = {
       id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim().slice(0, 120) : `variant-suggestion-${raw.type}-${evidenceResumeKeys[0]}`,
@@ -96,30 +98,37 @@ export function validateJobVariantSuggestions(suggestions: JobVariantSuggestion[
 
     if (raw.type === 'project-order') {
       const orderedIds = Array.isArray(raw.orderedIds) ? raw.orderedIds.filter((id): id is string => typeof id === 'string') : [];
-      return sameIds(orderedIds, projectIds) ? [{ ...base, orderedIds }] : [];
+      if (sameIds(orderedIds, projectIds)) validated.push({ ...base, orderedIds });
+      continue;
     }
     if (raw.type === 'experience-order') {
       const orderedIds = Array.isArray(raw.orderedIds) ? raw.orderedIds.filter((id): id is string => typeof id === 'string') : [];
-      return sameIds(orderedIds, experienceIds) ? [{ ...base, orderedIds }] : [];
+      if (sameIds(orderedIds, experienceIds)) validated.push({ ...base, orderedIds });
+      continue;
     }
     if (raw.type === 'short-description' || raw.type === 'self-evaluation') {
       const resumeKey = typeof raw.resumeKey === 'string' ? raw.resumeKey : '';
       const proposedValue = typeof raw.proposedValue === 'string' ? raw.proposedValue.trim() : '';
-      if (!ACTIONABLE_TEXT_PATH.test(resumeKey) || !proposedValue || proposedValue.length > 3000) return [];
-      if (raw.type === 'self-evaluation' && resumeKey !== 'basics.selfEvaluation') return [];
-      return [{ ...base, resumeKey, proposedValue }];
+      if (!ACTIONABLE_TEXT_PATH.test(resumeKey) || !proposedValue || proposedValue.length > 3000) continue;
+      if (raw.type === 'self-evaluation' && resumeKey !== 'basics.selfEvaluation') continue;
+      validated.push({ ...base, resumeKey, proposedValue });
+      continue;
     }
     if (raw.type === 'skill-highlight') {
       const requested = Array.isArray(raw.highlightSkills) ? raw.highlightSkills.filter((item): item is string => typeof item === 'string') : [];
-      const highlightSkills = Array.from(new Set(requested.map((skill) => knownSkills.get(skill.trim().toLowerCase())).filter((skill): skill is string => !!skill))).slice(0, 12);
-      return highlightSkills.length ? [{ ...base, highlightSkills }] : [];
+      const highlightSkills = Array.from(new Set(requested
+        .map((skill) => knownSkills.get(skill.trim().toLowerCase()))
+        .filter((skill): skill is string => typeof skill === 'string'))).slice(0, 12);
+      if (highlightSkills.length) validated.push({ ...base, highlightSkills });
+      continue;
     }
     if (raw.type === 'link-selection') {
       const selectedLinks = Array.isArray(raw.selectedLinks)
-        ? Array.from(new Set(raw.selectedLinks.filter((path): path is string => typeof path === 'string' && availableLinks.has(path as typeof LINK_PATHS[number]))))
+        ? Array.from(new Set(raw.selectedLinks.filter((path): path is string => typeof path === 'string' && availableLinks.has(path))))
         : [];
-      return selectedLinks.length ? [{ ...base, selectedLinks }] : [];
+      if (selectedLinks.length) validated.push({ ...base, selectedLinks });
     }
-    return [];
-  });
+  }
+
+  return validated;
 }
