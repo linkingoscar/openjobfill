@@ -1,6 +1,9 @@
 import { importJsonResume } from './jsonResumeImporter';
 import type { StandardResume } from '../../types/resume';
 import type { AIDocumentParseResponse } from '../../types/ai';
+import type { FieldEvidence, ResumeV5 } from '../../types/trustedResume';
+import { EMPTY_RESUME } from '../storage/defaultData';
+import { migrateToResumeV5, setResumeValue } from '../schema/trustedResume';
 import { validateDocumentParseResponse } from '../ai/protocolV2';
 
 const LEGACY_VISION_SCHEMA = `{
@@ -36,7 +39,8 @@ export function buildVisionResumePrompt(): string {
 5. 数组按文档出现顺序使用 0-based index，例如 educations.0.major、experiences.1.company。
 6. 不要输出 id、title、createdAt、updatedAt、schemaVersion、fieldMeta、variant*、parentResumeId 等系统字段。
 7. 日期尽量规范为 YYYY-MM 或 YYYY-MM-DD；当前经历结束时间可写“至今”，但不得根据年龄或常识推断日期。
-8. warnings 仅记录无法可靠确定的问题，例如“工作经历结束日期不清晰”。
+8. 布尔字段必须输出 JSON boolean，年龄/工龄/薪资数字必须输出 JSON number，其余字段输出字符串；格式不确定则不生成。
+9. warnings 仅记录无法可靠确定的问题，例如“工作经历结束日期不清晰”。
 
 允许的 path 结构：
 - basics.<基本字段>，以及 basics.nativePlace/currentLocation/birthPlace/hukouLocation.<province|city|district|detail>
@@ -99,12 +103,61 @@ export function parseVisionResumeCandidateResponse(response: string): AIDocument
   return validateDocumentParseResponse(extractJSONObject(response));
 }
 
+function candidateEvidence(
+  evidence: AIDocumentParseResponse['candidates'][number]['evidence'],
+  fileName: string,
+): FieldEvidence[] {
+  if (!evidence?.page && !evidence?.quote) return [];
+  return [{
+    type: evidence.page ? 'page-region' : 'text-range',
+    fileId: fileName,
+    page: evidence.page,
+    text: evidence.quote,
+  }];
+}
+
+function candidateResponseToResume(parsed: AIDocumentParseResponse, fileName: string): ResumeV5 {
+  const now = Date.now();
+  let resume = migrateToResumeV5({
+    ...structuredClone(EMPTY_RESUME),
+    id: `resume-${now}`,
+    title: fileName.replace(/\.[^/.]+$/, '') || 'AI 解析简历',
+    isDefault: false,
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: 5,
+  }, now);
+
+  for (const candidate of parsed.candidates) {
+    setResumeValue(resume, candidate.path, candidate.value);
+    resume.fieldMeta[candidate.path] = {
+      source: 'ai-parser',
+      confidence: candidate.confidence,
+      evidence: candidateEvidence(candidate.evidence, fileName),
+      confirmed: false,
+      locked: false,
+      updatedAt: now,
+      autoFillEnabled: true,
+    };
+  }
+
+  // Normalize partial array records and assign stable local IDs, then reattach transient
+  // warnings. resumeSchema deliberately strips aiParseWarnings on persistence.
+  resume = migrateToResumeV5(resume, now);
+  (resume as ResumeV5 & { aiParseWarnings?: string[] }).aiParseWarnings = [...parsed.warnings];
+  return resume;
+}
+
 /**
- * Legacy compatibility parser for older locally configured models that still return a whole resume.
- * New background flows prefer parseVisionResumeCandidateResponse and never silently merge this object.
+ * New models return candidate JSON. Older locally configured models may still return a
+ * whole resume object; that format remains readable only as a compatibility fallback.
  */
 export function parseVisionResumeResponse(response: string, fileName = 'AI 视觉识别简历'): StandardResume {
   const raw = extractJSONObject(response);
+  if (Array.isArray(raw.candidates)) {
+    return candidateResponseToResume(validateDocumentParseResponse(raw), fileName);
+  }
+
   const now = Date.now();
   const basics = record(raw.basics);
   const normalized = {
