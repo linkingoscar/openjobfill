@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { extractTextFromFile } from '@/core/parser/textExtractor';
+import { extractTextFromFile, renderPdfPagesForVision } from '@/core/parser/textExtractor';
 import { importResumeText } from '@/core/importers/jsonResumeImporter';
+import { mergeResumeImports } from '@/core/importers/visionResumeImporter';
+import { prepareResumeImage, validateResumeImageFile } from '@/core/importers/resumeImagePreparation';
+import { getAISettings } from '@/core/storage/aiSettingsStorage';
+import type { AISettings } from '@/types/ai';
 import type { StandardResume } from '@/types/resume';
 import { 
   UploadCloud, 
@@ -18,7 +22,8 @@ import {
   Trophy,
   Activity,
   AlertTriangle,
-  HelpCircle
+  HelpCircle,
+  ScanLine,
 } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -26,12 +31,25 @@ const emit = defineEmits<{
   (e: 'import', resume: StandardResume): void;
 }>();
 
-const mode = ref<'upload' | 'paste'>('upload');
+const mode = ref<'upload' | 'paste' | 'vision'>('upload');
 const isParsing = ref(false);
 const rawText = ref('');
 const fileName = ref('');
 const parsedResume = ref<StandardResume | null>(null);
 const errorMessage = ref('');
+const visionConsent = ref(false);
+const visionFile = ref<File | null>(null);
+const visionPreviewUrl = ref('');
+const aiSettings = ref<AISettings | null>(null);
+const useAIEnhancement = ref(false);
+const documentConsent = ref(false);
+const enhancementNotice = ref('');
+
+const aiConfigLabel = computed(() => {
+  const settings = aiSettings.value;
+  if (!settings?.enabled) return 'AI 尚未启用';
+  return `${settings.provider === 'ollama' ? 'Ollama' : '云端 API'} · ${settings.model || '未配置模型'}`;
+});
 
 const healthReport = computed(() => {
   if (!parsedResume.value) return null;
@@ -94,12 +112,14 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
+  aiSettings.value = await getAISettings();
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
+  if (visionPreviewUrl.value) URL.revokeObjectURL(visionPreviewUrl.value);
 });
 
 const handleFileUpload = async (event: Event) => {
@@ -112,6 +132,10 @@ const handleFileUpload = async (event: Event) => {
 const handleDrop = async (event: DragEvent) => {
   event.preventDefault();
   if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
+    if (useAIEnhancement.value && !documentConsent.value) {
+      errorMessage.value = '请先确认 AI 补强的数据发送方式';
+      return;
+    }
     const file = event.dataTransfer.files[0];
     await processFile(file);
   }
@@ -122,17 +146,53 @@ const processFile = async (file: File) => {
   errorMessage.value = '';
   fileName.value = file.name;
   parsedResume.value = null;
+  enhancementNotice.value = '';
 
+  let localResume: StandardResume | null = null;
+  let text = '';
   try {
-    const text = await extractTextFromFile(file);
+    text = await extractTextFromFile(file);
     rawText.value = text;
-    if (!text || text.trim().length === 0) {
+    if (text?.trim()) {
+      const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
+      localResume = importResumeText(text, cleanTitle);
+    } else if (!useAIEnhancement.value) {
       throw new Error('未能在文件中提取到有效文本，请确认该 PDF 不是纯图片扫描件');
     }
-    const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
-    parsedResume.value = importResumeText(text, cleanTitle);
+
+    if (useAIEnhancement.value) {
+      if (!documentConsent.value) throw new Error('请先确认 AI 补强的数据发送方式');
+      const settings = await getAISettings();
+      aiSettings.value = settings;
+      if (!settings.enabled) throw new Error('请先在“设置 → AI 智能兜底”中启用并配置模型');
+      const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+      const imageDataUrls = isPdf ? await renderPdfPagesForVision(file, 4) : [];
+      const response = await chrome.runtime.sendMessage({
+        type: 'AI_PARSE_RESUME_DOCUMENT',
+        payload: {
+          settings,
+          imageDataUrls,
+          documentText: text.slice(0, 60_000),
+          fileName: file.name,
+          confirmedExternalProcessing: true,
+        },
+      });
+      if (!response?.success || !response.resume) throw new Error(response?.error || 'AI 没有返回简历数据');
+      const aiResume = response.resume as StandardResume;
+      parsedResume.value = localResume ? mergeResumeImports(localResume, aiResume) : aiResume;
+      enhancementNotice.value = isPdf
+        ? `AI 已结合本地文本和 PDF 页面图补强（最多前 ${Math.min(4, imageDataUrls.length)} 页）`
+        : 'AI 已结合 Word/文本的本地提取内容补强结构化结果';
+    } else {
+      parsedResume.value = localResume;
+    }
   } catch (err: any) {
-    errorMessage.value = err?.message || '文件解析失败，请检查文件格式';
+    if (localResume && useAIEnhancement.value) {
+      parsedResume.value = localResume;
+      enhancementNotice.value = `AI 补强未完成，已保留本地解析结果：${err?.message || '未知错误'}`;
+    } else {
+      errorMessage.value = err?.message || '文件解析失败，请检查文件格式';
+    }
   } finally {
     isParsing.value = false;
   }
@@ -149,6 +209,64 @@ const handleParsePastedText = () => {
     parsedResume.value = importResumeText(rawText.value, '粘贴文本导入简历');
   } catch (err: any) {
     errorMessage.value = err?.message || '文本解析异常';
+  } finally {
+    isParsing.value = false;
+  }
+};
+
+const selectVisionFile = (file: File) => {
+  try {
+    validateResumeImageFile(file);
+    if (visionPreviewUrl.value) URL.revokeObjectURL(visionPreviewUrl.value);
+    visionFile.value = file;
+    visionPreviewUrl.value = URL.createObjectURL(file);
+    fileName.value = file.name;
+    parsedResume.value = null;
+    errorMessage.value = '';
+  } catch (err: any) {
+    errorMessage.value = err?.message || '图片格式无效';
+  }
+};
+
+const handleVisionFile = (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (file) selectVisionFile(file);
+};
+
+const handleVisionDrop = (event: DragEvent) => {
+  event.preventDefault();
+  const file = event.dataTransfer?.files?.[0];
+  if (file) selectVisionFile(file);
+};
+
+const handleVisionParse = async () => {
+  if (!visionFile.value) {
+    errorMessage.value = '请先选择简历图片';
+    return;
+  }
+  if (!visionConsent.value) {
+    errorMessage.value = '请确认本次图片处理方式后再开始识别';
+    return;
+  }
+  const settings = await getAISettings();
+  aiSettings.value = settings;
+  if (!settings.enabled) {
+    errorMessage.value = '请先在“设置 → AI 智能兜底”中启用并配置支持视觉的模型';
+    return;
+  }
+
+  isParsing.value = true;
+  errorMessage.value = '';
+  try {
+    const imageDataUrl = await prepareResumeImage(visionFile.value);
+    const response = await chrome.runtime.sendMessage({
+      type: 'AI_PARSE_RESUME_IMAGE',
+      payload: { settings, imageDataUrl, fileName: visionFile.value.name, confirmedExternalProcessing: true },
+    });
+    if (!response?.success || !response.resume) throw new Error(response?.error || '视觉模型没有返回简历数据');
+    parsedResume.value = response.resume as StandardResume;
+  } catch (err: any) {
+    errorMessage.value = err?.message || 'AI 视觉简历识别失败';
   } finally {
     isParsing.value = false;
   }
@@ -177,7 +295,7 @@ const handleConfirmImport = () => {
           </div>
           <div>
             <h2 id="import-modal-title" class="text-base font-bold leading-tight">智能简历解析导入</h2>
-            <p class="text-xs text-blue-100">支持 PDF / Word / Markdown / JSON Resume，100% 浏览器纯本地解析</p>
+            <p class="text-xs text-blue-100">文本文件本地解析；简历图片可选用已配置的视觉模型识别</p>
           </div>
         </div>
         <button 
@@ -228,6 +346,21 @@ const handleConfirmImport = () => {
             <FileText class="w-4 h-4" aria-hidden="true" />
             <span>直接粘贴文本</span>
           </button>
+          <button
+            id="tab-import-vision"
+            role="tab"
+            type="button"
+            :aria-selected="mode === 'vision'"
+            aria-controls="panel-import-vision"
+            @click="mode = 'vision'"
+            :class="[
+              'px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-violet-500',
+              mode === 'vision' ? 'bg-violet-50 text-violet-700 border border-violet-200 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+            ]"
+          >
+            <ScanLine class="w-4 h-4" aria-hidden="true" />
+            <span>AI 图片识别</span>
+          </button>
         </div>
 
         <!-- Mode 1: File Upload Area -->
@@ -238,6 +371,17 @@ const handleConfirmImport = () => {
           v-if="mode === 'upload' && !parsedResume" 
           class="space-y-4"
         >
+          <div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
+            <label class="flex items-center gap-2 font-bold text-slate-800 cursor-pointer">
+              <input v-model="useAIEnhancement" type="checkbox" class="w-4 h-4 accent-violet-600" />
+              <span>使用已配置模型补强 PDF / Word 解析</span>
+            </label>
+            <p class="text-slate-500">PDF：本地文本 + 最多前 4 页页面图；Word：本地提取的 Markdown/文本。AI 失败时自动保留本地解析结果。</p>
+            <label v-if="useAIEnhancement" class="flex items-start gap-2 p-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 cursor-pointer">
+              <input v-model="documentConsent" type="checkbox" class="mt-0.5 w-4 h-4 accent-violet-600" />
+              <span>我确认本次会把该 PDF/Word 的完整提取文本，以及 PDF 页面图发送到 {{ aiConfigLabel }}。</span>
+            </label>
+          </div>
           <div
             @dragover.prevent
             @drop="handleDrop"
@@ -248,8 +392,9 @@ const handleConfirmImport = () => {
               type="file"
               accept=".pdf,.docx,.txt,.md,.json,application/json"
               @change="handleFileUpload"
+              :disabled="useAIEnhancement && !documentConsent"
               aria-label="上传简历文件 (支持 PDF, DOCX, TXT, MD, JSON)"
-              class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              class="absolute inset-0 z-10 opacity-0 cursor-pointer w-full h-full"
             />
             <div class="w-14 h-14 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shadow-inner">
               <UploadCloud class="w-7 h-7" aria-hidden="true" />
@@ -259,6 +404,57 @@ const handleConfirmImport = () => {
               <p class="text-xs text-slate-500 mt-1">支持格式：.pdf (文字版)、.docx、.txt、.md、JSON Resume</p>
             </div>
           </div>
+        </div>
+
+        <!-- Mode 3: Explicit opt-in vision API import -->
+        <div
+          id="panel-import-vision"
+          role="tabpanel"
+          aria-labelledby="tab-import-vision"
+          v-if="mode === 'vision' && !parsedResume"
+          class="space-y-4"
+        >
+          <div class="p-3 rounded-xl border border-violet-200 bg-violet-50 text-xs text-violet-900 space-y-1">
+            <div class="font-bold flex items-center gap-1.5"><ScanLine class="w-4 h-4" />视觉模型配置：{{ aiConfigLabel }}</div>
+            <p>图片会压缩到最长边 2200px，然后发送到你在设置中配置的接口。云端模型会接收到完整简历内容；Ollama 则发送到所配置的本地地址。</p>
+            <p class="text-violet-700">模型必须支持图片输入，例如 GPT-4o、Qwen-VL、Gemma 3 或 LLaVA 系列。</p>
+          </div>
+
+          <div
+            @dragover.prevent
+            @drop="handleVisionDrop"
+            class="border-2 border-dashed border-violet-300 hover:border-violet-500 bg-violet-50/30 rounded-2xl p-6 text-center transition relative focus-within:ring-2 focus-within:ring-violet-500"
+          >
+            <input
+              id="resume-vision-file-input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+              @change="handleVisionFile"
+              aria-label="选择用于 AI 识别的简历图片"
+              class="absolute inset-0 z-10 opacity-0 cursor-pointer w-full h-full"
+            />
+            <img v-if="visionPreviewUrl" :src="visionPreviewUrl" alt="待识别简历图片预览" class="relative pointer-events-none mx-auto max-h-56 max-w-full rounded-lg shadow-sm border border-slate-200" />
+            <div v-else class="py-5 space-y-2">
+              <ScanLine class="w-9 h-9 mx-auto text-violet-600" />
+              <p class="font-bold text-slate-800">拖入或选择 JPG / PNG / WebP 简历图片</p>
+              <p class="text-slate-500">最大 12 MB；文字越清晰、图片越正，识别效果越好</p>
+            </div>
+          </div>
+
+          <label class="flex items-start gap-2 p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-900 cursor-pointer">
+            <input v-model="visionConsent" type="checkbox" class="mt-0.5 w-4 h-4 accent-violet-600" />
+            <span>我确认本次将完整简历图片发送到上述模型接口进行解析，并会在导入前核对识别结果。</span>
+          </label>
+
+          <button
+            type="button"
+            @click="handleVisionParse"
+            :disabled="isParsing || !visionFile || !visionConsent"
+            class="px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-md shadow-violet-500/20 focus-visible:ring-2 focus-visible:ring-violet-500"
+          >
+            <Sparkles class="w-3.5 h-3.5" />
+            <span>{{ isParsing ? '视觉模型识别中...' : '开始 AI 视觉识别' }}</span>
+          </button>
         </div>
 
         <!-- Mode 2: Paste Raw Text Area -->
@@ -288,6 +484,16 @@ const handleConfirmImport = () => {
             <Sparkles class="w-3.5 h-3.5" aria-hidden="true" />
             <span>{{ isParsing ? '正在智能提取...' : '开始提取简历结构' }}</span>
           </button>
+        </div>
+
+        <div
+          v-if="enhancementNotice"
+          role="status"
+          aria-live="polite"
+          class="p-3 rounded-xl border text-xs"
+          :class="enhancementNotice.startsWith('AI 补强未完成') ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'"
+        >
+          {{ enhancementNotice }}
         </div>
 
         <!-- Loading State -->

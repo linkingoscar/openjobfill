@@ -26,6 +26,8 @@ export type ExtensionMessage =
   | { type: 'FRAME_EXECUTE'; payload: { analysisId: string } }
   | { type: 'FRAME_CANCEL_ANALYSIS'; payload: { analysisId: string } }
   | { type: 'AI_MAP_FIELDS'; payload: { settings: AISettings; fields: UnmatchedFieldDescriptor[]; options: ResumeKeyOption[] } }
+  | { type: 'AI_PARSE_RESUME_IMAGE'; payload: { settings: AISettings; imageDataUrl: string; fileName: string; confirmedExternalProcessing: true } }
+  | { type: 'AI_PARSE_RESUME_DOCUMENT'; payload: { settings: AISettings; imageDataUrls: string[]; documentText: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'RESUME_STORAGE_SAVE'; payload: { resume: StandardResume } }
   | { type: 'RESUME_STORAGE_UPDATE_FIELDS'; payload: { id: string; updates: Record<string, unknown> } }
   | { type: 'RESUME_STORAGE_APPEND_ARRAY_ITEM'; payload: { id: string; path: string; item: unknown } }
@@ -96,6 +98,30 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && isRecord(payload.settings)
         && Array.isArray(payload.fields)
         && Array.isArray(payload.options);
+    case 'AI_PARSE_RESUME_IMAGE':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && isString(payload.imageDataUrl)
+        && payload.imageDataUrl.length <= 12_000_000
+        && /^data:image\/(?:jpeg|png|webp);base64,/i.test(payload.imageDataUrl)
+        && isNonEmptyString(payload.fileName)
+        && payload.fileName.length <= 240
+        && payload.confirmedExternalProcessing === true;
+    case 'AI_PARSE_RESUME_DOCUMENT':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && Array.isArray(payload.imageDataUrls)
+        && payload.imageDataUrls.length <= 4
+        && payload.imageDataUrls.every((image) => isString(image)
+          && image.length <= 12_000_000
+          && /^data:image\/(?:jpeg|png|webp);base64,/i.test(image))
+        && payload.imageDataUrls.reduce((total, image) => total + image.length, 0) <= 24_000_000
+        && isString(payload.documentText)
+        && payload.documentText.length <= 60_000
+        && (payload.imageDataUrls.length > 0 || payload.documentText.trim().length > 0)
+        && isNonEmptyString(payload.fileName)
+        && payload.fileName.length <= 240
+        && payload.confirmedExternalProcessing === true;
     case 'RESUME_STORAGE_SAVE':
       return isRecord(payload)
         && isRecord(payload.resume)
@@ -127,4 +153,5 @@ export interface ExtensionResponse {
   error?: string;
   plans?: RemoteFramePlan[];
   mapping?: AIFieldMappingResponse['mapping'];
+  resume?: StandardResume;
 }

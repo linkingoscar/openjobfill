@@ -227,8 +227,8 @@ const handleImportFile = async (e: Event) => {
       </div>
 
       <p class="text-slate-600 leading-relaxed">
-        默认关闭 —— 纯本地规则引擎即可正常使用。开启后，规则识别失败的字段会交给 AI <strong>一次性批量映射</strong>（省成本），且<strong>只发送字段标签、绝不发送简历内容</strong>。
-        推荐本地 Ollama（零成本、数据不出机）；也可用自带 Key 的云端接口。
+        默认关闭 —— 纯本地规则引擎即可正常使用。开启后，填表兜底只发送字段标签；只有当你在导入窗口主动选择“AI 图片识别”并逐次确认时，才会发送完整简历图片。
+        推荐本地 Ollama（零成本、数据不出机）；也可使用自带 Key 的云端接口。
       </p>
 
       <div v-if="aiEnabled" class="space-y-3 pt-1">
@@ -266,7 +266,7 @@ const handleImportFile = async (e: Event) => {
         </div>
 
         <p class="text-xs text-slate-500 leading-relaxed border-t border-violet-200/60 pt-2">
-          💡 本地 Ollama：先在终端运行 <code class="bg-white px-1 py-0.5 rounded font-mono">ollama run {{ aiModel || 'qwen2.5:7b' }}</code> 启动模型，再点「测试连接」。AI 匹配的字段会在填充日志中标注「AI 匹配」，便于你重点核对。
+          💡 本地 Ollama：先运行 <code class="bg-white px-1 py-0.5 rounded font-mono">ollama run {{ aiModel || 'qwen2.5:7b' }}</code>。图片简历识别需填写支持视觉的模型（如 Gemma 3、LLaVA）；普通文本模型只能用于字段映射。
         </p>
       </div>
     </section>

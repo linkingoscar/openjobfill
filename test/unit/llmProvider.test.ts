@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { callChatCompletion, normalizeChatCompletionUrl } from '@/core/ai/llmProvider';
+import { callChatCompletion, callResumeDocumentCompletion, callVisionCompletion, normalizeChatCompletionUrl } from '@/core/ai/llmProvider';
 
 describe('LLM provider', () => {
   afterEach(() => {
@@ -62,5 +62,85 @@ describe('LLM provider', () => {
       'prompt'
     )).rejects.toThrow('HTTP 401');
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('云端视觉请求应使用 OpenAI 兼容的 image_url 消息', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{"basics":{"name":"张三"}}' } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const imageDataUrl = 'data:image/jpeg;base64,YQ==';
+
+    const result = await callVisionCompletion(
+      { enabled: true, provider: 'openai-compatible', baseUrl: 'https://example.com/v1', apiKey: 'secret', model: 'vision-model' },
+      '提取简历',
+      imageDataUrl,
+    );
+
+    expect(result).toContain('张三');
+    const [, request] = fetchMock.mock.calls[0];
+    const body = JSON.parse(request.body);
+    expect(body.messages[0].content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'image_url', image_url: { url: imageDataUrl, detail: 'high' } }),
+    ]));
+  });
+
+  it('Ollama 视觉请求应剥离 data URL 前缀', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ message: { content: '{}' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await callVisionCompletion(
+      { enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'llava' },
+      '提取简历',
+      'data:image/png;base64,YQ==',
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages[0].images).toEqual(['YQ==']);
+  });
+
+  it('PDF 补强应同时发送本地提取文本和多页页面图', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{}' } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await callResumeDocumentCompletion(
+      { enabled: true, provider: 'openai-compatible', baseUrl: 'https://example.com/v1', apiKey: 'secret', model: 'vision-model' },
+      '提取简历',
+      { documentText: '张三 软件工程师', imageDataUrls: ['data:image/jpeg;base64,YQ==', 'data:image/jpeg;base64,Yg=='] },
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages[0].content[0].text).toContain('张三 软件工程师');
+    expect(body.messages[0].content.filter((part: any) => part.type === 'image_url')).toHaveLength(2);
+  });
+
+  it('Word 补强没有页面图时保持普通文本消息以兼容文本模型', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{}' } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await callResumeDocumentCompletion(
+      { enabled: true, provider: 'openai-compatible', baseUrl: 'https://example.com/v1', apiKey: 'secret', model: 'text-model' },
+      '提取简历',
+      { documentText: '# 张三\n## 教育经历' },
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages[0].content).toEqual(expect.stringContaining('# 张三'));
+  });
+
+  it('视觉请求拒绝外部图片 URL', async () => {
+    await expect(callVisionCompletion(
+      { enabled: true, provider: 'openai-compatible', baseUrl: 'https://example.com/v1', apiKey: 'secret', model: 'vision-model' },
+      '提取简历',
+      'https://evil.example/resume.jpg',
+    )).rejects.toThrow('只接受 JPEG、PNG 或 WebP');
   });
 });

@@ -193,6 +193,41 @@ export async function extractTextFromPdf(file: File | ArrayBuffer): Promise<stri
   return pageTexts.join('\n\n');
 }
 
+/** 将 PDF 前几页渲染为视觉模型可接受的 JPEG；扫描件没有文本层时仍可识别。 */
+export async function renderPdfPagesForVision(
+  file: File | ArrayBuffer,
+  maxPages = 4,
+  maxWidth = 1600,
+): Promise<string[]> {
+  const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file;
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    useWorkerFetch: false,
+    useSystemFonts: true,
+  });
+  const pdf = await loadingTask.promise;
+  const images: string[] = [];
+  const pageCount = Math.min(pdf.numPages, maxPages);
+  for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const initial = page.getViewport({ scale: 1 });
+    const scale = Math.min(2, maxWidth / initial.width);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('浏览器无法渲染 PDF 页面');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvas, canvasContext: context, viewport }).promise;
+    images.push(canvas.toDataURL('image/jpeg', 0.88));
+    page.cleanup();
+  }
+  await loadingTask.destroy();
+  return images;
+}
+
 /**
  * 从 Word (.docx) 文件中提取纯文本 (优先转换为 Markdown 保留段落/列表结构)
  */

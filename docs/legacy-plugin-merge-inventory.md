@@ -40,7 +40,7 @@
 | `src/engine/importers/markdownImporter.ts` | `src/core/parser/resumeParser.ts` | 现有 Markdown/Word 解析更完整 |
 | `src/engine/importers/platformSync.ts` | `platformProfileImporter.ts`、`FloatBall.vue` | 已迁移；显式点击确认后合并当前可见资料 |
 | `src/engine/importers/types.ts` | `src/types/resume.ts` | 统一类型承接 |
-| `src/engine/importers/visionImporter.ts` | 暂不接入默认导入界面 | 会把整张简历发送给外部模型，与当前隐私承诺冲突，不能静默启用 |
+| `src/engine/importers/visionImporter.ts` | `visionResumeImporter.ts`、`resumeImagePreparation.ts`、PDF 页面渲染、后台多模态 API | 已迁移；PDF 文本+页面图、Word 提取文本、独立图片页签、逐次确认、结果合并预览 |
 | `src/engine/jobTracker.ts` | `trackerStorage.ts`、`pageJobExtractor.ts` | 已补页面岗位信息提取 |
 | `src/engine/privacyScrubber.ts` | `src/core/privacy/privacyScrubber.ts` | 已迁移并改为递归脱敏 |
 | `src/engine/snapshotReplay.ts` | `snapshotRecorder.ts` | 已迁移录制、脱敏导出与离线回放 |
@@ -65,5 +65,5 @@
 - 所有实际填写仍然先生成预览，用户确认后才写入。
 - 不自动点击提交、下一步或不可逆保存按钮。
 - 平台简历同步只读取当前页面可见 DOM，且点击确认后才写入本地简历。
-- AI 字段映射仍只发送字段标签，不发送简历值；视觉识别没有被静默开启。
+- AI 字段映射仍只发送字段标签；视觉识别仅在用户选择图片并逐次确认后发送完整图片。
 - 诊断快照不记录目标值，并在导出前再次递归脱敏。

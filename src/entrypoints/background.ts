@@ -1,6 +1,7 @@
 import type { AISettings, UnmatchedFieldDescriptor, ResumeKeyOption } from '../types/ai';
-import { callChatCompletion } from '../core/ai/llmProvider';
+import { callChatCompletion, callResumeDocumentCompletion, callVisionCompletion } from '../core/ai/llmProvider';
 import { buildMappingPrompt, parseMappingResponse } from '../core/ai/fieldMapper';
+import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/importers/visionResumeImporter';
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
 import { isExtensionMessage, type ExtensionMessage } from '../types/message';
@@ -253,6 +254,41 @@ export default defineBackground(() => {
         }
       })();
       // 返回 true 表示异步 sendResponse
+      return true;
+    }
+
+    // 用户在导入弹窗逐次确认后才会发送完整简历图片。解析仍在 background
+    // 执行，避免 options 页面 CORS，并让接口密钥只用于扩展内部请求。
+    if (message.type === 'AI_PARSE_RESUME_IMAGE') {
+      (async () => {
+        try {
+          const { settings, imageDataUrl, fileName } = message.payload;
+          if (!settings.enabled) throw new Error('请先在设置中启用 AI 功能');
+          const raw = await callVisionCompletion(settings, buildVisionResumePrompt(), imageDataUrl);
+          const resume = parseVisionResumeResponse(raw, fileName);
+          sendResponse({ success: true, resume });
+        } catch (err: any) {
+          sendResponse({ success: false, error: err?.message || 'AI 视觉简历识别失败' });
+        }
+      })();
+      return true;
+    }
+
+    if (message.type === 'AI_PARSE_RESUME_DOCUMENT') {
+      (async () => {
+        try {
+          const { settings, imageDataUrls, documentText, fileName } = message.payload;
+          if (!settings.enabled) throw new Error('请先在设置中启用 AI 功能');
+          const raw = await callResumeDocumentCompletion(settings, buildVisionResumePrompt(), {
+            imageDataUrls,
+            documentText,
+          });
+          const resume = parseVisionResumeResponse(raw, fileName);
+          sendResponse({ success: true, resume });
+        } catch (err: any) {
+          sendResponse({ success: false, error: err?.message || 'AI 简历补强失败' });
+        }
+      })();
       return true;
     }
   });

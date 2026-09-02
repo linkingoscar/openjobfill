@@ -91,6 +91,21 @@ async function main() {
     assert.equal(hostStyles.display, 'block', '宿主节点应保持块级布局，避免被页面样式压缩');
 
     const options = await openOptions(context, extensionId);
+    await options.getByRole('button', { name: /智能解析导入/ }).click();
+    await options.getByLabel('使用已配置模型补强 PDF / Word 解析').check();
+    await options.getByText(/完整提取文本，以及 PDF 页面图/).waitFor({ state: 'visible' });
+    assert.equal(await options.locator('#resume-file-input').isDisabled(), true, '未确认数据发送时文件入口必须禁用');
+    await options.getByLabel(/我确认本次会把该 PDF\/Word/).check();
+    assert.equal(await options.locator('#resume-file-input').isEnabled(), true, '确认后才允许选择待补强文档');
+    await options.getByRole('tab', { name: 'AI 图片识别' }).click();
+    await options.getByText('视觉模型配置：AI 尚未启用').waitFor({ state: 'visible' });
+    assert.equal(
+      await options.getByRole('button', { name: '开始 AI 视觉识别' }).isDisabled(),
+      true,
+      '未选择图片和确认处理方式时不得发起视觉 API 请求',
+    );
+    await options.getByRole('button', { name: '关闭导入窗口' }).click();
+
     const nameInput = options.locator('#basics-name');
     const saveStatus = options.locator('[aria-live="polite"]');
     const initialSaveStatus = await saveStatus.textContent();
@@ -105,6 +120,9 @@ async function main() {
     await options.reload();
     assert.equal(await options.locator('#basics-name').inputValue(), 'Smoke Persistence Candidate');
     await options.close();
+    // chrome.storage.local 的回调已完成，但 Chromium 将扩展存储刷到持久化
+    // profile 文件存在短暂异步窗口；给磁盘落盘留出时间再模拟浏览器退出。
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     // 关闭并重新打开浏览器上下文，验证数据不依赖当前页面内存。
     await context.close();
