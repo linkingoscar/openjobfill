@@ -1,12 +1,12 @@
 import type { StandardResume } from '../../types/resume';
-import type { ImportConflict, ParsedCandidate, ResumeV5 } from '../../types/trustedResume';
+import type { FieldMeta, ImportConflict, ParsedCandidate, ResumeV5 } from '../../types/trustedResume';
 import { EMPTY_RESUME } from '../storage/defaultData';
 import { mergeParsedCandidates, migrateToResumeV5 } from '../schema/trustedResume';
 
 const META_KEYS = new Set([
   'id', 'title', 'isDefault', 'createdAt', 'updatedAt', 'schemaVersion', 'fieldMeta',
   'variantType', 'variantContext', 'variantOverrides', 'variantOrdering', 'variantPresentation',
-  'variantTextOverrides', 'parentResumeId',
+  'variantTextOverrides', 'parentResumeId', 'aiParseWarnings',
 ]);
 
 function usable(value: unknown): boolean {
@@ -36,6 +36,22 @@ function localConfidence(path: string, value: unknown, hasEvidence: boolean): nu
   return 0.72;
 }
 
+function trustedAIMeta(resume: StandardResume, path: string): FieldMeta | undefined {
+  const meta = (resume as StandardResume & { fieldMeta?: Record<string, FieldMeta> }).fieldMeta?.[path];
+  return meta?.source === 'ai-parser' ? meta : undefined;
+}
+
+function sanitizeNativeAIEvidence(meta: FieldMeta | undefined, documentText: string) {
+  if (!meta?.evidence?.length) return [];
+  return meta.evidence.filter((evidence) => {
+    if (evidence.page) return true;
+    if (!evidence.text) return false;
+    // For text-only DOCX/PDF extraction, an unpaged quote must be grounded in the
+    // locally extracted source text. Image/page evidence may not appear in OCR-free text.
+    return !documentText || documentText.includes(evidence.text);
+  }).map((evidence) => ({ ...evidence }));
+}
+
 export function resumeToParsedCandidates(
   resume: StandardResume,
   options: { source: 'local' | 'ai' | 'json'; documentText?: string; fileName?: string },
@@ -58,13 +74,25 @@ export function resumeToParsedCandidates(
       return;
     }
     if (!path) return;
-    const evidence = evidenceFor(value, text, fileName);
-    const confidence = options.source === 'local'
-      ? localConfidence(path, value, evidence.length > 0)
-      : options.source === 'json'
-        ? 0.98
-        : evidence.length > 0 ? 0.88 : 0.78;
-    candidates.push({ path, value, confidence, evidence, parserRule: `${options.source}-structured-import` });
+
+    const nativeMeta = options.source === 'ai' ? trustedAIMeta(resume, path) : undefined;
+    const evidence = nativeMeta
+      ? sanitizeNativeAIEvidence(nativeMeta, text)
+      : evidenceFor(value, text, fileName);
+    const confidence = nativeMeta && typeof nativeMeta.confidence === 'number'
+      ? nativeMeta.confidence
+      : options.source === 'local'
+        ? localConfidence(path, value, evidence.length > 0)
+        : options.source === 'json'
+          ? 0.98
+          : evidence.length > 0 ? 0.88 : 0.78;
+    candidates.push({
+      path,
+      value,
+      confidence,
+      evidence,
+      parserRule: nativeMeta ? 'ai-document-v2' : `${options.source}-structured-import`,
+    });
   };
 
   visit(resume, '');
