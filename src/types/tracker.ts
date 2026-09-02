@@ -19,5 +19,8 @@ export interface JobApplicationRecord {
   resumeVersionTitle?: string;
   jdSummary?: string;
   notes?: string;
+  /** 建档来源，便于区分用户确认的成功页草稿与普通手动归档。 */
+  source?: 'manual' | 'success_detection' | 'user_confirmed';
+  confirmedAt?: string;
   updatedAt: string;
 }

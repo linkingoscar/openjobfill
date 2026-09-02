@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractPageJobSnapshot } from '../../src/core/tracker/pageJobExtractor';
+import { extractPageJobSnapshot, isApplicationSuccessPage } from '../../src/core/tracker/pageJobExtractor';
 
 describe('page job extractor', () => {
   it('优先读取语义明确的岗位、公司、薪资和 JD 节点', () => {
@@ -23,5 +23,12 @@ describe('page job extractor', () => {
     });
     expect(snapshot.description).toContain('工程化');
   });
-});
 
+  it('识别明确的申请成功页，但不把普通岗位页误判为成功', () => {
+    document.body.innerHTML = '<main><h1>申请成功</h1><p>感谢您的申请，我们会尽快与您联系。</p></main>';
+    expect(isApplicationSuccessPage(document, new URL('https://jobs.example.com/apply/result') as unknown as Location)).toBe(true);
+
+    document.body.innerHTML = '<main><h1>高级前端开发工程师</h1><p>欢迎投递简历。</p></main>';
+    expect(isApplicationSuccessPage(document, new URL('https://jobs.example.com/jobs/123') as unknown as Location)).toBe(false);
+  });
+});

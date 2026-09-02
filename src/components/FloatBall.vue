@@ -47,7 +47,7 @@ import { startManualFill } from '@/core/engine/manualFill';
 import { uploadResumeToPage } from '@/core/engine/attachmentUploader';
 import { inspectFieldSafety } from '@/core/pipeline/fieldSafety';
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
-import { extractPageJobSnapshot } from '@/core/tracker/pageJobExtractor';
+import { extractPageJobSnapshot, isApplicationSuccessPage, type PageJobSnapshot } from '@/core/tracker/pageJobExtractor';
 import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
 import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
@@ -92,6 +92,23 @@ const handleHideFloatingBall = () => {
 
 // 多步向导与待办核对提示
 const stepNotification = ref({ show: false, text: '' });
+const copyToastMessage = ref('');
+const applicationDraft = ref<{ job: PageJobSnapshot; detectedAt: string } | null>(null);
+
+const detectApplicationSuccessDraft = () => {
+  if (!isApplicationSuccessPage()) return;
+  const job = extractPageJobSnapshot();
+  if (applicationDraft.value?.job.jobUrl === job.jobUrl) return;
+  applicationDraft.value = { job, detectedAt: new Date().toISOString() };
+  if (!isDrawerOpen.value) isDrawerOpen.value = true;
+  drawerTab.value = 'jdMatch';
+  copyToastMessage.value = '检测到申请成功页面，已生成投递归档草稿，请确认后保存';
+  setTimeout(() => { copyToastMessage.value = ''; }, 4500);
+};
+
+const dismissApplicationDraft = () => {
+  applicationDraft.value = null;
+};
 
 const handleFocusTaskElement = (task: any) => {
   if (task.element) {
@@ -202,6 +219,7 @@ const handleSaveTaskMapping = async (task: any) => {
 const pendingChangedRoots = ref<HTMLElement[]>([]);
 
 const notifyStepChange = (newUrl: string, changedNodes: HTMLElement[] = []) => {
+  detectApplicationSuccessDraft();
   if (isFilling.value) {
     formFillerEngine.cancelActiveRun('页面步骤已变化');
     void cancelPreview();
@@ -220,7 +238,6 @@ const notifyStepChange = (newUrl: string, changedNodes: HTMLElement[] = []) => {
 // 剪贴板快速搜索与复制提示
 const searchQuery = ref('');
 const copiedFieldKey = ref<string | null>(null);
-const copyToastMessage = ref('');
 const {
   jdAnalysis,
   isAnalyzingJD,
@@ -282,6 +299,7 @@ onMounted(async () => {
   const adapter = getAdapterForUrl(window.location.href);
   currentAdapterName.value = adapter.name;
   await Promise.all([loadActiveResume(), loadFillHistory()]);
+  detectApplicationSuccessDraft();
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', handleViewportResize);
 });
@@ -418,11 +436,19 @@ const handleUploadResume = () => {
 };
 
 const handleArchiveJob = async () => {
-  if (!jdAnalysis.value && currentResume.value) {
-    handleAnalyzeJD();
-  }
-  const pageJob = extractPageJobSnapshot();
+  const pageJob = applicationDraft.value?.job || extractPageJobSnapshot();
+  const successDetected = !!applicationDraft.value || isApplicationSuccessPage();
+  if (!jdAnalysis.value && currentResume.value) handleAnalyzeJD();
   const jobTitle = jdAnalysis.value?.jobTitle || pageJob.jobTitle;
+
+  const confirmationText = successDetected
+    ? `检测到申请成功页面：\n${pageJob.companyName} · ${jobTitle}\n\n是否确认归档为“已投递”？`
+    : `将当前岗位加入投递看板：\n${pageJob.companyName} · ${jobTitle}\n\n请确认你已经完成投递，确认后才会保存为“已投递”。`;
+  if (!window.confirm(confirmationText)) {
+    copyToastMessage.value = '已取消归档，岗位草稿仍保留在当前页面';
+    setTimeout(() => { copyToastMessage.value = ''; }, 2500);
+    return;
+  }
 
   const record: JobApplicationRecord = {
     id: `app-${Date.now()}`,
@@ -434,11 +460,14 @@ const handleArchiveJob = async () => {
     salary: pageJob.salary || (currentResume.value?.basics.expectedSalaryMin ? `${currentResume.value.basics.expectedSalaryMin}k` : ''),
     resumeVersionTitle: currentResume.value?.title || '默认简历',
     jdSummary: pageJob.description,
-    notes: `通过 OpenJobFill 一键填表完成投递。综合技能匹配度: ${jdAnalysis.value?.matchScore || 0}%`,
+    notes: `用户确认${successDetected ? '申请成功页面' : '已完成投递'}后由 OpenJobFill 建档。综合技能匹配度: ${jdAnalysis.value?.matchScore || 0}%`,
+    source: successDetected ? 'success_detection' : 'manual',
+    confirmedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   await trackerStorage.saveApplication(record);
+  applicationDraft.value = null;
   copyToastMessage.value = `📌 已归档【${record.companyName} - ${record.jobTitle}】至投递看板！`;
   setTimeout(() => { copyToastMessage.value = ''; }, 3000);
 };
@@ -1138,6 +1167,37 @@ defineExpose({
           class="flex-1 flex flex-col min-h-0 overflow-hidden"
         >
           <div class="p-4 flex-1 overflow-y-auto space-y-3.5">
+            <div
+              v-if="applicationDraft"
+              class="p-3 rounded-xl border border-emerald-200 bg-emerald-50/80 space-y-2"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+                <CheckCircle class="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                检测到申请成功，已生成投递草稿
+              </div>
+              <p class="text-[11px] text-emerald-900 truncate" :title="`${applicationDraft.job.companyName} · ${applicationDraft.job.jobTitle}`">
+                {{ applicationDraft.job.companyName }} · {{ applicationDraft.job.jobTitle }}
+              </p>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  @click="handleArchiveJob"
+                  class="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  确认归档为已投递
+                </button>
+                <button
+                  type="button"
+                  @click="dismissApplicationDraft"
+                  class="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-200 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  稍后
+                </button>
+              </div>
+            </div>
+
             <!-- Job Title & Score Gauge -->
             <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
               <div class="flex items-center justify-between text-xs">

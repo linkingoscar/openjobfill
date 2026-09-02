@@ -6,6 +6,7 @@ import { resumeStorage } from '@/core/storage/resumeStorage';
 import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { serializeAnalyzedPlan, serializeExecutionResult } from '@/core/frames/frameCoordinator';
 import { isExtensionMessage } from '@/types/message';
+import { isApplicationSuccessPage } from '@/core/tracker/pageJobExtractor';
 
 export default defineUnlistedScript(() => {
   // executeScript 可能在同一 frame 重复执行（例如 SPA 导航或 service worker 重启）。
@@ -77,9 +78,11 @@ export default defineUnlistedScript(() => {
 
   function startStepTracking(): () => void {
     let lastUrl = window.location.href;
+    let lastSuccessSignal = isApplicationSuccessPage();
     const handleStepChange = () => {
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
+        lastSuccessSignal = false;
         vm?.notifyStepChange?.(lastUrl);
       }
     };
@@ -115,19 +118,25 @@ export default defineUnlistedScript(() => {
       if (signatureTimer) clearTimeout(signatureTimer);
       signatureTimer = setTimeout(() => {
         const newSig = computeFormSignature();
+        const signatureChanged = !!newSig && newSig !== lastSignature;
+        const successDetected = isApplicationSuccessPage();
+        const successChanged = successDetected && !lastSuccessSignal;
+        lastSuccessSignal = successDetected;
         // 自己的动态增行/组件渲染也会触发 mutation；运行中只更新基线，
-        // 不把这些预期变化误当成外部步骤切换或增量任务。
-        if (newSig && newSig !== lastSignature) {
-          const busy = !!vm?.isFilling?.();
-          lastSignature = newSig;
-          if (busy) return;
-          const changedNodes = mutations
+        // 不把这些预期变化误当成外部步骤切换或增量任务。申请成功信号除外，
+        // 它需要尽快中止未完成的填写并生成待确认草稿。
+        if (!signatureChanged && !successChanged) return;
+        const busy = !!vm?.isFilling?.();
+        if (signatureChanged) lastSignature = newSig;
+        if (busy && !successChanged) return;
+        const changedNodes = signatureChanged
+          ? mutations
             .flatMap((mutation) => Array.from(mutation.addedNodes))
             .map((node) => node.nodeType === 1 ? node as HTMLElement : node.parentElement)
             .filter((node): node is HTMLElement => !!node)
-            .slice(0, 40);
-          vm?.notifyStepChange?.(window.location.href, changedNodes);
-        }
+            .slice(0, 40)
+          : [];
+        vm?.notifyStepChange?.(window.location.href, changedNodes);
       }, 500);
     });
     if (document.body) domStepObserver.observe(document.body, { childList: true, subtree: true });

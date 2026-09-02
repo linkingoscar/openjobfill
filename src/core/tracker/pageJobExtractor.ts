@@ -7,6 +7,29 @@ export interface PageJobSnapshot {
   jobUrl: string;
 }
 
+const APPLICATION_SUCCESS_PATTERNS = [
+  /投递成功/,
+  /申请成功/,
+  /提交成功/,
+  /简历已(?:成功)?投递/,
+  /感谢您(?:的)?申请/,
+  /thank\s+you\s+for\s+applying/i,
+  /application\s+(?:has\s+been\s+)?submitted/i,
+  /your\s+application\s+was\s+received/i,
+];
+
+/** 只依据可见成功文案或明确的结果页路径判断申请是否已经提交。 */
+export function isApplicationSuccessPage(
+  doc: Document = document,
+  location: Location = window.location,
+): boolean {
+  const route = `${location.pathname} ${location.hash}`;
+  if (/(?:application|apply|candidate|job)[-_/]?(?:success|submitted|complete|confirmation)/i.test(route)) return true;
+  if (!doc?.body) return false;
+  const visibleText = cleanText((doc.body as HTMLElement | null)?.innerText || doc.body?.textContent, 12000);
+  return APPLICATION_SUCCESS_PATTERNS.some((pattern) => pattern.test(visibleText));
+}
+
 function cleanText(value: string | null | undefined, maxLength: number): string {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
@@ -60,4 +83,3 @@ export function extractPageJobSnapshot(doc: Document = document, location: Locat
     jobUrl: location.href,
   };
 }
-
