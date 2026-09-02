@@ -1,6 +1,8 @@
 import type { StandardResume } from '../../types/resume';
+import type { ResumeVariantContext, ResumeV5 } from '../../types/trustedResume';
 import { EMPTY_RESUME, DEMO_RESUME, DEFAULT_RESUME } from './defaultData';
 import { parseResumePayload } from '../schema/resumeSchema';
+import { createJobVariant as buildJobVariant, migrateToResumeV5, resolveVariant } from '../schema/trustedResume';
 
 const STORAGE_KEY_RESUMES = 'openjobfill_resumes';
 export const RESUME_STORAGE_INDEX_KEY = 'openjobfill_resume_ids';
@@ -75,8 +77,6 @@ class ResumeStorage {
         }
       } catch (e) {
         console.error('Failed to parse resumes from localStorage', e);
-        // Keep the original bytes recoverable. A downgrade or corrupt payload must
-        // not be overwritten with defaults merely because the current reader rejects it.
         return createDefaultResumeList();
       }
     }
@@ -156,8 +156,17 @@ class ResumeStorage {
     return resumes;
   }
 
+  private resolveStoredResume(resume: StandardResume, resumes: StandardResume[]): ResumeV5 {
+    const candidate = migrateToResumeV5(resume);
+    if (candidate.variantType !== 'job-variant' || !candidate.parentResumeId) return candidate;
+    const parent = resumes.find((item) => item.id === candidate.parentResumeId);
+    if (!parent) return candidate;
+    return resolveVariant(migrateToResumeV5(parent), candidate);
+  }
+
   /**
-   * 获取所有存储的简历列表
+   * 获取所有存储的简历列表。岗位版本在这里保持原始持久化形态，
+   * 便于管理 parentResumeId / variantOverrides；真正填写时通过 getActiveResume 解析继承。
    */
   async getAllResumes(): Promise<StandardResume[]> {
     if (this.isExtensionEnv()) {
@@ -178,8 +187,6 @@ class ResumeStorage {
       const migrated = await this.migrateLegacyResumes(result[STORAGE_KEY_RESUMES]);
       if (migrated) return migrated;
 
-      // 首次安装时直接初始化底层存储。不能调用 saveResume()：
-      // saveResume() 会再次调用 getAllResumes()，从而在空存储上无限递归。
       const defaults = createDefaultResumeList();
       await this.writeResumeEntries(defaults);
       return defaults;
@@ -188,8 +195,16 @@ class ResumeStorage {
     }
   }
 
+  /** 获取指定简历用于填写的解析结果；岗位版本会继承主档案最新未覆盖事实。 */
+  async getResumeForFill(id: string): Promise<ResumeV5> {
+    const resumes = await this.getAllResumes();
+    const selected = resumes.find((resume) => resume.id === id);
+    if (!selected) throw new Error(`找不到简历：${id}`);
+    return this.resolveStoredResume(selected, resumes);
+  }
+
   /**
-   * 获取当前选中的激活简历
+   * 获取当前选中的激活简历。若当前是岗位版本，返回与最新 master 合成后的视图。
    */
   async getActiveResume(): Promise<StandardResume> {
     const resumes = await this.getAllResumes();
@@ -209,11 +224,26 @@ class ResumeStorage {
 
     if (activeId) {
       const found = resumes.find((r) => r.id === activeId);
-      if (found) return found;
+      if (found) return this.resolveStoredResume(found, resumes);
     }
 
     const defaultResume = resumes.find((r) => r.isDefault) || resumes[0];
-    return defaultResume;
+    return this.resolveStoredResume(defaultResume, resumes);
+  }
+
+  /** 从主档案创建岗位版本，不改写 master。 */
+  async createJobVariant(masterId: string, context: ResumeVariantContext = {}): Promise<ResumeV5> {
+    const resumes = await this.getAllResumes();
+    let master = resumes.find((resume) => resume.id === masterId);
+    if (!master) throw new Error(`找不到主档案：${masterId}`);
+    const selected = migrateToResumeV5(master);
+    if (selected.variantType === 'job-variant' && selected.parentResumeId) {
+      master = resumes.find((resume) => resume.id === selected.parentResumeId) || master;
+    }
+    const trustedMaster = migrateToResumeV5(master);
+    const variant = buildJobVariant(trustedMaster, context);
+    await this.saveResume(variant);
+    return variant;
   }
 
   /**
@@ -278,7 +308,6 @@ class ResumeStorage {
 
     const resumes = await this.getAllResumes();
     const index = resumes.findIndex((r) => r.id === cleanResume.id);
-    
     cleanResume.updatedAt = nextResumeUpdatedAt(index >= 0 ? resumes[index].updatedAt : undefined);
     if (index >= 0) {
       resumes[index] = cleanResume;
