@@ -1,6 +1,6 @@
 import type { AISettings, UnmatchedFieldDescriptor, ResumeKeyOption } from '../types/ai';
 import { callChatCompletion, callResumeDocumentCompletion, callVisionCompletion } from '../core/ai/llmProvider';
-import { buildMappingPrompt, parseMappingResponse } from '../core/ai/fieldMapper';
+import { buildMappingPrompt, parseMappingResponse, parseMappingSuggestions } from '../core/ai/fieldMapper';
 import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/importers/visionResumeImporter';
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
@@ -471,7 +471,8 @@ export default defineBackground(() => {
       })();
     }
 
-    // AI 字段映射：在 background 执行，规避 content script 的 CORS 限制
+    // AI 字段映射：在 background 执行，规避 content script 的 CORS 限制。
+    // 同时返回 v2 suggestions 和 legacy mapping，旧本地模型仍能兼容。
     if (message.type === 'AI_MAP_FIELDS') {
       (async () => {
         try {
@@ -483,14 +484,14 @@ export default defineBackground(() => {
 
           const prompt = buildMappingPrompt(payload.fields, payload.options);
           const raw = await callChatCompletion(payload.settings, prompt);
+          const mappings = parseMappingSuggestions(raw);
           const mapping = parseMappingResponse(raw);
 
-          sendResponse({ success: true, mapping });
+          sendResponse({ success: true, mappings, mapping });
         } catch (err: any) {
           sendResponse({ success: false, error: err?.message || 'AI 调用失败' });
         }
       })();
-      // 返回 true 表示异步 sendResponse
       return true;
     }
 
