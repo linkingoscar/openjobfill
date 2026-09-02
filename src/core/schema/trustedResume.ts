@@ -6,9 +6,13 @@ function clone<T>(value: T): T {
   try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value)) as T; }
 }
 
+const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+
 function partsFor(path: string): string[] {
   const parts = path.split('.').filter(Boolean);
-  if (!parts.length || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) throw new Error(`非法字段路径: ${path}`);
+  if (!parts.length || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part) || UNSAFE_PATH_SEGMENTS.has(part))) {
+    throw new Error(`非法字段路径: ${path}`);
+  }
   return parts;
 }
 
@@ -57,11 +61,15 @@ export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
     parentResumeId: typeof raw.parentResumeId === 'string' ? raw.parentResumeId : undefined,
     variantType: raw.variantType === 'job-variant' ? 'job-variant' : 'master',
     variantContext: raw.variantContext && typeof raw.variantContext === 'object' ? clone(raw.variantContext as ResumeV5['variantContext']) : undefined,
-    variantOverrides: Array.isArray(raw.variantOverrides) ? raw.variantOverrides.filter((item): item is string => typeof item === 'string') : [],
+    variantOverrides: Array.isArray(raw.variantOverrides) ? raw.variantOverrides.filter((item): item is string => {
+      if (typeof item !== 'string') return false;
+      try { partsFor(item); return true; } catch { return false; }
+    }) : [],
   };
 }
 
 export function confirmField(resume: ResumeV5, path: string, options: { lock?: boolean; source?: FieldMetaSource; now?: number } = {}): ResumeV5 {
+  partsFor(path);
   const next = clone(resume);
   const now = options.now ?? Date.now();
   const existing = next.fieldMeta[path];
@@ -105,6 +113,32 @@ export function mergeParsedCandidates(current: ResumeV5, candidates: ParsedCandi
   }
   if (acceptedPaths.length) next.updatedAt = now;
   return { resume: next, acceptedPaths, conflicts };
+}
+
+/**
+ * Explicit user resolution is the only path allowed to replace a locked/confirmed fact during import.
+ * Accepting a candidate marks the new fact confirmed and preserves an existing lock.
+ */
+export function resolveImportConflict(
+  current: ResumeV5,
+  conflict: ImportConflict,
+  decision: 'keep-current' | 'accept-candidate',
+  now = Date.now(),
+): ResumeV5 {
+  partsFor(conflict.path);
+  if (decision === 'keep-current') return clone(current);
+  const next = clone(current);
+  setResumeValue(next, conflict.path, clone(conflict.candidateValue));
+  next.fieldMeta[conflict.path] = {
+    ...clone(conflict.candidateMeta),
+    confirmed: true,
+    locked: conflict.currentMeta?.locked === true,
+    confirmedAt: now,
+    updatedAt: now,
+    autoFillEnabled: conflict.candidateMeta.autoFillEnabled !== false,
+  };
+  next.updatedAt = now;
+  return next;
 }
 
 export function createJobVariant(master: ResumeV5, context: ResumeV5['variantContext'], now = Date.now()): ResumeV5 {
