@@ -45,6 +45,13 @@ export interface ResumeVariantOrdering {
   experiences?: string[];
 }
 
+export interface ResumeVariantPresentation {
+  /** Existing skill names to emphasize for this job; never creates new skills. */
+  highlightSkills?: string[];
+  /** Existing profile link field paths allowed to be used for this job variant. */
+  selectedLinkKeys?: string[];
+}
+
 export interface ResumeV5 extends StandardResume {
   schemaVersion: 5;
   fieldMeta: Record<string, FieldMeta>;
@@ -55,6 +62,8 @@ export interface ResumeV5 extends StandardResume {
   variantOverrides?: string[];
   /** Reordering is sidecar metadata rather than a full-array override. */
   variantOrdering?: ResumeVariantOrdering;
+  /** Presentation choices do not alter master facts. */
+  variantPresentation?: ResumeVariantPresentation;
 }
 
 export interface ParsedCandidate<T = unknown> {
