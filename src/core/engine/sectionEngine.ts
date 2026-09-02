@@ -3,14 +3,16 @@ import type { PlatformEnhancer } from '../../types/pipeline';
 import { autoExpandHeuristicSections, ensureSectionRows } from './repeater';
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 import { prepareEditableSections } from './expansionHelper';
+import { throwIfAborted } from '../pipeline/runContext';
 
 export class SectionEngine {
   /**
    * 自动探测页面现有卡片行数，并按需差量点击 "+添加经历" 按钮 (Required - Existing)
    */
-  async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null): Promise<boolean> {
+  async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null, signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
     let anyExpanded = false;
-    if (await prepareEditableSections() > 0) anyExpanded = true;
+    if (await prepareEditableSections(signal) > 0) anyExpanded = true;
 
     // 1. 教育经历卡片
     if (resume.educations && resume.educations.length > 1) {
@@ -18,7 +20,7 @@ export class SectionEngine {
       const needed = resume.educations.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await this.expandSection('education', ['教育', '学历', 'education'], needed, delta, enhancer);
+        const expanded = await this.expandSection('education', ['教育', '学历', 'education'], needed, delta, enhancer, signal);
         if (expanded) anyExpanded = true;
       }
     }
@@ -29,7 +31,7 @@ export class SectionEngine {
       const needed = resume.experiences.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await this.expandSection('experience', ['工作', '实习', 'experience'], needed, delta, enhancer);
+        const expanded = await this.expandSection('experience', ['工作', '实习', 'experience'], needed, delta, enhancer, signal);
         if (expanded) anyExpanded = true;
       }
     }
@@ -40,7 +42,7 @@ export class SectionEngine {
       const needed = resume.projects.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await this.expandSection('project', ['项目', 'project'], needed, delta, enhancer);
+        const expanded = await this.expandSection('project', ['项目', 'project'], needed, delta, enhancer, signal);
         if (expanded) anyExpanded = true;
       }
     }
@@ -51,14 +53,14 @@ export class SectionEngine {
       const needed = resume.familyMembers.length;
       if (needed > existingCount) {
         const delta = needed - existingCount;
-        const expanded = await this.expandSection('family', ['家庭', 'family'], needed, delta, enhancer);
+        const expanded = await this.expandSection('family', ['家庭', 'family'], needed, delta, enhancer, signal);
         if (expanded) anyExpanded = true;
       }
     }
 
     if (anyExpanded) {
       // 额外等待 150ms 确保 Vue/React/Angular 虚拟 DOM 挂载完成
-      await sleep(150);
+      await sleep(150, signal);
     }
 
     return anyExpanded;
@@ -70,6 +72,7 @@ export class SectionEngine {
     requiredCount: number,
     delta: number,
     enhancer?: PlatformEnhancer | null,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const config = enhancer?.repeaterConfigs?.[sectionKey];
     if (config?.sectionRoot && config.itemSelector && config.addButton) {
@@ -78,13 +81,13 @@ export class SectionEngine {
         itemSelector: config.itemSelector,
         addButtonSelector: config.addButton,
         itemFields: {},
-      }, requiredCount);
+      }, requiredCount, signal);
       if (rows.length >= requiredCount) return true;
       if (rows.length > 0) delta = Math.max(0, requiredCount - rows.length);
     }
 
     if (delta <= 0) return true;
-    return autoExpandHeuristicSections(keywords, delta + 1);
+    return autoExpandHeuristicSections(keywords, delta + 1, signal);
   }
 
   /**

@@ -79,11 +79,15 @@ export function compactPlanSnapshot(plan: FillPlan) {
 export class SnapshotRecorder {
   private static current: FillSnapshotSession | null = null;
 
-  static start(pageUrl = typeof window !== 'undefined' ? window.location.href : '', pageTitle = typeof document !== 'undefined' ? document.title : ''): FillSnapshotSession {
+  static start(
+    pageUrl = typeof window !== 'undefined' ? window.location.href : '',
+    pageTitle = typeof document !== 'undefined' ? document.title : '',
+    runId?: string,
+  ): FillSnapshotSession {
     const createdAt = Date.now();
     this.current = {
       schemaVersion: 1,
-      sessionId: `session-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId: runId || `session-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
       pageUrl: safePageUrl(pageUrl),
       pageTitle: String(pageTitle || '').slice(0, 180),
       createdAt,

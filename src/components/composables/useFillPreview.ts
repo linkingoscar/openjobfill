@@ -2,6 +2,7 @@ import { computed, ref, type Ref } from 'vue';
 import { cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import type { FillResult } from '@/types/adapter';
 import { AnalyzedPlanStaleError, formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
+import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 
 export type DrawerTab = 'logs' | 'review' | 'clipboard' | 'jdMatch';
 
@@ -49,6 +50,13 @@ export function useFillPreview(
       drawerTab.value = 'logs';
     } catch (error) {
       console.error('[OpenJobFill] Execute fill error:', error);
+      if (isFillRunAbortedError(error)) {
+        previewPlan.value = null;
+        fillResult.value = null;
+        operationError.value = '';
+        drawerTab.value = 'logs';
+        return;
+      }
       if (error instanceof AnalyzedPlanStaleError) {
         // 子 frame 的临时计划也一并释放，避免旧 analysisId 在 frame 中残留。
         await cancelPreview();
@@ -61,6 +69,9 @@ export function useFillPreview(
   };
 
   const cancelPreview = async () => {
+    if (previewPlan.value?.runId) {
+      formFillerEngine.cancelRun(previewPlan.value.runId, '预览已取消');
+    }
     if (previewPlan.value?.remoteFrames?.length) {
       await cancelRemoteFrames(previewPlan.value.remoteFrames);
     }

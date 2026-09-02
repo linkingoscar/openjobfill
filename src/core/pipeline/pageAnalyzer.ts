@@ -1,5 +1,5 @@
 import type { FieldDescriptor, FieldType, FieldSectionInfo } from '../../types/pipeline';
-import { 
+import {
   findAssociatedLabelText, 
   getElementWindow, 
   isInputElement, 
@@ -8,6 +8,8 @@ import {
   isFieldRequired,
   getAllOpenRoots,
 } from '../../utils/dom';
+import { createElementFingerprint } from './runContext';
+import { inspectFieldSafety } from './fieldSafety';
 
 export class PageAnalyzer {
   /**
@@ -114,6 +116,7 @@ export class PageAnalyzer {
       const options = this.extractOptions(el, type);
       const section = this.detectSectionInfo(el);
       const contextText = this.extractContextText(el);
+      const sectionTitle = section.rawTitle || section.type;
 
       descriptors.push({
         id: `field_${fieldCounter}_${type}`,
@@ -130,6 +133,8 @@ export class PageAnalyzer {
         options,
         section,
         contextText,
+        fingerprint: createElementFingerprint(el, sectionTitle, section.index),
+        safety: inspectFieldSafety(el, label, contextText),
       });
     }
 

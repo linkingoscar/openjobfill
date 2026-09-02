@@ -1,6 +1,7 @@
 import { setNativeValue, simulateClick } from '../engine/dispatcher';
 import { selectCustomOption } from '../engine/selector';
 import { getAllOpenRoots, isElementVisible, isInputElement, sleep } from '../../utils/dom';
+import { throwIfAborted } from '../pipeline/runContext';
 
 export interface SemanticDate {
   year: number;
@@ -65,7 +66,8 @@ export class DateEngine {
     return text.replace(/\s+/g, '');
   }
 
-  private async alignCalendarView(popup: HTMLElement, semantic: SemanticDate): Promise<void> {
+  private async alignCalendarView(popup: HTMLElement, semantic: SemanticDate, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const year = String(semantic.year);
     const month = String(semantic.month);
     const paddedMonth = month.padStart(2, '0');
@@ -77,7 +79,7 @@ export class DateEngine {
       )).find(isElementVisible);
       if (yearSwitch) {
         simulateClick(yearSwitch);
-        await sleep(100);
+        await sleep(100, signal);
 
         // Ant/Element 的年份面板通常按十年分页。只在能读出年份范围时定向翻页，
         // 最多 24 次，覆盖正常求职经历日期且不会无限循环。
@@ -85,7 +87,7 @@ export class DateEngine {
           const yearCell = this.findCalendarItem(popup, [year, `${year}年`]);
           if (yearCell) {
             simulateClick(yearCell);
-            await sleep(100);
+            await sleep(100, signal);
             break;
           }
           const visibleYears = this.visibleCalendarItems(popup)
@@ -101,7 +103,7 @@ export class DateEngine {
           const nav = Array.from(popup.querySelectorAll<HTMLElement>(navSelector)).find(isElementVisible);
           if (!nav) break;
           simulateClick(nav);
-          await sleep(80);
+          await sleep(80, signal);
         }
       }
     }
@@ -118,7 +120,7 @@ export class DateEngine {
         const monthSwitch = monthSwitches.find((item) => /月|month/i.test(item.textContent || item.className)) || monthSwitches.at(-1);
         if (monthSwitch) {
           simulateClick(monthSwitch);
-          await sleep(100);
+          await sleep(100, signal);
           monthCell = this.findCalendarItem(popup, [
             `${semantic.year}-${paddedMonth}`, `${month}月`, `${paddedMonth}月`,
           ]);
@@ -126,12 +128,12 @@ export class DateEngine {
       }
       if (monthCell) {
         simulateClick(monthCell);
-        await sleep(100);
+        await sleep(100, signal);
       }
     }
   }
 
-  private async selectVisibleCalendarCell(el: HTMLElement, semantic: SemanticDate): Promise<boolean> {
+  private async selectVisibleCalendarCell(el: HTMLElement, semantic: SemanticDate, signal?: AbortSignal): Promise<boolean> {
     const doc = el.ownerDocument || document;
     const y = String(semantic.year);
     const m = String(semantic.month).padStart(2, '0');
@@ -146,13 +148,14 @@ export class DateEngine {
     let roots: ParentNode[] = [];
     let rootsRefreshedAt = 0;
     for (let attempt = 0; attempt < 12; attempt++) {
+      throwIfAborted(signal);
       if (roots.length === 0 || Date.now() - rootsRefreshedAt >= 240) {
         roots = getAllOpenRoots(doc);
         rootsRefreshedAt = Date.now();
       }
       const popups = roots.flatMap((root) => Array.from(root.querySelectorAll<HTMLElement>(popupSelectors))).filter(isElementVisible);
       for (const popup of popups) {
-        if (attempt === 0) await this.alignCalendarView(popup, semantic);
+        if (attempt === 0) await this.alignCalendarView(popup, semantic, signal);
         const exactSelectors = [
           `[data-date="${isoDate}"]`, `[data-value="${isoDate}"]`, `[title="${isoDate}"]`,
           `[data-month="${isoMonth}"]`, `[data-value="${isoMonth}"]`, `[title="${isoMonth}"]`,
@@ -161,7 +164,7 @@ export class DateEngine {
           const target = popup.querySelector<HTMLElement>(selector);
           if (target && isElementVisible(target) && target.getAttribute('aria-disabled') !== 'true') {
             simulateClick(target);
-            await sleep(120);
+            await sleep(120, signal);
             return true;
           }
         }
@@ -175,12 +178,12 @@ export class DateEngine {
           const dayCell = cells.find((cell) => (cell.textContent || '').trim() === String(semantic.day));
           if (dayCell) {
             simulateClick(dayCell);
-            await sleep(120);
+            await sleep(120, signal);
             return true;
           }
         }
       }
-      await sleep(60);
+      await sleep(60, signal);
     }
     return false;
   }
@@ -285,7 +288,8 @@ export class DateEngine {
   /**
    * 智能检测日期组件形态并完成结构化注入 (支持原生 input、双下拉框与文本框)
    */
-  async injectSemanticDate(el: HTMLElement, rawDateStr: string): Promise<boolean> {
+  async injectSemanticDate(el: HTMLElement, rawDateStr: string, signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
     const semantic = this.parseSemanticDate(rawDateStr);
     if (!semantic.valid && !semantic.isPresent) return false;
 
@@ -293,7 +297,7 @@ export class DateEngine {
       const presentControl = this.findPresentControl(el);
       if (!presentControl) return false;
       simulateClick(presentControl);
-      await sleep(80);
+      await sleep(80, signal);
       if (isInputElement(presentControl)) return presentControl.checked;
       return presentControl.getAttribute('aria-checked') === 'true' || presentControl.getAttribute('aria-pressed') === 'true';
     }
@@ -322,8 +326,8 @@ export class DateEngine {
         const yearTarget = String(semantic.year);
         const monthTarget = String(semantic.month);
 
-        const yearOk = await selectCustomOption(yearSelect, yearTarget);
-        const monthOk = await selectCustomOption(monthSelect, monthTarget);
+        const yearOk = await selectCustomOption(yearSelect, yearTarget, true, signal);
+        const monthOk = await selectCustomOption(monthSelect, monthTarget, true, signal);
         return yearOk && monthOk;
       }
     }
@@ -347,7 +351,7 @@ export class DateEngine {
     try {
       if (input.readOnly) input.readOnly = false;
       setNativeValue(input, formattedText);
-      await sleep(60);
+      await sleep(60, signal);
       if (input.value === formattedText || input.value.replace(/[^\d]/g, '').startsWith(formattedText.replace(/[^\d]/g, ''))) {
         return true;
       }
@@ -356,10 +360,10 @@ export class DateEngine {
     }
 
     simulateClick(el === input ? input : el);
-    await sleep(100);
-    const selected = await this.selectVisibleCalendarCell(el, semantic);
+    await sleep(100, signal);
+    const selected = await this.selectVisibleCalendarCell(el, semantic, signal);
     if (!selected) return false;
-    await sleep(80);
+    await sleep(80, signal);
     const digits = input.value.replace(/[^\d]/g, '');
     const expectedDigits = this.formatDate(semantic, semantic.day ? 'YYYY-MM-DD' : 'YYYY-MM').replace(/[^\d]/g, '');
     return !!digits && (digits.startsWith(expectedDigits) || expectedDigits.startsWith(digits));

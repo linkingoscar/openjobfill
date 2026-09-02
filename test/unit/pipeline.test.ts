@@ -117,6 +117,29 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
   });
 
   describe('PlanGenerator (填表规划决策生成)', () => {
+    it('密码、验证码和支付字段必须在规划阶段被安全阻断', () => {
+      document.body.innerHTML = `
+        <form>
+          <div class="form-item"><label>登录密码</label><input name="password" type="password" /></div>
+          <div class="form-item"><label>验证码</label><input name="captcha" type="text" /></div>
+          <div class="form-item"><label>银行卡号</label><input name="cardNumber" type="text" /></div>
+          <div class="form-item"><label>姓名</label><input name="name" type="text" /></div>
+        </form>
+      `;
+
+      const fields = pageAnalyzer.analyzePage(document);
+      const plan = planGenerator.generatePlan(fields, MOCK_RESUME);
+      const password = plan.items.find((item) => item.field.name === 'password');
+      const captcha = plan.items.find((item) => item.field.name === 'captcha');
+      const card = plan.items.find((item) => item.field.name === 'cardNumber');
+      const name = plan.items.find((item) => item.field.name === 'name');
+
+      expect(password?.action).toBe('SKIP');
+      expect(captcha?.action).toBe('SKIP');
+      expect(card?.action).toBe('SKIP');
+      expect(name?.action).toBe('FILL');
+    });
+
     it('应该能正确识别高置信度字段、问答库并标记 NEEDS_USER 待办项', () => {
       document.body.innerHTML = `
         <form>
@@ -341,6 +364,18 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       // 验证 DOM 上的值确实已经被填入
       const nameInput = document.querySelector('input[name="name"]') as HTMLInputElement;
       expect(nameInput.value).toBe('张三');
+    });
+
+    it('收到 AbortSignal 后不得再写入任何字段', async () => {
+      document.body.innerHTML = '<form><label>姓名</label><input name="name" type="text" /></form>';
+      const fields = pageAnalyzer.analyzePage(document);
+      const plan = planGenerator.generatePlan(fields, MOCK_RESUME);
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(pipelineExecutor.executePlan(plan, { signal: controller.signal }))
+        .rejects.toThrow('填写已取消');
+      expect(document.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('');
     });
 
     it('预览停留时间不应计入最终填写耗时', async () => {

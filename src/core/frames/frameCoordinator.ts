@@ -1,6 +1,7 @@
 import type { FillResult, FillLogItem } from '../../types/adapter';
 import type { RemoteFramePlan, RemoteFillPlanItem, RemainingTaskItem } from '../../types/pipeline';
 import type { AnalyzedPlan } from '../engine/filler';
+import { FillRunAbortedError } from '../pipeline/runContext';
 
 interface RemoteExecutionResult {
   frameId: number;
@@ -75,6 +76,8 @@ export function serializeAnalyzedPlan(
   return {
     frameId,
     analysisId,
+    runId: analyzed.runId,
+    pageFingerprint: analyzed.pageFingerprint,
     resumeId: analyzed.resumeId,
     resumeUpdatedAt: analyzed.resumeUpdatedAt,
     pageUrl: analyzed.pageUrl || url,
@@ -107,35 +110,48 @@ export function serializeExecutionResult(result: FillResult, url = location.href
   };
 }
 
-export async function analyzeRemoteFrames(resumeId: string): Promise<RemoteFramePlan[]> {
+export async function analyzeRemoteFrames(
+  resumeId: string,
+  options: { runId?: string; signal?: AbortSignal } = {},
+): Promise<RemoteFramePlan[]> {
   if (!canCoordinateFrames() || window !== window.top) return [];
 
   try {
-    const response = await chrome.runtime.sendMessage({
+    const request = chrome.runtime.sendMessage({
       type: 'ANALYZE_CROSS_ORIGIN_FRAMES',
-      payload: { resumeId },
+      payload: { resumeId, runId: options.runId },
     });
+    const response = await raceWithSignal(request, options.signal);
     if (!response?.success || !Array.isArray(response.plans)) {
       console.warn('[OpenJobFill Frames] Cross-origin frame analysis failed:', response?.error || 'invalid response');
       return [];
     }
     return response.plans;
   } catch (err) {
+    if (options.signal?.aborted) throw err;
     console.warn('[OpenJobFill Frames] Cross-origin frame analysis unavailable:', err);
     return [];
   }
 }
 
-export async function executeRemoteFrames(plans: RemoteFramePlan[]): Promise<RemoteExecutionResult[]> {
+export async function executeRemoteFrames(
+  plans: RemoteFramePlan[],
+  options: { runId?: string; signal?: AbortSignal } = {},
+): Promise<RemoteExecutionResult[]> {
   if (!canCoordinateFrames() || plans.length === 0 || window !== window.top) return [];
 
+  const abortHandler = () => {
+    void cancelRemoteFrames(plans);
+  };
+  options.signal?.addEventListener('abort', abortHandler, { once: true });
   try {
-    const response = await chrome.runtime.sendMessage({
+    const request = chrome.runtime.sendMessage({
       type: 'EXECUTE_CROSS_ORIGIN_FRAMES',
       payload: {
         targets: plans.map((plan) => ({ frameId: plan.frameId, analysisId: plan.analysisId })),
       },
     });
+    const response = await raceWithSignal(request, options.signal);
     const results: RemoteExecutionResult[] = response?.success && Array.isArray(response.results)
       ? response.results
       : [];
@@ -172,8 +188,11 @@ export async function executeRemoteFrames(plans: RemoteFramePlan[]): Promise<Rem
 
     return results;
   } catch (err) {
+    if (options.signal?.aborted) throw err;
     console.warn('[OpenJobFill Frames] Cross-origin frame execution unavailable:', err);
     return [];
+  } finally {
+    options.signal?.removeEventListener('abort', abortHandler);
   }
 }
 
@@ -190,4 +209,26 @@ export async function cancelRemoteFrames(plans: RemoteFramePlan[]): Promise<void
   } catch {
     // 取消只负责释放子 frame 的临时计划；frame 已卸载时无需提示用户。
   }
+}
+
+async function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw new FillRunAbortedError('填写已取消');
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new FillRunAbortedError('填写已取消'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
 }

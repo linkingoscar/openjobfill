@@ -45,6 +45,8 @@ import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
 import { startManualFill } from '@/core/engine/manualFill';
 import { uploadResumeToPage } from '@/core/engine/attachmentUploader';
+import { inspectFieldSafety } from '@/core/pipeline/fieldSafety';
+import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 import { extractPageJobSnapshot } from '@/core/tracker/pageJobExtractor';
 import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
 import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
@@ -197,6 +199,10 @@ const handleSaveTaskMapping = async (task: any) => {
 };
 
 const notifyStepChange = (newUrl: string) => {
+  if (isFilling.value) {
+    formFillerEngine.cancelActiveRun('页面步骤已变化');
+    void cancelPreview();
+  }
   stepNotification.value = {
     show: true,
     text: '点击即可重新规划并填充当前页'
@@ -233,6 +239,7 @@ const {
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && isDrawerOpen.value) {
+    if (isFilling.value) formFillerEngine.cancelActiveRun('用户按下 Esc 取消填写');
     isDrawerOpen.value = false;
   }
 };
@@ -295,7 +302,7 @@ const handleQuickFill = async () => {
     selectedResumeId.value = activeResume.id;
     // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
     const analyzed = await formFillerEngine.analyze(activeResume);
-    analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id);
+    analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id, { runId: analyzed.runId });
     previewPlan.value = analyzed;
     // 展示实际参与规划的引擎名称。旧版这里只显示注册表 adapter，
     // Greenhouse/Lever 等页面容易误以为会走专属 customFill，实际当前统一走 Pipeline。
@@ -313,6 +320,10 @@ const handleQuickFill = async () => {
         analyzed.remoteFrames.reduce((sum, frame) => sum + frame.needsUserCount, 0),
     };
   } catch (err: any) {
+    if (isFillRunAbortedError(err)) {
+      operationError.value = '';
+      return { fillCount: 0, needsUserCount: 0 };
+    }
     console.error('[OpenJobFill] Analyze error:', err);
     operationError.value = err?.message || '页面识别失败，请刷新网页后重试';
     await persistOperationError('analysis', operationError.value);
@@ -322,6 +333,13 @@ const handleQuickFill = async () => {
   } finally {
     isFilling.value = false;
   }
+};
+
+const handleCancelActiveRun = async () => {
+  formFillerEngine.cancelActiveRun('用户取消填写');
+  await cancelPreview();
+  copyToastMessage.value = '已停止本次填写';
+  setTimeout(() => { copyToastMessage.value = ''; }, 2000);
 };
 
 const handleBubbleClick = () => {
@@ -542,7 +560,8 @@ const handleCopyField = async (item: ClipboardItem) => {
     // 智能点填：如果当前页面有聚焦的输入框，顺手写入
     const activeEl = document.activeElement;
     if (activeEl && (isInputElement(activeEl) || isTextAreaElement(activeEl))) {
-      if (setNativeValue(activeEl, item.value)) {
+      const safety = inspectFieldSafety(activeEl as HTMLElement, '', activeEl.closest('.el-form-item, .ant-form-item, .form-item, .form-group, fieldset, tr')?.textContent || '');
+      if (!safety.blocked && setNativeValue(activeEl, item.value)) {
         copyToastMessage.value = `已复制并自动填入当前输入框！`;
       }
     }
@@ -1001,10 +1020,10 @@ defineExpose({
             </button>
             <button
               type="button"
-              @click="cancelPreview"
+              @click="isFilling ? handleCancelActiveRun() : cancelPreview()"
               class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              取消
+              {{ isFilling ? '停止' : '取消' }}
             </button>
           </footer>
 
@@ -1018,6 +1037,14 @@ defineExpose({
             >
               <Sparkles class="w-3.5 h-3.5" aria-hidden="true" />
               <span>{{ isFilling ? '正在识别...' : '一键识别并预览填写 (Alt+Shift+F)' }}</span>
+            </button>
+            <button
+              v-if="isFilling"
+              type="button"
+              @click="handleCancelActiveRun"
+              class="px-3 py-2 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-xl font-bold transition active:scale-95 focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              停止
             </button>
             <button
               type="button"

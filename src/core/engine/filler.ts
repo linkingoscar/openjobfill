@@ -12,6 +12,7 @@ import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecor
 import { applyAIFallbackToPlan } from '../ai/aiFallback';
 import { executeRemoteFrames } from '../frames/frameCoordinator';
 import { compactFieldSnapshot, compactPlanSnapshot, SnapshotRecorder } from '../pipeline/snapshotRecorder';
+import { createPageFingerprint, FillRunContext, throwIfAborted } from '../pipeline/runContext';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
 export interface AnalyzedPlan {
@@ -22,6 +23,9 @@ export interface AnalyzedPlan {
   resumeUpdatedAt: number;
   /** 用于防止 SPA 步骤切换或页面替换后继续执行旧预览。 */
   pageUrl: string;
+  /** 运行级取消与页面结构一致性标识。 */
+  runId: string;
+  pageFingerprint: string;
   remoteFrames?: RemoteFramePlan[];
 }
 
@@ -62,6 +66,11 @@ async function assertAnalyzedPlanIsCurrent(analyzed: AnalyzedPlan): Promise<void
     throw new AnalyzedPlanStaleError('当前表单已刷新，预览已失效，请重新识别后再试');
   }
 
+  if (analyzed.pageFingerprint && typeof document !== 'undefined'
+    && createPageFingerprint(document) !== analyzed.pageFingerprint) {
+    throw new AnalyzedPlanStaleError('当前表单结构已变化，预览已失效，请重新识别后再试');
+  }
+
   if (!isExtensionStorageAvailable() || !analyzed.resumeId) return;
 
   let currentResume: StandardResume | undefined;
@@ -77,29 +86,57 @@ async function assertAnalyzedPlanIsCurrent(analyzed: AnalyzedPlan): Promise<void
 }
 
 export class FormFillerEngine {
+  private readonly activeRuns = new Map<string, FillRunContext>();
+  private activeRunId: string | null = null;
+
+  getActiveRunId(): string | null {
+    return this.activeRunId;
+  }
+
+  cancelRun(runId: string, reason = '填写已取消'): void {
+    this.activeRuns.get(runId)?.abort(reason);
+  }
+
+  cancelActiveRun(reason = '填写已取消'): void {
+    if (this.activeRunId) this.cancelRun(this.activeRunId, reason);
+  }
   /**
    * 阶段一 + 阶段二：扫描页面并生成填表规划（不写入 DOM）
    *
    * 拆出此方法是为了支持「先预览、确认后再填写」的交互：
    * 调用方拿到规划后可以先展示给用户核对，再决定是否 executePlan。
    */
-  async analyze(resume: StandardResume): Promise<AnalyzedPlan> {
+  async analyze(resume: StandardResume, options: { runId?: string } = {}): Promise<AnalyzedPlan> {
+    // 同一 content script 同时只允许一条本地运行链，避免用户重新点击
+    // 识别后旧的等待器继续占用 DOM 或在稍后恢复写入。
+    if (this.activeRunId) {
+      const previousRunId = this.activeRunId;
+      this.cancelRun(previousRunId, '新的填写任务已开始');
+      this.activeRuns.delete(previousRunId);
+    }
+    const run = new FillRunContext({ runId: options.runId });
+    this.activeRuns.set(run.runId, run);
+    this.activeRunId = run.runId;
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     const analysisStartedAt = Date.now();
-    SnapshotRecorder.start(currentUrl, typeof document !== 'undefined' ? document.title : '');
+    SnapshotRecorder.start(currentUrl, typeof document !== 'undefined' ? document.title : '', run.runId);
+    let completed = false;
+    try {
+      run.throwIfAborted();
     // 1. 获取当前页面匹配的平台增强器 (Platform Enhancer)
     const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
     if (enhancer) {
       console.log(`[OpenJobFill Pipeline] Matched Platform Enhancer: ${enhancer.name} (${enhancer.id})`);
       if (enhancer.onBeforePlan) {
-        await enhancer.onBeforePlan(resume);
+        await enhancer.onBeforePlan(resume, typeof document !== 'undefined' ? document : undefined, run.signal);
       }
     }
 
     // 2. 全局通用多经历卡片差量扩增 (SectionEngine)
     try {
-      await sectionEngine.ensureSectionCapacity(resume, enhancer);
+      await sectionEngine.ensureSectionCapacity(resume, enhancer, run.signal);
     } catch (err) {
+      if (run.signal.aborted) throw err;
       console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
     }
 
@@ -108,6 +145,7 @@ export class FormFillerEngine {
     const customFieldRules = customRule ? customRule.fields : [];
 
     // 4. 阶段一：页面全要素深度扫描 (Page Analyzer 重新扫描最新挂载的 DOM 节点)
+    run.throwIfAborted();
     const descriptors = pageAnalyzer.analyzePage(document);
     SnapshotRecorder.record('scan', {
       totalCandidateCount: descriptors.length,
@@ -116,6 +154,7 @@ export class FormFillerEngine {
     console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
     // 5. 阶段二：生成全局填表规划 (Fill Plan)
+    run.throwIfAborted();
     const plan = planGenerator.generatePlan(descriptors, resume, enhancer, customFieldRules);
     console.log(
       `[OpenJobFill Pipeline] FillPlan generated: ${plan.highConfidenceCount} to fill, ${plan.needsUserCount} need user, ${plan.skipCount} skipped.`
@@ -124,23 +163,35 @@ export class FormFillerEngine {
     // 5.5 AI 兜底：把规则标记为 NEEDS_USER 的字段交给 LLM 批量映射并就地提升为 FILL
     //     （本地优先，未配置时静默跳过；仅发送字段标签，不发送简历内容）
     try {
-      const { appliedCount } = await applyAIFallbackToPlan(plan, resume);
+      const { appliedCount } = await applyAIFallbackToPlan(plan, resume, run.signal);
       if (appliedCount > 0) {
         console.log(`[OpenJobFill Pipeline] AI fallback promoted ${appliedCount} fields to FILL.`);
       }
     } catch (err) {
+      if (run.signal.aborted) throw err;
       console.warn('[OpenJobFill Pipeline] AI fallback warning:', err);
     }
 
+    run.refreshPageFingerprint(typeof document !== 'undefined' ? document : undefined);
     SnapshotRecorder.record('plan', compactPlanSnapshot(plan), Date.now() - analysisStartedAt);
 
+    completed = true;
     return {
       plan,
       adapterName: enhancer ? enhancer.name : '智能通用决策引擎 (Pipeline v2)',
       resumeId: resume.id,
       resumeUpdatedAt: resume.updatedAt,
       pageUrl: currentUrl,
+      runId: run.runId,
+      pageFingerprint: run.pageFingerprint,
     };
+    } finally {
+      if (!completed) {
+        run.abort('分析已取消');
+        this.activeRuns.delete(run.runId);
+        if (this.activeRunId === run.runId) this.activeRunId = null;
+      }
+    }
   }
 
   /**
@@ -148,12 +199,21 @@ export class FormFillerEngine {
    */
   async executePlan(analyzed: AnalyzedPlan): Promise<FillResult> {
     const { plan, adapterName } = analyzed;
+    const run = this.activeRuns.get(analyzed.runId) || new FillRunContext({
+      runId: analyzed.runId,
+      pageUrl: analyzed.pageUrl,
+    });
+    this.activeRuns.set(analyzed.runId, run);
+    this.activeRunId = analyzed.runId;
 
-    // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
-    await assertAnalyzedPlanIsCurrent(analyzed);
+    try {
+      run.throwIfAborted();
+      // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
+      await assertAnalyzedPlanIsCurrent(analyzed);
 
-    const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan);
-    const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || []);
+      const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan, { signal: run.signal });
+      run.throwIfAborted();
+      const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || [], { runId: run.runId, signal: run.signal });
     const remoteDurationMs = remoteResults.reduce((max, remote) => Math.max(max, remote.durationMs), 0);
 
     for (const remote of remoteResults) {
@@ -209,6 +269,10 @@ export class FormFillerEngine {
       remainingTasks: executionResult.remainingTasks,
       plan: executionResult.plan,
     };
+    } finally {
+      this.activeRuns.delete(analyzed.runId);
+      if (this.activeRunId === analyzed.runId) this.activeRunId = null;
+    }
   }
 
   /**

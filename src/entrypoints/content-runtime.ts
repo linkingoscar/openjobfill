@@ -144,7 +144,7 @@ export default defineUnlistedScript(() => {
         const analysisId = message.payload.analysisId;
         const resumes = await resumeStorage.getAllResumes();
         const resume = resumes.find((item) => item.id === message.payload.resumeId) || await resumeStorage.getActiveResume();
-        const analyzed = await formFillerEngine.analyze(resume);
+        const analyzed = await formFillerEngine.analyze(resume, { runId: message.payload.runId });
         framePlans.set(analysisId, analyzed);
         sendResponse({ success: true, plan: serializeAnalyzedPlan(analyzed, analysisId) });
       })().catch((error) => sendResponse({ success: false, error: error instanceof Error ? error.message : '子页面分析失败' }));
@@ -163,6 +163,8 @@ export default defineUnlistedScript(() => {
     }
 
     if (message.type === 'FRAME_CANCEL_ANALYSIS') {
+      const analyzed = framePlans.get(message.payload.analysisId);
+      if (analyzed) formFillerEngine.cancelRun(analyzed.runId, '跨域填写已取消');
       framePlans.delete(message.payload.analysisId);
       sendResponse({ success: true });
       return;

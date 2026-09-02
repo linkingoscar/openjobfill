@@ -1,5 +1,6 @@
 import type { StandardResume, CustomQABankItem } from './resume';
 import type { FillLogItem } from './adapter';
+import type { FieldSafetyInfo } from '../core/pipeline/fieldSafety';
 
 export type FieldType =
   | 'text'
@@ -38,6 +39,9 @@ export interface FieldDescriptor {
   options?: string[]; // 对于 select / radio group / combobox
   section?: FieldSectionInfo;
   contextText: string;
+  /** Privacy-safe structural evidence used by safety, replay and future incremental scans. */
+  fingerprint?: string;
+  safety?: FieldSafetyInfo;
 }
 
 export type PlanAction = 'FILL' | 'NEEDS_USER' | 'SKIP';
@@ -87,6 +91,8 @@ export interface RemoteFillPlanItem {
 export interface RemoteFramePlan {
   frameId: number;
   analysisId: string;
+  runId?: string;
+  pageFingerprint?: string;
   /** 生成计划时使用的简历快照，用于执行前的失效校验。 */
   resumeId: string;
   resumeUpdatedAt: number;
@@ -160,5 +166,5 @@ export interface PlatformEnhancer {
   };
 
   // 增行/初始化钩子
-  onBeforePlan?(resume: StandardResume, doc?: Document): Promise<void> | void;
+  onBeforePlan?(resume: StandardResume, doc?: Document, signal?: AbortSignal): Promise<void> | void;
 }

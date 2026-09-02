@@ -27,6 +27,7 @@ import { selectCustomOption, selectCascaderOptions } from '../engine/selector';
 import { fillDatePicker } from '../engine/datepicker';
 import { getValueByPath } from '../../utils/objectPath';
 import { findAssociatedLabelText, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
+import { FillRunAbortedError, throwIfAborted } from '../pipeline/runContext';
 
 export interface UnmatchedFieldEntry {
   element: HTMLElement;
@@ -146,13 +147,15 @@ async function fillElement(el: HTMLElement, strValue: string): Promise<boolean> 
 async function requestFieldMapping(
   settings: AISettings,
   fields: UnmatchedFieldDescriptor[],
-  options: ResumeKeyOption[]
+  options: ResumeKeyOption[],
+  signal?: AbortSignal,
 ): Promise<FieldIndexMapping | null> {
   try {
-    const response = (await chrome.runtime.sendMessage({
+    const request = chrome.runtime.sendMessage({
       type: 'AI_MAP_FIELDS',
       payload: { settings, fields, options },
-    })) as AIFieldMappingResponse;
+    });
+    const response = await raceWithSignal(request, signal) as AIFieldMappingResponse;
 
     if (!response?.success || !response.mapping) {
       console.warn('[OpenJobFill] AI 映射失败：', response?.error || '无映射返回');
@@ -282,8 +285,10 @@ export async function tryAIFallback(
  */
 export async function applyAIFallbackToPlan(
   plan: FillPlan,
-  resume: StandardResume
+  resume: StandardResume,
+  signal?: AbortSignal,
 ): Promise<{ appliedCount: number }> {
+  throwIfAborted(signal);
   const settings = await getAISettings();
   if (!settings.enabled) return { appliedCount: 0 };
 
@@ -308,12 +313,13 @@ export async function applyAIFallbackToPlan(
     inputType: item.field.type,
   }));
 
-  const mapping = await requestFieldMapping(settings, fields, options);
+  const mapping = await requestFieldMapping(settings, fields, options, signal);
   if (!mapping) return { appliedCount: 0 };
 
   let appliedCount = 0;
 
   for (const [indexStr, resumeKey] of Object.entries(mapping)) {
+    throwIfAborted(signal);
     const item = candidates[Number(indexStr)];
     if (!item) continue;
 
@@ -339,4 +345,26 @@ export async function applyAIFallbackToPlan(
   }
 
   return { appliedCount };
+}
+
+async function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw new FillRunAbortedError('填写已取消');
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new FillRunAbortedError('填写已取消'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
 }

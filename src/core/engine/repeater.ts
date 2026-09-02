@@ -1,6 +1,7 @@
 import { sleep, getAllDocumentsAcrossIframes, isElementVisible } from '../../utils/dom';
 import { simulateClick } from './dispatcher';
 import type { SectionRepeaterRule } from '../../types/adapter';
+import { throwIfAborted } from '../pipeline/runContext';
 
 /**
  * 动态列表自动增行与索引分发器 (基于显式规则)
@@ -8,7 +9,8 @@ import type { SectionRepeaterRule } from '../../types/adapter';
  */
 export async function ensureSectionRows(
   rule: SectionRepeaterRule,
-  requiredCount: number
+  requiredCount: number,
+  signal?: AbortSignal,
 ): Promise<HTMLElement[]> {
   if (requiredCount <= 0) return [];
 
@@ -24,6 +26,7 @@ export async function ensureSectionRows(
   // 如果现有行数少于所需条目数，循环点击添加按钮
   let attempts = 0;
   while (currentItems.length < requiredCount && attempts < 5) {
+    throwIfAborted(signal);
     const addBtn = container.querySelector<HTMLElement>(rule.addButtonSelector) ||
       (container.ownerDocument || document).querySelector<HTMLElement>(rule.addButtonSelector);
 
@@ -32,7 +35,8 @@ export async function ensureSectionRows(
       simulateClick(addBtn);
       const waitStartedAt = Date.now();
       while (Date.now() - waitStartedAt < 1200) {
-        await sleep(80);
+        await sleep(80, signal);
+        throwIfAborted(signal);
         const nextItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(isElementVisible);
         if (nextItems.length > previousCount) break;
       }
@@ -55,7 +59,8 @@ export async function ensureSectionRows(
  */
 export async function autoExpandHeuristicSections(
   sectionTitleKeywords: string[],
-  requiredCount: number
+  requiredCount: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (requiredCount <= 1) return false;
 
@@ -77,6 +82,7 @@ export async function autoExpandHeuristicSections(
     let clickedCount = 0;
     // 点击并等待每行渲染
     for (let i = 1; i < requiredCount && i <= 6; i++) {
+      throwIfAborted(signal);
       const liveButtons = getAllDocumentsAcrossIframes().flatMap((doc) =>
         Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
       ).filter((btn) => {
@@ -87,11 +93,11 @@ export async function autoExpandHeuristicSections(
       const targetBtn = liveButtons[0] || matchAddButtons[0];
       if (!targetBtn || !isElementVisible(targetBtn)) break;
       simulateClick(targetBtn);
-      await sleep(450);
+      await sleep(450, signal);
       clickedCount++;
     }
     // 等待 SPA 响应式框架 (Vue / React) 批量虚拟 DOM 更新
-    await sleep(200);
+    await sleep(200, signal);
     return clickedCount > 0;
   }
 

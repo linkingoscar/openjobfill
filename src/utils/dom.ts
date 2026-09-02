@@ -2,8 +2,24 @@
  * DOM 辅助操作工具库 (增强 Iframe 穿透与跨 Window 环境兼容)
  */
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('操作已取消'));
+  }
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      timer = null;
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal?.reason instanceof Error ? signal.reason : new Error('操作已取消'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**

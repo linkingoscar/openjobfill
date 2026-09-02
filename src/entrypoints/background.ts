@@ -187,7 +187,11 @@ export default defineBackground(() => {
         const responses = await Promise.all(frames.map(async (frame) => {
           const response = await sendMessageToFrame(tabId, frame.frameId, {
             type: 'FRAME_ANALYZE',
-            payload: { resumeId: message.payload?.resumeId, analysisId },
+            payload: {
+              resumeId: message.payload?.resumeId,
+              analysisId,
+              runId: message.payload?.runId,
+            },
           }) as { success?: boolean; plan?: import('../types/pipeline').RemoteFramePlan } | null;
           if (!response?.success || !response.plan) return null;
           return { ...response.plan, frameId: frame.frameId, url: frame.url };

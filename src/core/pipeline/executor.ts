@@ -4,12 +4,15 @@ import { retryLadder } from './retryLadder';
 import { verifier } from './verifier';
 import { decorateElement } from '../engine/badgeDecorator';
 import { sleep } from '../../utils/dom';
+import { inspectFieldSafety } from './fieldSafety';
+import { throwIfAborted, isFillRunAbortedError } from './runContext';
 
 export class PipelineExecutor {
   /**
    * 调度执行 FillPlan，执行 Write -> Read-Back -> Verify -> Retry 闭环
    */
-  async executePlan(plan: FillPlan): Promise<PipelineExecutionResult> {
+  async executePlan(plan: FillPlan, options: { signal?: AbortSignal } = {}): Promise<PipelineExecutionResult> {
+    const signal = options.signal;
     const startTime = Date.now();
     const logs: FillLogItem[] = [];
     const remainingTasks: RemainingTaskItem[] = [];
@@ -20,8 +23,24 @@ export class PipelineExecutor {
     let verifiedCount = 0;
 
     for (const item of plan.items) {
+      throwIfAborted(signal);
       const field = item.field;
       const label = field.label || field.placeholder || field.name || '未命名输入框';
+
+      // 最终写入闸门再次读取实时 DOM 语义，防止分析之后字段被替换为
+      // 密码、验证码、支付或提交相关控件时仍沿用旧计划。
+      const safety = inspectFieldSafety(field.element, label, field.contextText);
+      if (safety.blocked) {
+        skippedCount++;
+        logs.push({
+          status: 'skipped',
+          label,
+          field: item.semanticKey || '',
+          value: '',
+          message: safety.reason || '安全策略禁止自动填写',
+        });
+        continue;
+      }
 
       // 1. 跳过项
       if (item.action === 'SKIP') {
@@ -71,10 +90,12 @@ export class PipelineExecutor {
 
       for (const strategy of strategies) {
         try {
-          await strategy.execute(field, item.targetValue);
+          throwIfAborted(signal);
+          await strategy.execute(field, item.targetValue, signal);
           
           // 等待 DOM / Vue / React 受控状态响应
-          await sleep(50);
+          await sleep(50, signal);
+          throwIfAborted(signal);
 
           // 读回验证 (Read-Back)
           actualReadValue = await verifier.readBack(field, item.driverType);
@@ -94,6 +115,7 @@ export class PipelineExecutor {
             );
           }
         } catch (err) {
+          if (signal?.aborted || isFillRunAbortedError(err)) throw err;
           console.warn(`[OpenJobFill Pipeline] Strategy "${strategy.name}" threw error on [${label}]:`, err);
         }
       }

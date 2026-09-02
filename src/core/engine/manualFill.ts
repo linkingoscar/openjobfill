@@ -18,6 +18,7 @@ import {
   isSelectElement,
   isTextAreaElement,
 } from '../../utils/dom';
+import { inspectFieldSafety } from '../pipeline/fieldSafety';
 
 export interface ManualFillField {
   resumeKey: string;
@@ -120,6 +121,12 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
  * 把值填入目标元素，并给一次成功高亮反馈
  */
 async function applyValueToElement(el: HTMLElement, value: string): Promise<boolean> {
+  const nearbyContext = el.closest('.el-form-item, .ant-form-item, .form-item, .form-group, fieldset, tr')?.textContent || '';
+  const safety = inspectFieldSafety(el, '', nearbyContext);
+  if (safety.blocked) {
+    console.warn(`[OpenJobFill] Manual fill blocked: ${safety.reason || '安全策略禁止自动填写'}`);
+    return false;
+  }
   let success = false;
   if (isInputElement(el)) {
     if (el.type === 'radio') {

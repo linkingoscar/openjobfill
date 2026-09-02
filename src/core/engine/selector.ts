@@ -1,6 +1,7 @@
 import { sleep, isElementVisible, getElementWindow, getAllOpenRoots, isInputElement, isSelectElement } from '../../utils/dom';
 import { setNativeValue, simulateClick } from './dispatcher';
 import { getFormalUniversityVariants, getFormalMajorVariants } from '../matcher/aliasDictionary';
+import { throwIfAborted } from '../pipeline/runContext';
 
 const OPTION_SELECTORS = [
   '.el-select-dropdown__item', // Element UI / Element Plus
@@ -46,7 +47,7 @@ function confirmKnownLegacyPopup(selected: HTMLElement): void {
 /**
  * 动态等待下拉菜单或选项在 DOM 中渲染并可见 (支持 aria-controls / aria-owns 作用域精准隔离)
  */
-async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 800): Promise<HTMLElement[]> {
+async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 800, signal?: AbortSignal): Promise<HTMLElement[]> {
   const startTime = Date.now();
   const ownerDocument = triggerEl?.ownerDocument || (typeof document !== 'undefined' ? document : null);
   if (!ownerDocument) return [];
@@ -62,6 +63,7 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
     null;
 
   while (Date.now() - startTime < timeoutMs) {
+    throwIfAborted(signal);
     const candidates: HTMLElement[] = [];
 
     // ShadowRoot 枚举需要遍历页面 DOM。缓存一小段时间，既能发现点击后新挂载的
@@ -76,7 +78,7 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
         .map((root) => root.querySelector<HTMLElement>(`[id="${CSS.escape(popupId)}"]`))
         .find((candidate): candidate is HTMLElement => !!candidate);
       if (!popupEl || !isElementVisible(popupEl as HTMLElement)) {
-        await sleep(50);
+        await sleep(50, signal);
         continue; // 声明了 popupId 时必须只等待自身 Popup 挂载，严禁中途退回 document 全局误拿其他下拉
       }
       scopedRoots = [popupEl];
@@ -97,7 +99,7 @@ async function waitForDropdownCandidates(triggerEl?: HTMLElement, timeoutMs = 80
       return candidates;
     }
 
-    await sleep(50);
+    await sleep(50, signal);
   }
 
   return [];
@@ -112,8 +114,10 @@ import { locationResolver } from '../resolvers/locationResolver';
 async function trySelectCustomOptionOnce(
   triggerEl: HTMLElement,
   targetText: string,
-  fuzzy = true
+  fuzzy = true,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  throwIfAborted(signal);
   const targetLower = targetText.toLowerCase().trim();
 
   // 1. 如果是原生 select 标签
@@ -171,7 +175,7 @@ async function trySelectCustomOptionOnce(
   }
 
   // 4. 动态等待 Portal 选项列表渲染挂载到 DOM (优先在 trigger 关联作用域查找)
-  let candidateElements = await waitForDropdownCandidates(triggerEl, 1200);
+  let candidateElements = await waitForDropdownCandidates(triggerEl, 1200, signal);
   if (candidateElements.length === 0) {
     return false;
   }
@@ -208,14 +212,15 @@ async function trySelectCustomOptionOnce(
   if (!bestMatch && scrollContainer) {
     let previousTop = -1;
     for (let attempt = 0; attempt < 10 && !bestMatch; attempt++) {
+      throwIfAborted(signal);
       const nextTop = Math.min(scrollContainer.scrollHeight, scrollContainer.scrollTop + Math.max(120, scrollContainer.clientHeight * 0.8));
       if (nextTop === previousTop || nextTop === scrollContainer.scrollTop) break;
       previousTop = scrollContainer.scrollTop;
       scrollContainer.scrollTop = nextTop;
       const ScrollEvent = (getElementWindow(scrollContainer) as any).Event || Event;
       scrollContainer.dispatchEvent(new ScrollEvent('scroll', { bubbles: true }));
-      await sleep(100);
-      candidateElements = await waitForDropdownCandidates(triggerEl, 300);
+      await sleep(100, signal);
+      candidateElements = await waitForDropdownCandidates(triggerEl, 300, signal);
       bestMatch = findBestMatch(candidateElements);
     }
   }
@@ -237,19 +242,21 @@ async function trySelectCustomOptionOnce(
 export async function selectCustomOption(
   triggerEl: HTMLElement,
   targetText: string,
-  fuzzy = true
+  fuzzy = true,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (!triggerEl || !targetText) return false;
+  throwIfAborted(signal);
 
   // 第一轮：直接使用原文本尝试匹配
-  const firstTry = await trySelectCustomOptionOnce(triggerEl, targetText, fuzzy);
+  const firstTry = await trySelectCustomOptionOnce(triggerEl, targetText, fuzzy, signal);
   if (firstTry) return true;
 
   // 第二轮：如果是高校名称或专业名称，尝试同义词/正式全称变体
   const uniVariants = getFormalUniversityVariants(targetText);
   for (const variant of uniVariants) {
     if (variant === targetText) continue;
-    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy);
+    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy, signal);
     if (variantSuccess) {
       console.log(`[OpenJobFill] 高校同义词命中: ${targetText} -> ${variant}`);
       return true;
@@ -259,7 +266,7 @@ export async function selectCustomOption(
   const majorVariants = getFormalMajorVariants(targetText);
   for (const variant of majorVariants) {
     if (variant === targetText) continue;
-    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy);
+    const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy, signal);
     if (variantSuccess) {
       console.log(`[OpenJobFill] 专业同义词命中: ${targetText} -> ${variant}`);
       return true;
@@ -277,9 +284,11 @@ export async function selectCustomOption(
  */
 export async function selectCascaderOptions(
   triggerEl: HTMLElement,
-  pathData: string[] | string
+  pathData: string[] | string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (!triggerEl) return false;
+  throwIfAborted(signal);
   const pathTexts = Array.isArray(pathData) 
     ? pathData 
     : pathData.split(/[-/、>]/).map(s => s.trim()).filter(Boolean);
@@ -288,7 +297,7 @@ export async function selectCascaderOptions(
 
   // 1. 点击展开级联菜单
   simulateClick(triggerEl);
-  await sleep(250);
+  await sleep(250, signal);
 
   const cascaderItemSelectors = [
     '.el-cascader-node', // Element Plus
@@ -308,8 +317,9 @@ export async function selectCascaderOptions(
   ];
 
   for (let i = 0; i < pathTexts.length; i++) {
+    throwIfAborted(signal);
     const stepTarget = pathTexts[i].trim().toLowerCase();
-    await sleep(200);
+    await sleep(200, signal);
 
     const candidates: HTMLElement[] = [];
     const ownerDocument = triggerEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
@@ -330,14 +340,14 @@ export async function selectCascaderOptions(
 
     if (matched) {
       simulateClick(matched);
-      await sleep(150);
+      await sleep(150, signal);
     } else {
       console.warn(`[OpenJobFill] Cascader step ${i + 1} (${pathTexts[i]}) not matched.`);
       return false;
     }
   }
 
-  await sleep(150);
+  await sleep(150, signal);
   return true;
 }
 

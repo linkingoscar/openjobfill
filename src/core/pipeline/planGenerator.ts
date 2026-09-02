@@ -6,6 +6,7 @@ import { calculateTextMatchScore } from '../matcher/heuristic';
 import { isInputElement } from '../../utils/dom';
 import { inferLocationPath, inferMajorHierarchy } from '../resolvers/profileNormalizer';
 import { deriveLanguageSummary } from '../derivation/profileDeriver';
+import { inspectFieldSafety } from './fieldSafety';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -57,6 +58,23 @@ export class PlanGenerator {
         if (enhancement) {
           Object.assign(field, enhancement);
         }
+      }
+
+      // 安全策略优先于所有语义匹配和用户规则：即使自定义规则或 AI
+      // 错误地命中，也不能让凭据、支付或提交相关控件进入执行计划。
+      const safety = field.safety || inspectFieldSafety(field.element, field.label, field.contextText);
+      field.safety = safety;
+      if (safety.blocked) {
+        items.push({
+          id: `plan_${field.id}`,
+          field,
+          action: 'SKIP',
+          confidence: 1.0,
+          reason: safety.reason || '安全策略禁止自动填写',
+          driverType: this.resolveDriverType(field),
+        });
+        skipCount++;
+        continue;
       }
 
       // 1. 用户输入保护：如果字段已有内容或选项已被用户手动选过，默认跳过以保护用户输入

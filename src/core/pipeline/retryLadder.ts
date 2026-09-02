@@ -5,10 +5,11 @@ import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolve
 import { locationResolver } from '../resolvers/locationResolver';
 import { dateEngine } from '../resolvers/dateEngine';
 import { getElementWindow, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
+import { throwIfAborted } from './runContext';
 
 export interface ExecutionStrategy {
   name: string;
-  execute(field: FieldDescriptor, value: any): Promise<boolean> | boolean;
+  execute(field: FieldDescriptor, value: any, signal?: AbortSignal): Promise<boolean> | boolean;
 }
 
 export class RetryLadder {
@@ -22,11 +23,15 @@ export class RetryLadder {
         return [
           {
             name: 'Native Prototype Setter + React/Vue Event Chain',
-            execute: (field, val) => setNativeValue(field.element, String(val)),
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
+              return setNativeValue(field.element, String(val));
+            },
           },
           {
             name: 'Direct Property Assignment + InputEvent Dispatch',
-            execute: (field, val) => {
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
               const el = field.element;
               if (!isInputElement(el) && !isTextAreaElement(el)) return false;
               const win = getElementWindow(el) as any;
@@ -45,16 +50,18 @@ export class RetryLadder {
         return [
           {
             name: 'Hierarchical Cascader Multi-Level Step Driver',
-            execute: async (field, val) => {
+            execute: async (field, val, signal) => {
+              throwIfAborted(signal);
               const stringVal = String(val);
               // 如果是包含省市区或者连字符的多级路径
-              return await selectCascaderOptions(field.element, stringVal);
+              return await selectCascaderOptions(field.element, stringVal, signal);
             },
           },
           {
             name: 'Fallback to Single Select Option Finder',
-            execute: async (field, val) => {
-              return await selectCustomOption(field.element, String(val));
+            execute: async (field, val, signal) => {
+              throwIfAborted(signal);
+              return await selectCustomOption(field.element, String(val), true, signal);
             },
           },
         ];
@@ -63,7 +70,8 @@ export class RetryLadder {
         return [
           {
             name: 'Option/Location Resolver + Custom UI Selection',
-            execute: async (field, val) => {
+            execute: async (field, val, signal) => {
+              throwIfAborted(signal);
               const stringVal = String(val);
               let targetOptionText = stringVal;
 
@@ -83,12 +91,13 @@ export class RetryLadder {
                 }
               }
 
-              return await selectCustomOption(field.element, targetOptionText);
+              return await selectCustomOption(field.element, targetOptionText, true, signal);
             },
           },
           {
             name: 'Native Select Option Value & Text Loop Fallback',
-            execute: (field, val) => {
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
               if (isSelectElement(field.element)) {
                 const sel = field.element;
                 const stringVal = String(val).toLowerCase();
@@ -114,7 +123,8 @@ export class RetryLadder {
         return [
           {
             name: 'Semantic Radio Group Matcher & Dispatcher',
-            execute: (field, val) => {
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
               return setRadioGroupValue(field.element, String(val));
             },
           },
@@ -124,7 +134,8 @@ export class RetryLadder {
         return [
           {
             name: 'Strict Boolean Checkbox Dispatcher',
-            execute: (field, val) => {
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
               if (isInputElement(field.element)) {
                 return setNativeCheckboxChecked(field.element, val);
               }
@@ -137,13 +148,17 @@ export class RetryLadder {
         return [
           {
             name: 'DateEngine Structured Injection (Dual-Select / Native Date)',
-            execute: async (field, val) => {
-              return await dateEngine.injectSemanticDate(field.element, String(val));
+            execute: async (field, val, signal) => {
+              throwIfAborted(signal);
+              return await dateEngine.injectSemanticDate(field.element, String(val), signal);
             },
           },
           {
             name: 'Native Prototype Date String Setter Fallback',
-            execute: (field, val) => setNativeValue(field.element, String(val)),
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
+              return setNativeValue(field.element, String(val));
+            },
           },
         ];
 
@@ -151,14 +166,15 @@ export class RetryLadder {
         return [
           {
             name: 'Date Range Structured Picker Driver',
-            execute: async (field, val) => {
+            execute: async (field, val, signal) => {
+              throwIfAborted(signal);
               const range = typeof val === 'object' && val
                 ? val as { startDate?: string; endDate?: string }
                 : { startDate: String(val || ''), endDate: '' };
               const inputs = Array.from(field.element.querySelectorAll<HTMLInputElement>('input'));
               if (inputs.length < 2) return false;
-              const startOk = !range.startDate || await dateEngine.injectSemanticDate(inputs[0], range.startDate);
-              const endOk = !range.endDate || await dateEngine.injectSemanticDate(inputs[1], range.endDate);
+              const startOk = !range.startDate || await dateEngine.injectSemanticDate(inputs[0], range.startDate, signal);
+              const endOk = !range.endDate || await dateEngine.injectSemanticDate(inputs[1], range.endDate, signal);
               return startOk && endOk;
             },
           },
@@ -168,7 +184,10 @@ export class RetryLadder {
         return [
           {
             name: 'Default Native Setter',
-            execute: (field, val) => setNativeValue(field.element, String(val)),
+            execute: (field, val, signal) => {
+              throwIfAborted(signal);
+              return setNativeValue(field.element, String(val));
+            },
           },
         ];
     }

@@ -19,10 +19,10 @@ export type ExtensionMessage =
   | { type: 'OPEN_OPTIONS_PAGE' }
   | { type: 'GET_SITE_INFO_REQUEST' }
   | { type: 'GET_SITE_INFO_RESPONSE'; payload: { siteName: string; isMatched: boolean; url: string } }
-  | { type: 'ANALYZE_CROSS_ORIGIN_FRAMES'; payload: { resumeId: string } }
+  | { type: 'ANALYZE_CROSS_ORIGIN_FRAMES'; payload: { resumeId: string; runId?: string } }
   | { type: 'EXECUTE_CROSS_ORIGIN_FRAMES'; payload: { targets: FrameTarget[] } }
   | { type: 'CANCEL_CROSS_ORIGIN_FRAMES'; payload: { targets: FrameTarget[] } }
-  | { type: 'FRAME_ANALYZE'; payload: { analysisId: string; resumeId?: string } }
+  | { type: 'FRAME_ANALYZE'; payload: { analysisId: string; resumeId?: string; runId?: string } }
   | { type: 'FRAME_EXECUTE'; payload: { analysisId: string } }
   | { type: 'FRAME_CANCEL_ANALYSIS'; payload: { analysisId: string } }
   | { type: 'AI_MAP_FIELDS'; payload: { settings: AISettings; fields: UnmatchedFieldDescriptor[]; options: ResumeKeyOption[] } }
@@ -82,14 +82,16 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && typeof payload.isMatched === 'boolean'
         && isString(payload.url);
     case 'ANALYZE_CROSS_ORIGIN_FRAMES':
-      return isRecord(payload) && isNonEmptyString(payload.resumeId);
+      return isRecord(payload) && isNonEmptyString(payload.resumeId)
+        && (payload.runId === undefined || isNonEmptyString(payload.runId));
     case 'EXECUTE_CROSS_ORIGIN_FRAMES':
     case 'CANCEL_CROSS_ORIGIN_FRAMES':
       return isRecord(payload) && isFrameTargets(payload.targets);
     case 'FRAME_ANALYZE':
       return isRecord(payload)
         && isNonEmptyString(payload.analysisId)
-        && (payload.resumeId === undefined || isString(payload.resumeId));
+        && (payload.resumeId === undefined || isString(payload.resumeId))
+        && (payload.runId === undefined || isNonEmptyString(payload.runId));
     case 'FRAME_EXECUTE':
     case 'FRAME_CANCEL_ANALYSIS':
       return isRecord(payload) && isNonEmptyString(payload.analysisId);

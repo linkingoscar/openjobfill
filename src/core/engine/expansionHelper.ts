@@ -1,5 +1,6 @@
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 import { simulateClick } from './dispatcher';
+import { throwIfAborted } from '../pipeline/runContext';
 
 const COLLAPSED_SELECTOR = [
   '.ant-collapse-header[aria-expanded="false"]',
@@ -25,14 +26,16 @@ const EDIT_CONTAINER_SELECTOR = [
  * 在规划前展开折叠区与只读经历卡片。
  * 只点击“展开/编辑/修改”类控件，不点击保存、提交或新增，保持预览阶段无持久化副作用。
  */
-export async function prepareEditableSections(): Promise<number> {
+export async function prepareEditableSections(signal?: AbortSignal): Promise<number> {
   let changed = 0;
   const clicked = new Set<HTMLElement>();
 
   for (const doc of getAllDocumentsAcrossIframes()) {
+    throwIfAborted(signal);
     const collapsed = Array.from(doc.querySelectorAll<HTMLElement>(COLLAPSED_SELECTOR));
     for (const control of collapsed) {
       if (!isElementVisible(control) || clicked.has(control)) continue;
+      throwIfAborted(signal);
       simulateClick(control);
       clicked.add(control);
       changed++;
@@ -44,13 +47,13 @@ export async function prepareEditableSections(): Promise<number> {
       const control = Array.from(container.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
         .find((candidate) => /^(编辑|修改|edit)$/i.test((candidate.textContent || '').trim()));
       if (!control || !isElementVisible(control) || clicked.has(control)) continue;
+      throwIfAborted(signal);
       simulateClick(control);
       clicked.add(control);
       changed++;
     }
   }
 
-  if (changed > 0) await sleep(180);
+  if (changed > 0) await sleep(180, signal);
   return changed;
 }
-
