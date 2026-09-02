@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { decideFill } from '../../src/core/pipeline/decisionPolicy';
 import { sanitizeFieldMappingSuggestions } from '../../src/core/ai/protocolV2';
 import { learnQA, matchScopedQA } from '../../src/core/engine/scopedQABank';
-import { createCompatibility, markSelectorFingerprintConflict, recordMappingVerification, updateCompatibility } from '../../src/core/storage/personalSiteLearning';
+import { createCompatibility, markPersonalVerified, markSelectorFingerprintConflict, recordMappingVerification, updateCompatibility } from '../../src/core/storage/personalSiteLearning';
 
 const field = (overrides: Record<string, unknown> = {}) => ({
   id: 'f', element: document.createElement('input'), type: 'text', label: '姓名', placeholder: '', name: '', ariaLabel: '', required: true,
@@ -35,16 +35,23 @@ describe('PRD v1 policies', () => {
     expect(matchScopedQA('为什么选择我们', [global, company], { hostname: 'jobs.example.com' })?.version.answer).toBe('公司专属');
   });
 
-  it('marks conflicting personal selectors stale and tracks real-site verification separately', () => {
+  it('keeps fixture telemetry separate until PERSONAL_VERIFIED is explicitly confirmed', () => {
     const mapping = { id: 'm', hostname: 'example.com', resumeKey: 'basics.name', selector: '#name', createdFrom: 'manual-fill', status: 'ACTIVE', successCount: 2, failureCount: 0 } as const;
     expect(markSelectorFingerprintConflict(mapping).status).toBe('STALE');
     expect(recordMappingVerification({ ...mapping }, { verified: true, now: 10 }).successCount).toBe(3);
+
     let compat = createCompatibility('example.com');
     compat = updateCompatibility(compat, 'basics', 'PASS', { now: 1 });
     compat = updateCompatibility(compat, 'education', 'PASS', { now: 2 });
     compat = updateCompatibility(compat, 'date', 'PASS', { now: 3 });
+    expect(compat.status).toBe('PARTIAL');
+    expect(compat.personalVerifiedAt).toBeUndefined();
+
+    compat = markPersonalVerified(compat, { now: 4, urlScope: 'https://example.com' });
     expect(compat.status).toBe('PERSONAL_VERIFIED');
-    compat = updateCompatibility(compat, 'attachment', 'FAIL', { now: 4, failureCode: 'attachment_unverified' });
+    expect(compat.personalVerifiedAt).toBe(4);
+
+    compat = updateCompatibility(compat, 'attachment', 'FAIL', { now: 5, failureCode: 'attachment_unverified' });
     expect(compat.status).toBe('DEGRADED');
   });
 });
