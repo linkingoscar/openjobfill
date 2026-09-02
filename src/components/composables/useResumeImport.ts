@@ -3,6 +3,7 @@ import {
   importPastedResume, importResumeDocument, importResumeImage,
   type DocumentImportOptions, type ResumeImportOutcome,
 } from '@/core/importers/resumeImportService';
+import { resolveImportConflict } from '@/core/schema/trustedResume';
 import type { StandardResume } from '@/types/resume';
 
 /** Owns import progress and results; late responses cannot restore a discarded preview. */
@@ -39,6 +40,23 @@ export function useResumeImport() {
     }
   }
 
+  function resolveConflict(path: string, decision: 'keep-current' | 'accept-candidate') {
+    const current = outcome.value;
+    if (!current) return;
+    const conflict = current.conflicts.find((item) => item.path === path);
+    if (!conflict) return;
+    const now = Date.now();
+    const resume = resolveImportConflict(current.resume, conflict, decision, now);
+    outcome.value = {
+      ...current,
+      resume,
+      conflicts: current.conflicts.filter((item) => item !== conflict),
+      acceptedPaths: decision === 'accept-candidate'
+        ? Array.from(new Set([...current.acceptedPaths, path]))
+        : current.acceptedPaths,
+    };
+  }
+
   onScopeDispose(() => { disposed = true; reset(); });
   return {
     isParsing: computed(() => busy.value),
@@ -49,7 +67,9 @@ export function useResumeImport() {
     aiCandidates: computed(() => outcome.value?.aiCandidates || []),
     importConflicts: computed(() => outcome.value?.conflicts || []),
     acceptedPaths: computed(() => outcome.value?.acceptedPaths || []),
+    canConfirmImport: computed(() => (outcome.value?.conflicts.length || 0) === 0),
     reset,
+    resolveConflict,
     reportError: (message: string) => { error.value = message; },
     importDocument: (file: File, options: DocumentImportOptions) => run((signal) => importResumeDocument(file, options, signal)),
     importImage: (file: File, consent: boolean, baseResume?: StandardResume | null) => run((signal) => importResumeImage(file, consent, signal, baseResume)),
