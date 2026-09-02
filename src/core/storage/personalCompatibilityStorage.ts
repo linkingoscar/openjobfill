@@ -2,6 +2,7 @@ import type { FillLogItem } from '../../types/adapter';
 import type { FillPlan, FillPlanItem } from '../../types/pipeline';
 import {
   createCompatibility,
+  markPersonalVerified,
   updateCompatibility,
   type CompatibilityModule,
   type PersonalSiteCompatibility,
@@ -138,6 +139,22 @@ export const personalCompatibilityStorage = {
       latest = await this.recordModuleResult(rawUrl, module, result, result === 'FAIL' ? failureCodeForItems(items, logs) || 'verification_mismatch' : undefined);
     }
     return latest;
+  },
+
+  /**
+   * Explicitly mark a site PERSONAL_VERIFIED after an external real-flow confirmation step.
+   * Passive runtime telemetry and fixture tests never call this method automatically.
+   */
+  async markPersonalVerified(rawUrl: string, browserVersion?: string): Promise<PersonalSiteCompatibility> {
+    const host = hostFor(rawUrl);
+    if (!host) throw new Error('站点 URL 无效');
+    const all = await readAll();
+    const index = all.findIndex((item) => item.hostname === host.hostname);
+    const current = index >= 0 ? all[index] : createCompatibility(host.hostname);
+    const next = markPersonalVerified(current, { browserVersion, urlScope: host.urlScope });
+    if (index >= 0) all[index] = next; else all.unshift(next);
+    await writeAll(all);
+    return next;
   },
 
   async clear(): Promise<void> { await writeAll([]); },
