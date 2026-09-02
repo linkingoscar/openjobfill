@@ -75,6 +75,7 @@ function uniqueBest<T extends { score: number }>(candidates: T[]): T | null {
 /**
  * Resolve all learned mappings once per page. A selector contradicted by a strong
  * fingerprint is treated as stale instead of being allowed to target a recycled class.
+ * Explicitly disabled mappings are ignored without being counted as stale/unmatched.
  */
 export function resolveCustomRuleMappings(
   fields: FieldDescriptor[],
@@ -86,6 +87,7 @@ export function resolveCustomRuleMappings(
   const methodCounts: Record<CustomRuleMatchMethod, number> = { selector: 0, fingerprint: 0, locator: 0 };
 
   for (const mapping of mappings) {
+    if (mapping.status === 'DISABLED') continue;
     if (mapping.status === 'STALE') {
       stale.add(mapping.id);
       continue;
