@@ -1,4 +1,4 @@
-import type { AISettings, AIFieldMappingResponse, ResumeKeyOption, UnmatchedFieldDescriptor } from './ai';
+import type { AIAnswerDraft, AISettings, AIFieldMappingResponse, ResumeKeyOption, UnmatchedFieldDescriptor } from './ai';
 import type { StandardResume } from './resume';
 import type { FillResult } from './adapter';
 import type { RemoteFramePlan } from './pipeline';
@@ -40,6 +40,16 @@ export type ExtensionMessage =
       };
     }
   | { type: 'AI_MAP_FIELDS'; payload: { settings: AISettings; fields: UnmatchedFieldDescriptor[]; options: ResumeKeyOption[] } }
+  | {
+      type: 'AI_DRAFT_ANSWER';
+      payload: {
+        settings: AISettings;
+        question: string;
+        maxChars?: number;
+        context: Record<string, unknown>;
+        confirmedExternalProcessing: true;
+      };
+    }
   | { type: 'AI_PARSE_RESUME_IMAGE'; payload: { settings: AISettings; imageDataUrl: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'AI_PARSE_RESUME_DOCUMENT'; payload: { settings: AISettings; imageDataUrls: string[]; documentText: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'RESUME_STORAGE_SAVE'; payload: { resume: StandardResume } }
@@ -75,6 +85,11 @@ function isMainWorldValue(value: unknown): value is string | string[] {
       && value.length > 0
       && value.length <= 6
       && value.every((item) => isString(item) && item.length > 0 && item.length <= 240));
+}
+
+function isBoundedJson(value: unknown, maxLength: number): boolean {
+  try { return JSON.stringify(value).length <= maxLength; }
+  catch { return false; }
 }
 
 const MAIN_WORLD_CONTROL_ADAPTER_IDS = new Set([
@@ -173,6 +188,14 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && isRecord(payload.settings)
         && Array.isArray(payload.fields)
         && Array.isArray(payload.options);
+    case 'AI_DRAFT_ANSWER':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && isBoundedString(payload.question, 500)
+        && (payload.maxChars === undefined || (typeof payload.maxChars === 'number' && Number.isInteger(payload.maxChars) && payload.maxChars > 0 && payload.maxChars <= 5000))
+        && isRecord(payload.context)
+        && isBoundedJson(payload.context, 80_000)
+        && payload.confirmedExternalProcessing === true;
     case 'AI_PARSE_RESUME_IMAGE':
       return isRecord(payload)
         && isRecord(payload.settings)
@@ -243,6 +266,7 @@ export interface ExtensionResponse {
   error?: string;
   plans?: RemoteFramePlan[];
   mapping?: AIFieldMappingResponse['mapping'];
+  draft?: AIAnswerDraft;
   resume?: StandardResume;
   applications?: JobApplicationRecord[];
 }
