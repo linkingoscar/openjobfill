@@ -365,7 +365,9 @@ export class SnapshotRecorder {
       .filter((session): session is FillSnapshotSession => !!session)
       .slice(0, MAX_REPLAY_SNAPSHOTS);
     if (sessions.length === 0) throw new Error('问题包中没有有效的运行快照');
-    for (const session of sessions) this.remember(session, false);
+    // Problem packages are ordered newest-first; insert oldest-first so the
+    // in-memory ring keeps the same order after import.
+    for (const session of [...sessions].reverse()) this.remember(session, false);
     await writeStorage(this.recentSessions);
     return { imported: sessions.length, sessions: sessions.map(cloneSession), redactionApplied: true };
   }
