@@ -73,6 +73,8 @@ export interface FillPlanItem {
   verificationStatus?: VerificationStatus;
   actualValue?: unknown;
   requiresExplicitReview?: boolean;
+  /** When source=user_rule, identify the exact learned mapping for health feedback. */
+  learnedRuleMappingId?: string;
 }
 
 export interface FillPlan {
@@ -109,6 +111,7 @@ export interface RemoteFillPlanItem {
   source?: FillPlanItem['source'];
   fingerprint?: string;
   locator?: FieldLocatorEvidence;
+  learnedRuleMappingId?: string;
 }
 
 export interface RemoteFramePlan {
