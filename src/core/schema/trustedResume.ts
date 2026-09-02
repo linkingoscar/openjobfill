@@ -274,6 +274,7 @@ export function createJobVariant(master: ResumeV5, context: ResumeV5['variantCon
     createdAt: now,
     updatedAt: now,
     schemaVersion: 5,
+    fieldMeta: {},
     parentResumeId: master.id,
     variantType: 'job-variant',
     variantContext: clone(context || {}),
