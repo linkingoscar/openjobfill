@@ -50,6 +50,14 @@ export type ExtensionMessage =
         confirmedExternalProcessing: true;
       };
     }
+  | {
+      type: 'AI_SUGGEST_JOB_VARIANT';
+      payload: {
+        settings: AISettings;
+        context: Record<string, unknown>;
+        confirmedExternalProcessing: true;
+      };
+    }
   | { type: 'AI_PARSE_RESUME_IMAGE'; payload: { settings: AISettings; imageDataUrl: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'AI_PARSE_RESUME_DOCUMENT'; payload: { settings: AISettings; imageDataUrls: string[]; documentText: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'RESUME_STORAGE_SAVE'; payload: { resume: StandardResume } }
@@ -88,8 +96,10 @@ function isMainWorldValue(value: unknown): value is string | string[] {
 }
 
 function isBoundedJson(value: unknown, maxLength: number): boolean {
-  try { return JSON.stringify(value).length <= maxLength; }
-  catch { return false; }
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === 'string' && serialized.length <= maxLength;
+  } catch { return false; }
 }
 
 const MAIN_WORLD_CONTROL_ADAPTER_IDS = new Set([
@@ -196,6 +206,12 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && isRecord(payload.context)
         && isBoundedJson(payload.context, 80_000)
         && payload.confirmedExternalProcessing === true;
+    case 'AI_SUGGEST_JOB_VARIANT':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && isRecord(payload.context)
+        && isBoundedJson(payload.context, 120_000)
+        && payload.confirmedExternalProcessing === true;
     case 'AI_PARSE_RESUME_IMAGE':
       return isRecord(payload)
         && isRecord(payload.settings)
@@ -267,6 +283,7 @@ export interface ExtensionResponse {
   plans?: RemoteFramePlan[];
   mapping?: AIFieldMappingResponse['mapping'];
   draft?: AIAnswerDraft;
+  suggestions?: unknown[];
   resume?: StandardResume;
   applications?: JobApplicationRecord[];
 }
