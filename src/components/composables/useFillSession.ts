@@ -3,6 +3,7 @@ import { AnalyzedPlanStaleError, formFillerEngine, type AnalyzedPlan } from '@/c
 import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 import { mergeAnalyzedPlans } from '@/core/pipeline/mergeAnalyzedPlans';
+import { recordPersonalLearningFeedback } from '@/core/storage/personalLearningFeedback';
 import type { StandardResume } from '@/types/resume';
 import type { FillResult } from '@/types/adapter';
 
@@ -127,6 +128,11 @@ export function useFillSession(options: FillSessionOptions) {
       preview.value = null;
       basePlan.value = null;
       await options.persistResult(filled);
+      try {
+        await recordPersonalLearningFeedback(plan.pageUrl || window.location.href, filled);
+      } catch (feedbackError) {
+        console.warn('[OpenJobFill] Personal learning feedback was not persisted:', feedbackError);
+      }
       if (isCurrent(ticket)) options.present();
     } catch (cause) {
       if (!isCurrent(ticket)) return;
