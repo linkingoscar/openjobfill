@@ -1,4 +1,5 @@
 import type { FieldInputType } from './adapter';
+import type { FieldLocatorEvidence } from './pipeline';
 
 export interface CustomFieldMapping {
   id: string;
@@ -6,6 +7,9 @@ export interface CustomFieldMapping {
   resumeKey: string;
   type?: FieldInputType;
   description?: string;
+  /** Optional value-free evidence captured when the user confirms a mapping. */
+  fingerprint?: string;
+  locator?: FieldLocatorEvidence;
 }
 
 export interface CustomSiteRule {

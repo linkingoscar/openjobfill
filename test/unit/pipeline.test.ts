@@ -108,6 +108,9 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(nameField).toBeDefined();
       expect(nameField?.required).toBe(true);
       expect(nameField?.label).toContain('姓名');
+      expect(nameField?.fingerprint).toMatch(/^field-/);
+      expect(nameField?.locator?.selectors).toContain('#nameInput');
+      expect(JSON.stringify(nameField?.locator)).not.toContain('张三');
 
       const selectField = descriptors.find((d) => d.type === 'select');
       expect(selectField).toBeDefined();

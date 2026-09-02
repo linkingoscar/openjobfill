@@ -71,6 +71,8 @@ export function serializeAnalyzedPlan(
     reason: item.reason,
     semanticKey: item.semanticKey,
     source: item.source,
+    fingerprint: item.field.fingerprint,
+    locator: item.field.locator,
   }));
 
   return {
@@ -106,6 +108,8 @@ export function serializeExecutionResult(result: FillResult, url = location.href
       required: task.required,
       reason: task.reason,
       frameUrl: url,
+      fingerprint: task.fingerprint,
+      locator: task.locator,
     })),
   };
 }

@@ -65,6 +65,8 @@ export class PipelineExecutor {
           required: field.required,
           reason: item.reason || '需人工核对填入',
           element: field.element,
+          fingerprint: field.fingerprint,
+          locator: field.locator,
         });
 
         decorateElement(field.element, {
@@ -143,6 +145,8 @@ export class PipelineExecutor {
           required: field.required,
           reason: `写入验证未通过 (期望值: ${item.targetValue})`,
           element: field.element,
+          fingerprint: field.fingerprint,
+          locator: field.locator,
         });
 
         decorateElement(field.element, {

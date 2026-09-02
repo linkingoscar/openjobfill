@@ -191,7 +191,8 @@ const handleSaveTaskMapping = async (task: any) => {
     window.location.href,
     selector,
     selectedMappingKey.value,
-    task.label
+    task.label,
+    { fingerprint: task.fingerprint, locator: task.locator },
   );
   activeTaskMappingId.value = null;
   copyToastMessage.value = `🎯 已为当前网站记住映射【${task.label} -> ${selectedMappingKey.value}】！下次自动填表将精准命中。`;

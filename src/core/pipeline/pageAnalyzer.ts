@@ -10,6 +10,7 @@ import {
 } from '../../utils/dom';
 import { createElementFingerprint } from './runContext';
 import { inspectFieldSafety } from './fieldSafety';
+import { buildFieldLocator } from './fieldLocator';
 
 export class PageAnalyzer {
   /**
@@ -134,6 +135,7 @@ export class PageAnalyzer {
         section,
         contextText,
         fingerprint: createElementFingerprint(el, sectionTitle, section.index),
+        locator: buildFieldLocator(el, section, label),
         safety: inspectFieldSafety(el, label, contextText),
       });
     }

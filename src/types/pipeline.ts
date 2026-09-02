@@ -21,6 +21,26 @@ export interface FieldSectionInfo {
   rawTitle?: string;
 }
 
+/** Value-free evidence used to relocate a field after a SPA rerender. */
+export interface FieldLocatorEvidence {
+  fingerprint: string;
+  host: string;
+  path: string;
+  sectionType?: FieldSectionInfo['type'];
+  sectionIndex: number;
+  sectionTitle?: string;
+  label: string;
+  tagName: string;
+  inputType?: string;
+  name?: string;
+  id?: string;
+  automationId?: string;
+  testId?: string;
+  role?: string;
+  selectors: string[];
+  xpath?: string;
+}
+
 /**
  * 页面表单字段结构化描述符 (由 PageAnalyzer 提取)
  */
@@ -41,6 +61,7 @@ export interface FieldDescriptor {
   contextText: string;
   /** Privacy-safe structural evidence used by safety, replay and future incremental scans. */
   fingerprint?: string;
+  locator?: FieldLocatorEvidence;
   safety?: FieldSafetyInfo;
 }
 
@@ -85,6 +106,8 @@ export interface RemoteFillPlanItem {
   reason?: string;
   semanticKey?: string;
   source?: FillPlanItem['source'];
+  fingerprint?: string;
+  locator?: FieldLocatorEvidence;
 }
 
 /** 一个跨域 frame 在本地保存的分析快照及其可展示摘要。 */
@@ -118,6 +141,8 @@ export interface RemainingTaskItem {
   /** 跨域 frame 的待办不能把 DOM 节点传回顶层，此时为空。 */
   element?: HTMLElement;
   frameUrl?: string;
+  fingerprint?: string;
+  locator?: FieldLocatorEvidence;
 }
 
 /**

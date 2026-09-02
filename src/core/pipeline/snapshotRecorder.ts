@@ -52,6 +52,13 @@ export function compactFieldSnapshot(fields: FieldDescriptor[], maxFields = 120)
     readOnly: field.readOnly,
     options: field.options?.slice(0, 20).map((option) => option.slice(0, 100)),
     section: field.section,
+    fingerprint: field.fingerprint,
+    locator: field.locator,
+    safety: field.safety?.blocked ? {
+      blocked: true,
+      category: field.safety.category,
+      reason: field.safety.reason,
+    } : undefined,
   }));
 }
 

@@ -274,7 +274,8 @@ export const ruleStorage = {
     url: string,
     selector: string,
     resumeKey: string,
-    description: string
+    description: string,
+    evidence?: { fingerprint?: string; locator?: import('../../types/pipeline').FieldLocatorEvidence },
   ): Promise<CustomSiteRule> {
     let hostname = '';
     try {
@@ -304,6 +305,8 @@ export const ruleStorage = {
       selector,
       resumeKey,
       description,
+      fingerprint: evidence?.fingerprint,
+      locator: evidence?.locator,
     };
 
     if (existingFieldIdx >= 0) {
