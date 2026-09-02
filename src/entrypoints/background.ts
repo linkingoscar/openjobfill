@@ -1,6 +1,7 @@
 import type { AISettings, UnmatchedFieldDescriptor, ResumeKeyOption } from '../types/ai';
 import { callChatCompletion, callResumeDocumentCompletion, callVisionCompletion } from '../core/ai/llmProvider';
 import { buildMappingPrompt, parseMappingResponse, parseMappingSuggestions } from '../core/ai/fieldMapper';
+import { buildAnswerDraftPrompt, parseAnswerDraftResponse } from '../core/ai/answerDraftService';
 import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/importers/visionResumeImporter';
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
@@ -490,6 +491,23 @@ export default defineBackground(() => {
           sendResponse({ success: true, mappings, mapping });
         } catch (err: any) {
           sendResponse({ success: false, error: err?.message || 'AI 调用失败' });
+        }
+      })();
+      return true;
+    }
+
+    // 开放题草稿只有用户逐次确认数据发送后才允许请求；background 只返回候选文本，不写 DOM。
+    if (message.type === 'AI_DRAFT_ANSWER') {
+      (async () => {
+        try {
+          const { settings, question, maxChars, context } = message.payload;
+          if (!settings.enabled) throw new Error('请先在设置中启用 AI 功能');
+          const raw = await callChatCompletion(settings, buildAnswerDraftPrompt({ question, maxChars, context }));
+          const draft = parseAnswerDraftResponse(raw);
+          if (!draft) throw new Error('AI 草稿响应格式无效');
+          sendResponse({ success: true, draft });
+        } catch (err: any) {
+          sendResponse({ success: false, error: err?.message || 'AI 开放题草稿生成失败' });
         }
       })();
       return true;
