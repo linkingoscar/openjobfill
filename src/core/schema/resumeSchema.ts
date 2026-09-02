@@ -201,10 +201,11 @@ function parseArray(payload: UnknownRecord, key: string, now: number, issues: st
 
 const FIELD_META_SOURCES = new Set(['manual', 'local-parser', 'ai-parser', 'json-import', 'derived', 'site-learned']);
 const EVIDENCE_TYPES = new Set(['text-range', 'page-region', 'manual', 'derived', 'site-input']);
+const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 
 function isSafeFieldPath(path: string): boolean {
   const parts = path.split('.').filter(Boolean);
-  return parts.length > 0 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+  return parts.length > 0 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part) && !UNSAFE_PATH_SEGMENTS.has(part));
 }
 
 function parseFieldMeta(payload: UnknownRecord, now: number, issues: string[]): UnknownRecord {
