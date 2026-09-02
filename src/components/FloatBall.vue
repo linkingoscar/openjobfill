@@ -328,7 +328,7 @@ const handleQuickFill = async () => {
     // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
     const analyzed = await formFillerEngine.analyze(activeResume);
     analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id, { runId: analyzed.runId });
-    previewPlan.value = analyzed;
+    setPreviewPlan(analyzed);
     // 展示实际参与规划的引擎名称。旧版这里只显示注册表 adapter，
     // Greenhouse/Lever 等页面容易误以为会走专属 customFill，实际当前统一走 Pipeline。
     currentAdapterName.value = analyzed.remoteFrames.length > 0
@@ -369,10 +369,11 @@ const handleIncrementalFill = async () => {
     const activeResume = await resumeStorage.getActiveResume();
     currentResume.value = activeResume;
     selectedResumeId.value = activeResume.id;
-    const analyzed = await formFillerEngine.analyzeIncremental(activeResume, lastPlan.value, {
+    const previousPlan = lastPlan.value;
+    const analyzed = await formFillerEngine.analyzeIncremental(activeResume, previousPlan, {
       changedRoots: pendingChangedRoots.value.map((node) => node.parentElement || node),
     });
-    previewPlan.value = analyzed;
+    setPreviewPlan(analyzed, previousPlan);
     currentAdapterName.value = analyzed.adapterName;
     drawerTab.value = 'logs';
     isDrawerOpen.value = true;
@@ -693,6 +694,7 @@ const handleManualFill = async () => {
 // ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
 const {
   previewPlan,
+  setPreviewPlan,
   lastPlan,
   previewFillItems,
   previewNeedsUserItems,

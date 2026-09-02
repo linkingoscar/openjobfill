@@ -3,6 +3,7 @@ import { cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import type { FillResult } from '@/types/adapter';
 import { AnalyzedPlanStaleError, formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
+import type { FillPlan } from '@/types/pipeline';
 
 export type DrawerTab = 'logs' | 'review' | 'clipboard' | 'jdMatch';
 
@@ -18,6 +19,33 @@ export function useFillPreview(
 ) {
   const previewPlan = ref<AnalyzedPlan | null>(null);
   const lastPlan = ref<AnalyzedPlan | null>(null);
+  const previewBasePlan = ref<AnalyzedPlan | null>(null);
+
+  const planItemKey = (item: FillPlan['items'][number]) =>
+    `${item.field.fingerprint || item.field.id}|${item.field.label}|${item.field.section?.type || ''}:${item.field.section?.index || 0}`;
+
+  const mergePlans = (base: AnalyzedPlan, incremental: AnalyzedPlan): AnalyzedPlan => {
+    const items = [...base.plan.items, ...incremental.plan.items].filter((item, index, all) =>
+      all.findIndex((candidate) => planItemKey(candidate) === planItemKey(item)) === index,
+    );
+    const plan: FillPlan = {
+      items,
+      totalFieldsCount: items.length,
+      highConfidenceCount: items.filter((item) => item.action === 'FILL').length,
+      needsUserCount: items.filter((item) => item.action === 'NEEDS_USER').length,
+      skipCount: items.filter((item) => item.action === 'SKIP').length,
+    };
+    return {
+      ...incremental,
+      plan,
+      remoteFrames: base.remoteFrames || incremental.remoteFrames,
+    };
+  };
+
+  const setPreviewPlan = (plan: AnalyzedPlan, basePlan: AnalyzedPlan | null = null) => {
+    previewPlan.value = plan;
+    previewBasePlan.value = basePlan;
+  };
 
   const getRemotePreviewItems = (action: 'FILL' | 'NEEDS_USER') =>
     (previewPlan.value?.remoteFrames || []).flatMap((frame) =>
@@ -45,15 +73,19 @@ export function useFillPreview(
     operationError.value = '';
     try {
       const result = await formFillerEngine.executePlan(previewPlan.value!);
-      lastPlan.value = previewPlan.value;
+      lastPlan.value = previewBasePlan.value
+        ? mergePlans(previewBasePlan.value, previewPlan.value)
+        : previewPlan.value;
       fillResult.value = result;
       await persistFillHistory(result);
       previewPlan.value = null;
+      previewBasePlan.value = null;
       drawerTab.value = 'logs';
     } catch (error) {
       console.error('[OpenJobFill] Execute fill error:', error);
       if (isFillRunAbortedError(error)) {
         previewPlan.value = null;
+        previewBasePlan.value = null;
         fillResult.value = null;
         operationError.value = '';
         drawerTab.value = 'logs';
@@ -78,6 +110,7 @@ export function useFillPreview(
       await cancelRemoteFrames(previewPlan.value.remoteFrames);
     }
     previewPlan.value = null;
+    previewBasePlan.value = null;
   };
 
   const handlePreviewManualFill = async () => {
@@ -87,6 +120,7 @@ export function useFillPreview(
 
   return {
     previewPlan,
+    setPreviewPlan,
     lastPlan,
     previewFillItems,
     previewNeedsUserItems,

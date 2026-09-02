@@ -172,7 +172,9 @@ export class PipelineExecutor {
           field: item.semanticKey || '',
           value: String(item.targetValue),
           message: `读回验证失败 (实际渲染: "${actualReadValue}")`,
-          failureCode: 'verification_mismatch',
+          failureCode: attempts.some((attempt) => attempt.outcome === 'error')
+            ? 'strategy_error'
+            : 'verification_mismatch',
           attempts,
         });
       }

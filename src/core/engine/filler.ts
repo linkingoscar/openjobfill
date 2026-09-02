@@ -211,6 +211,11 @@ export class FormFillerEngine {
     previous: AnalyzedPlan,
     options: { runId?: string; changedRoots?: HTMLElement[] } = {},
   ): Promise<AnalyzedPlan> {
+    if (this.activeRunId && this.activeRunId !== options.runId) {
+      const previousRunId = this.activeRunId;
+      this.cancelRun(previousRunId, '新的增量填写任务已开始');
+      this.activeRuns.delete(previousRunId);
+    }
     const run = new FillRunContext({ runId: options.runId });
     this.activeRuns.set(run.runId, run);
     this.activeRunId = run.runId;
@@ -347,16 +352,21 @@ export class FormFillerEngine {
       skippedCount: executionResult.skippedCount,
       failedCount: executionResult.failedCount,
       verifiedCount: executionResult.verifiedCount,
-      fields: executionResult.logs.map((log) => ({
-        status: log.status,
-        label: log.label,
-        field: log.field,
-        message: log.message,
-        failureCode: log.failureCode,
-        attempts: log.attempts,
-        fingerprint: plan.items.find((item) => item.semanticKey === log.field)?.field.fingerprint,
-        locator: plan.items.find((item) => item.semanticKey === log.field)?.field.locator,
-      })),
+      fields: executionResult.logs.map((log) => {
+        const planItem = plan.items.find((item) =>
+          (item.semanticKey && item.semanticKey === log.field) || item.field.label === log.label,
+        );
+        return {
+          status: log.status,
+          label: log.label,
+          field: log.field,
+          message: log.message,
+          failureCode: log.failureCode,
+          attempts: log.attempts,
+          fingerprint: planItem?.field.fingerprint,
+          locator: planItem?.field.locator,
+        };
+      }),
     }, executionResult.durationMs, run.runId);
     await SnapshotRecorder.finish(executionResult, plan.totalFieldsCount, run.runId);
 
