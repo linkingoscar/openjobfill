@@ -1,4 +1,5 @@
 import type { DriverType } from '../../types/pipeline';
+import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
 
 export type VerificationStatus = 'VERIFIED' | 'PARTIALLY_VERIFIED' | 'MISMATCH' | 'UNREADABLE' | 'NOT_HANDLED';
 export type VerificationValueType = 'PHONE' | 'EMAIL' | 'ID' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'DATE_RANGE' | 'ENUM' | 'REGION' | 'URL' | 'TEXT' | 'LONG_TEXT' | 'SELECT';
@@ -50,7 +51,19 @@ function normalizeBoolean(value: unknown): boolean | null {
   return null;
 }
 function normalizeRegion(value: unknown): string[] {
-  return text(value).replace(/[省市区县]/g, '').split(/[\s,，/\->]+/).map((x) => x.trim()).filter(Boolean);
+  return text(value)
+    .replace(/[省市区县]/g, '')
+    .split(/[\s,，/＞>→\-]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+function normalizeSelect(value: unknown): string {
+  return text(value)
+    .toLowerCase()
+    .replace(/[／/＞>→－—]/g, '-')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 export function inferVerificationValueType(driverType: DriverType, semanticKey?: string): VerificationValueType {
@@ -63,7 +76,7 @@ export function inferVerificationValueType(driverType: DriverType, semanticKey?:
   if (/Date|birthDate/i.test(key) || driverType === 'date') return 'DATE';
   if (/Location|Place|City|province|district|address/i.test(key) && (driverType === 'select' || driverType === 'cascader')) return 'REGION';
   if (/Url$/i.test(key)) return 'URL';
-  if (driverType === 'checkbox' || typeof semanticKey === 'boolean') return 'BOOLEAN';
+  if (driverType === 'checkbox') return 'BOOLEAN';
   if (driverType === 'select' || driverType === 'cascader' || driverType === 'radio') return 'SELECT';
   if (driverType === 'contenteditable') return 'LONG_TEXT';
   return 'TEXT';
@@ -73,11 +86,30 @@ function equalDate(actual: unknown, expected: unknown): VerificationStatus {
   const a = normalizeDate(actual); const e = normalizeDate(expected);
   if (!a || !e) return 'MISMATCH';
   if (a === e) return 'VERIFIED';
-  if (a !== 'PRESENT' && e !== 'PRESENT') {
-    const short = a.length < e.length ? a : e; const long = a.length < e.length ? e : a;
-    if (short.length >= 7 && long.startsWith(short)) return 'PARTIALLY_VERIFIED';
-  }
+  if (a === 'PRESENT' || e === 'PRESENT') return 'MISMATCH';
+  // The target fact defines the required precision. If the profile only stores YYYY-MM,
+  // a page that renders a concrete day in that same month is fully verified. The reverse
+  // direction is only partial because the page dropped information that the profile had.
+  if (e.length === 7 && a.length === 10 && a.startsWith(`${e}-`)) return 'VERIFIED';
+  if (e.length === 4 && a.length >= 7 && a.startsWith(e)) return 'VERIFIED';
+  if (a.length < e.length && a.length >= 7 && e.startsWith(a)) return 'PARTIALLY_VERIFIED';
   return 'MISMATCH';
+}
+
+function equalSelect(actual: unknown, expected: unknown): { status: VerificationStatus; actual: string; expected: string } {
+  const a = normalizeSelect(actual); const e = normalizeSelect(expected);
+  if (!a || !e) return { status: 'MISMATCH', actual: a, expected: e };
+  if (a === e) return { status: 'VERIFIED', actual: a, expected: e };
+
+  const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
+  for (const domain of domains) {
+    const canonicalActual = optionResolver.toCanonical(domain, a);
+    const canonicalExpected = optionResolver.toCanonical(domain, e);
+    if (canonicalActual && canonicalExpected && canonicalActual === canonicalExpected) {
+      return { status: 'VERIFIED', actual: canonicalActual, expected: canonicalExpected };
+    }
+  }
+  return { status: 'MISMATCH', actual: a, expected: e };
 }
 
 export function verifyTypedValue(actual: unknown, expected: unknown, valueType: VerificationValueType): VerificationResult {
@@ -103,7 +135,9 @@ export function verifyTypedValue(actual: unknown, expected: unknown, valueType: 
     case 'REGION': normalizedActual = normalizeRegion(actual); normalizedExpected = normalizeRegion(expected); status = JSON.stringify(normalizedActual) === JSON.stringify(normalizedExpected) && (normalizedExpected as string[]).length > 0 ? 'VERIFIED' : 'MISMATCH'; break;
     case 'URL': normalizedActual = normalizeUrl(actual); normalizedExpected = normalizeUrl(expected); status = normalizedActual === normalizedExpected && !!normalizedExpected ? 'VERIFIED' : 'MISMATCH'; break;
     case 'ENUM':
-    case 'SELECT': normalizedActual = text(actual).toLowerCase(); normalizedExpected = text(expected).toLowerCase(); status = normalizedActual === normalizedExpected && !!normalizedExpected ? 'VERIFIED' : 'MISMATCH'; break;
+    case 'SELECT': {
+      const result = equalSelect(actual, expected); status = result.status; normalizedActual = result.actual; normalizedExpected = result.expected; break;
+    }
     case 'LONG_TEXT':
     case 'TEXT': normalizedActual = text(actual); normalizedExpected = text(expected); status = normalizedActual === normalizedExpected ? 'VERIFIED' : 'MISMATCH'; break;
   }
@@ -111,5 +145,11 @@ export function verifyTypedValue(actual: unknown, expected: unknown, valueType: 
 }
 
 export function verifyByField(actual: unknown, expected: unknown, driverType: DriverType, semanticKey?: string): VerificationResult {
+  // Cascaders frequently render the same path with a different separator. Treat an obvious
+  // multi-segment path as a region/path equivalence check without introducing substring matching.
+  if (driverType === 'cascader') {
+    const aSegments = normalizeRegion(actual); const eSegments = normalizeRegion(expected);
+    if (aSegments.length >= 2 && eSegments.length >= 2) return verifyTypedValue(actual, expected, 'REGION');
+  }
   return verifyTypedValue(actual, expected, inferVerificationValueType(driverType, semanticKey));
 }
