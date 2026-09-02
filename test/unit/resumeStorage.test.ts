@@ -14,37 +14,19 @@ function installChromeStorageMock(initial: Record<string, unknown> = {}) {
     for (const key of keys) result[key] = data[key];
     callback(result);
   });
-  const set = vi.fn((values: Record<string, unknown>, callback?: () => void) => {
-    Object.assign(data, structuredClone(values));
-    callback?.();
-  });
-  const remove = vi.fn((keys: string[], callback?: () => void) => {
-    for (const key of keys) delete data[key];
-    callback?.();
-  });
-
-  vi.stubGlobal('chrome', {
-    runtime: { id: 'test-extension-id', lastError: undefined },
-    storage: { local: { get, set, remove } },
-  });
-
+  const set = vi.fn((values: Record<string, unknown>, callback?: () => void) => { Object.assign(data, structuredClone(values)); callback?.(); });
+  const remove = vi.fn((keys: string[], callback?: () => void) => { for (const key of keys) delete data[key]; callback?.(); });
+  vi.stubGlobal('chrome', { runtime: { id: 'test-extension-id', lastError: undefined }, storage: { local: { get, set, remove } } });
   return { data, get, set, remove };
 }
 
 describe('ResumeStorage 首装初始化', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('扩展空存储应直接写入默认简历，不递归调用读取', async () => {
     const storage = installChromeStorageMock();
-
     const resumes = await resumeStorage.getAllResumes();
-
     expect(resumes).toHaveLength(1);
     expect(resumes[0].id).toBe('resume-default');
     expect(storage.get).toHaveBeenCalledTimes(1);
@@ -56,12 +38,7 @@ describe('ResumeStorage 首装初始化', () => {
   it('首装初始化后应能正常保存并重新读取简历', async () => {
     const storage = installChromeStorageMock();
     const [defaultResume] = await resumeStorage.getAllResumes();
-
-    await resumeStorage.saveResume({
-      ...defaultResume,
-      basics: { ...defaultResume.basics, name: '张三' },
-    });
-
+    await resumeStorage.saveResume({ ...defaultResume, basics: { ...defaultResume.basics, name: '张三' } });
     const resumes = await resumeStorage.getAllResumes();
     expect(resumes).toHaveLength(1);
     expect(resumes[0].basics.name).toBe('张三');
@@ -73,25 +50,14 @@ describe('ResumeStorage 首装初始化', () => {
     installChromeStorageMock();
     const [defaultResume] = await resumeStorage.getAllResumes();
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-
     try {
-      await resumeStorage.saveResume({
-        ...defaultResume,
-        basics: { ...defaultResume.basics, name: '第一次保存' },
-      });
+      await resumeStorage.saveResume({ ...defaultResume, basics: { ...defaultResume.basics, name: '第一次保存' } });
       const [first] = await resumeStorage.getAllResumes();
-
-      await resumeStorage.saveResume({
-        ...first,
-        basics: { ...first.basics, name: '第二次保存' },
-      });
+      await resumeStorage.saveResume({ ...first, basics: { ...first.basics, name: '第二次保存' } });
       const [second] = await resumeStorage.getAllResumes();
-
       expect(second.updatedAt).toBeGreaterThan(first.updatedAt);
       expect(second.basics.name).toBe('第二次保存');
-    } finally {
-      now.mockRestore();
-    }
+    } finally { now.mockRestore(); }
   });
 
   it('浏览器拒绝写入时应明确报错，不能伪装成保存成功', async () => {
@@ -102,27 +68,35 @@ describe('ResumeStorage 首装初始化', () => {
       callback?.();
       (globalThis as any).chrome.runtime.lastError = undefined;
     });
-
-    await expect(resumeStorage.saveResume({
-      ...defaultResume,
-      basics: { ...defaultResume.basics, name: '不会被静默丢失' },
-    })).rejects.toThrow('QUOTA_BYTES quota exceeded');
+    await expect(resumeStorage.saveResume({ ...defaultResume, basics: { ...defaultResume.basics, name: '不会被静默丢失' } })).rejects.toThrow('QUOTA_BYTES quota exceeded');
   });
 
   it('解析导入的简历应在重新读取及恢复激活项后仍完整存在', async () => {
     installChromeStorageMock();
     const [defaultResume] = await resumeStorage.getAllResumes();
-    const imported = await resumeStorage.importResumeFromJson(JSON.stringify({
-      ...defaultResume,
-      title: '上传解析简历',
-      basics: { ...defaultResume.basics, name: '持久化用户' },
-    }));
+    const imported = await resumeStorage.importResumeFromJson(JSON.stringify({ ...defaultResume, title: '上传解析简历', basics: { ...defaultResume.basics, name: '持久化用户' } }));
     await resumeStorage.setActiveResumeId(imported.id);
-
     const restored = await resumeStorage.getActiveResume();
     expect(restored.id).toBe(imported.id);
     expect(restored.title).toBe('上传解析简历');
     expect(restored.basics.name).toBe('持久化用户');
+  });
+
+  it('v5 fieldMeta 与岗位版本关系在保存和恢复后必须保留', async () => {
+    installChromeStorageMock();
+    const [defaultResume] = await resumeStorage.getAllResumes();
+    const trusted = {
+      ...defaultResume,
+      schemaVersion: 5,
+      fieldMeta: { 'basics.name': { source: 'manual', confirmed: true, locked: true, updatedAt: 1000 } },
+      variantType: 'master',
+      variantOverrides: [],
+    } as any;
+    await resumeStorage.saveResume(trusted);
+    const restored = (await resumeStorage.getAllResumes())[0] as any;
+    expect(restored.schemaVersion).toBe(5);
+    expect(restored.fieldMeta['basics.name']).toMatchObject({ confirmed: true, locked: true });
+    expect(restored.variantType).toBe('master');
   });
 
   it('跨页面交错更新应由 background 串行化并保留双方字段', async () => {
@@ -130,33 +104,23 @@ describe('ResumeStorage 首装初始化', () => {
     await resumeStorage.getAllResumes();
     let queued = Promise.resolve();
     (globalThis as any).chrome.runtime.sendMessage = vi.fn((message: any, callback: (response: any) => void) => {
-      queued = queued.then(async () => {
-        if (message.type === 'RESUME_STORAGE_UPDATE_FIELDS') {
-          await resumeStorage.updateResumeFieldsDirect(message.payload.id, message.payload.updates);
-        }
-      });
+      queued = queued.then(async () => { if (message.type === 'RESUME_STORAGE_UPDATE_FIELDS') await resumeStorage.updateResumeFieldsDirect(message.payload.id, message.payload.updates); });
       queued.then(() => callback({ success: true }), (error) => callback({ success: false, error: error.message }));
     });
-
     await Promise.all([
       resumeStorage.updateResumeFields('resume-default', { 'basics.name': '管理页用户' }),
       resumeStorage.updateResumeFields('resume-default', { 'basics.email': 'content@example.com' }),
     ]);
-
     const [resume] = await resumeStorage.getAllResumes();
     expect(resume.basics.name).toBe('管理页用户');
     expect(resume.basics.email).toBe('content@example.com');
-    expect(storage.data['openjobfill_resume_resume-default']).toEqual(expect.objectContaining({
-      basics: expect.objectContaining({ name: '管理页用户', email: 'content@example.com' }),
-    }));
+    expect(storage.data['openjobfill_resume_resume-default']).toEqual(expect.objectContaining({ basics: expect.objectContaining({ name: '管理页用户', email: 'content@example.com' }) }));
   });
 
   it('localStorage 中的空数组也应自动恢复默认简历', async () => {
     vi.stubGlobal('chrome', undefined);
     localStorage.setItem(RESUMES_KEY, '[]');
-
     const resumes = await resumeStorage.getAllResumes();
-
     expect(resumes).toHaveLength(1);
     expect(resumes[0].id).toBe('resume-default');
     expect(JSON.parse(localStorage.getItem(RESUMES_KEY) || '[]')).toHaveLength(1);
@@ -166,9 +130,7 @@ describe('ResumeStorage 首装初始化', () => {
     vi.stubGlobal('chrome', undefined);
     const futurePayload = JSON.stringify([{ id: 'future', schemaVersion: 99, basics: { name: '未来用户' } }]);
     localStorage.setItem(RESUMES_KEY, futurePayload);
-
     const resumes = await resumeStorage.getAllResumes();
-
     expect(resumes[0].id).toBe('resume-default');
     expect(localStorage.getItem(RESUMES_KEY)).toBe(futurePayload);
   });
@@ -176,20 +138,15 @@ describe('ResumeStorage 首装初始化', () => {
   it('保存入口应拒绝损坏的嵌套字段类型', async () => {
     vi.stubGlobal('chrome', undefined);
     const [defaultResume] = await resumeStorage.getAllResumes();
-    await expect(resumeStorage.saveResume({
-      ...defaultResume,
-      educations: ['broken'] as unknown as StandardResume['educations'],
-    })).rejects.toThrow(/educations\[0\] 必须是对象/);
+    await expect(resumeStorage.saveResume({ ...defaultResume, educations: ['broken'] as unknown as StandardResume['educations'] })).rejects.toThrow(/educations\[0\] 必须是对象/);
   });
 
   it('公开下载的 JSON 模板应始终可以被当前版本直接导入', async () => {
     vi.stubGlobal('chrome', undefined);
     const templatePath = resolve(process.cwd(), 'src/public/openjobfill-resume-template.json');
     const templateJson = readFileSync(templatePath, 'utf8');
-
     const imported = await resumeStorage.importResumeFromJson(templateJson);
-
-    expect(imported.schemaVersion).toBe(4);
+    expect(imported.schemaVersion).toBe(5);
     expect(imported.title).toBe('校招通用简历模板');
     expect(imported.basics.name).toBe('张三');
     expect(imported.educations).toHaveLength(1);
