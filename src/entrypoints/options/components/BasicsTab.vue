@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { StandardResume } from '@/types/resume';
 import type { FieldMeta } from '@/types/trustedResume';
+import { resumeStorage } from '@/core/storage/resumeStorage';
 
 const props = defineProps<{ resume: StandardResume }>();
-const trusted = props.resume as StandardResume & { fieldMeta?: Record<string, FieldMeta>; variantType?: 'master' | 'job-variant'; parentResumeId?: string };
+const trusted = props.resume as StandardResume & { fieldMeta?: Record<string, FieldMeta>; variantType?: 'master' | 'job-variant'; parentResumeId?: string; variantContext?: { company?: string; role?: string; jobFamily?: string; jdSnapshotId?: string } };
 trusted.fieldMeta ||= {};
 if (!props.resume.basics.currentLocation) props.resume.basics.currentLocation = { city: '' };
 if (!props.resume.basics.nativePlace) props.resume.basics.nativePlace = { city: '' };
+const creatingVariant = ref(false);
+const variantError = ref('');
 
 function meta(path: string): FieldMeta | undefined { return trusted.fieldMeta?.[path]; }
 function confirm(path: string) {
@@ -37,6 +41,22 @@ function sourceLabel(path: string): string {
   const source = meta(path)?.source;
   return ({ manual: '人工', 'local-parser': '本地解析', 'ai-parser': 'AI 候选', 'json-import': 'JSON', derived: '推导', 'site-learned': '站点学习' } as Record<string, string>)[source || ''] || '未确认';
 }
+async function createVariantFromCurrent() {
+  if (creatingVariant.value) return;
+  creatingVariant.value = true;
+  variantError.value = '';
+  try {
+    const variant = await resumeStorage.createJobVariant(props.resume.id, {
+      role: props.resume.basics.expectedRole || undefined,
+      jobFamily: trusted.variantContext?.jobFamily,
+    });
+    await resumeStorage.setActiveResumeId(variant.id);
+    window.location.reload();
+  } catch (error) {
+    variantError.value = error instanceof Error ? error.message : '创建岗位版本失败';
+    creatingVariant.value = false;
+  }
+}
 </script>
 
 <template>
@@ -45,8 +65,17 @@ function sourceLabel(path: string): string {
       <div>
         <div class="font-bold">可信求职档案 · {{ trusted.variantType === 'job-variant' ? '岗位版本' : '主档案' }}</div>
         <div class="mt-1 text-[11px] text-blue-700">修改字段后会标记为人工确认；锁定字段不会被后续导入或 AI 覆盖。可单独关闭某字段的自动填写。</div>
+        <div v-if="trusted.variantType === 'job-variant'" class="mt-1 text-[10px] text-blue-700">
+          岗位上下文：{{ trusted.variantContext?.company || '未指定公司' }} · {{ trusted.variantContext?.role || resume.basics.expectedRole || '未指定岗位' }}
+        </div>
+        <p v-if="variantError" class="mt-1 text-[10px] text-rose-700">{{ variantError }}</p>
       </div>
-      <div v-if="trusted.parentResumeId" class="text-[10px] px-2 py-1 rounded bg-white border border-blue-200">继承自 {{ trusted.parentResumeId }}</div>
+      <div class="flex items-center gap-2">
+        <div v-if="trusted.parentResumeId" class="text-[10px] px-2 py-1 rounded bg-white border border-blue-200">继承自 {{ trusted.parentResumeId }}</div>
+        <button type="button" @click="createVariantFromCurrent" :disabled="creatingVariant" class="px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white text-blue-700 font-semibold hover:bg-blue-100 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-500">
+          {{ creatingVariant ? '创建中…' : trusted.variantType === 'job-variant' ? '从主档案再建岗位版本' : '创建岗位版本' }}
+        </button>
+      </div>
     </div>
 
     <div class="grid grid-cols-3 gap-4">
