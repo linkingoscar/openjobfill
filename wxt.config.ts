@@ -1,4 +1,5 @@
 import { defineConfig } from 'wxt';
+import { BUILTIN_RECRUITMENT_MATCHES } from './src/core/recruitmentPermissions';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
@@ -15,9 +16,10 @@ export default defineConfig({
       '128': 'icon-128.png',
     },
     permissions: ['storage', 'activeTab', 'webNavigation', 'scripting'],
-    // 静态探测器覆盖所有页面，确认招聘页后由 scripting 按需注入重型运行时；
-    // 因此这里保留 https 主机权限以支持未知招聘站点和用户自带 AI 接口，默认不会上传简历内容。
-    host_permissions: ['http://localhost/*', 'https://*/*'],
+    // Built-in recruitment/ATS origins can run the lightweight detector automatically.
+    // Unknown sites and custom AI endpoints are requested only after an explicit user gesture.
+    host_permissions: BUILTIN_RECRUITMENT_MATCHES,
+    optional_host_permissions: ['http://*/*', 'https://*/*'],
     action: {
       default_icon: {
         '16': 'icon-16.png',
