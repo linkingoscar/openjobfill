@@ -90,7 +90,13 @@ export interface ImportConflict {
   candidateValue: unknown;
   currentMeta?: FieldMeta;
   candidateMeta: FieldMeta;
-  reason: 'locked' | 'confirmed-different' | 'parser-disagreement' | 'invalid';
+  reason:
+    | 'locked'
+    | 'confirmed-different'
+    | 'parser-disagreement'
+    | 'low-confidence'
+    | 'no-evidence'
+    | 'invalid';
 }
 
 export interface ImportMergeResult {
