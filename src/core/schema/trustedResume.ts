@@ -1,5 +1,5 @@
 import type { StandardResume } from '../../types/resume';
-import type { FieldMeta, FieldMetaSource, ImportConflict, ImportMergeResult, ParsedCandidate, ResumeV5, ResumeVariantOrdering } from '../../types/trustedResume';
+import type { FieldMeta, FieldMetaSource, ImportConflict, ImportMergeResult, ParsedCandidate, ResumeV5, ResumeVariantOrdering, ResumeVariantPresentation } from '../../types/trustedResume';
 import { parseResumePayload } from './resumeSchema';
 
 function clone<T>(value: T): T {
@@ -7,6 +7,7 @@ function clone<T>(value: T): T {
 }
 
 const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+const PROFILE_LINK_PATHS = new Set(['basics.githubUrl', 'basics.linkedinUrl', 'basics.blogUrl', 'basics.portfolioUrl']);
 
 function partsFor(path: string): string[] {
   const parts = path.split('.').filter(Boolean);
@@ -44,6 +45,19 @@ function normalizeOrdering(raw: unknown): ResumeVariantOrdering {
   return {
     projects: sanitize(record.projects),
     experiences: sanitize(record.experiences),
+  };
+}
+
+function normalizePresentation(raw: unknown): ResumeVariantPresentation {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  return {
+    highlightSkills: Array.isArray(record.highlightSkills)
+      ? Array.from(new Set(record.highlightSkills.filter((item): item is string => typeof item === 'string' && item.trim().length > 0))).slice(0, 20)
+      : undefined,
+    selectedLinkKeys: Array.isArray(record.selectedLinkKeys)
+      ? Array.from(new Set(record.selectedLinkKeys.filter((item): item is string => typeof item === 'string' && PROFILE_LINK_PATHS.has(item))))
+      : undefined,
   };
 }
 
@@ -91,6 +105,7 @@ export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
       try { partsFor(item); return true; } catch { return false; }
     }) : [],
     variantOrdering: normalizeOrdering(raw.variantOrdering),
+    variantPresentation: normalizePresentation(raw.variantPresentation),
   };
 }
 
@@ -181,6 +196,7 @@ export function createJobVariant(master: ResumeV5, context: ResumeV5['variantCon
     variantContext: clone(context || {}),
     variantOverrides: [],
     variantOrdering: {},
+    variantPresentation: {},
   };
 }
 
@@ -188,6 +204,7 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
   if (variant.variantType !== 'job-variant' || variant.parentResumeId !== master.id) return clone(variant);
   const resolved = clone(master);
   const ordering = normalizeOrdering(variant.variantOrdering);
+  const presentation = normalizePresentation(variant.variantPresentation);
   Object.assign(resolved, {
     id: variant.id,
     title: variant.title,
@@ -200,6 +217,7 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
     variantContext: clone(variant.variantContext || {}),
     variantOverrides: clone(variant.variantOverrides || []),
     variantOrdering: clone(ordering),
+    variantPresentation: clone(presentation),
     fieldMeta: { ...clone(master.fieldMeta), ...clone(variant.fieldMeta) },
   });
   for (const path of variant.variantOverrides || []) setResumeValue(resolved, path, clone(getResumeValue(variant, path)));
