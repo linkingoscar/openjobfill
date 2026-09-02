@@ -56,4 +56,19 @@ describe('自定义规则证据匹配', () => {
     expect(resolution.matches.size).toBe(0);
     expect(resolution.staleMappingIds).toEqual(['conflicted-name']);
   });
+
+  it('用户主动禁用的字段映射不参与匹配，也不制造 stale/unmatched 噪声', () => {
+    document.body.innerHTML = '<form><label for="name">姓名</label><input id="name" name="name"></form>';
+    const fields = pageAnalyzer.analyzePage(document);
+    const mapping: CustomFieldMapping = {
+      id: 'disabled-name',
+      selector: '#name',
+      resumeKey: 'basics.name',
+      status: 'DISABLED',
+    };
+    const resolution = resolveCustomRuleMappings(fields, [mapping]);
+    expect(resolution.matches.size).toBe(0);
+    expect(resolution.staleMappingIds).toEqual([]);
+    expect(resolution.unmatchedMappingIds).toEqual([]);
+  });
 });
