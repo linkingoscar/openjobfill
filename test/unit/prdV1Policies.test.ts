@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { decideFill } from '../../src/core/pipeline/decisionPolicy';
 import { sanitizeFieldMappingSuggestions } from '../../src/core/ai/protocolV2';
-import { learnQA, matchScopedQA } from '../../src/core/engine/scopedQABank';
+import { learnQA, matchResumeQABank, matchScopedQA } from '../../src/core/engine/scopedQABank';
 import { createCompatibility, markPersonalVerified, markSelectorFingerprintConflict, recordMappingVerification, updateCompatibility } from '../../src/core/storage/personalSiteLearning';
+import { parseResumePayload } from '../../src/core/schema/resumeSchema';
+import { EMPTY_RESUME } from '../../src/core/storage/defaultData';
 
 const field = (overrides: Record<string, unknown> = {}) => ({
   id: 'f', element: document.createElement('input'), type: 'text', label: '姓名', placeholder: '', name: '', ariaLabel: '', required: true,
@@ -33,6 +35,27 @@ describe('PRD v1 policies', () => {
     const global = learnQA({ question: '为什么选择我们', answer: '全局', scope: 'global', source: 'manual', confirmedByUser: true, now: 1 });
     const company = learnQA({ question: '为什么选择我们', answer: '公司专属', scope: 'company-domain', companyDomain: 'example.com', source: 'manual', confirmedByUser: true, now: 2 });
     expect(matchScopedQA('为什么选择我们', [global, company], { hostname: 'jobs.example.com' })?.version.answer).toBe('公司专属');
+  });
+
+  it('persists scoped QA versions in schema v5 and selects a fitting confirmed version', () => {
+    const payload = JSON.parse(JSON.stringify(EMPTY_RESUME));
+    payload.schemaVersion = 5;
+    payload.qaBank = [{
+      id: 'qa-company',
+      keyword: '为什么选择我们',
+      question: '为什么选择我们',
+      answer: '原始长答案',
+      scope: 'company-domain',
+      companyDomain: 'example.com',
+      versions: [
+        { id: 'v100', answer: '一百字内版本', maxChars: 100, createdAt: 1, confirmedByUser: true, source: 'manual' },
+        { id: 'v200', answer: '二百字版本'.repeat(30), maxChars: 200, createdAt: 2, confirmedByUser: true, source: 'manual' },
+      ],
+    }];
+    const parsed = parseResumePayload(payload, { strict: true, now: 10 }).resume;
+    expect(parsed.qaBank[0].scope).toBe('company-domain');
+    expect(parsed.qaBank[0].versions?.map((version) => version.id)).toEqual(['v100', 'v200']);
+    expect(matchResumeQABank('为什么选择我们', parsed.qaBank, { hostname: 'jobs.example.com', maxChars: 120 })?.version.id).toBe('v100');
   });
 
   it('keeps fixture telemetry separate until PERSONAL_VERIFIED is explicitly confirmed', () => {
