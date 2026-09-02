@@ -17,7 +17,7 @@ import type { JobVariantSuggestion } from '@/core/ai/contentAssistant';
 import { requestAIJobVariantSuggestions } from '@/core/ai/jobVariantAssistant';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { migrateToResumeV5, setResumeValue } from '@/core/schema/trustedResume';
-import type { ResumeV5 } from '@/types/trustedResume';
+import type { ResumeV5, ResumeVariantTextOverride } from '@/types/trustedResume';
 
 const props = defineProps<{
   jdAnalysis: JDAnalysisResult | null;
@@ -92,6 +92,30 @@ async function ensureJobVariant(): Promise<ResumeV5> {
   return variant;
 }
 
+function buildStableTextOverride(variant: ResumeV5, resumeKey: string, value: string): ResumeVariantTextOverride | null {
+  const match = /^(projects|experiences)\.(\d+)\.(description|responsibility|achievements)$/.exec(resumeKey);
+  if (!match) return null;
+  const collection = match[1] as ResumeVariantTextOverride['collection'];
+  const field = match[3] as ResumeVariantTextOverride['field'];
+  if (collection === 'experiences' && field === 'responsibility') return null;
+  const index = Number(match[2]);
+  const item = collection === 'projects' ? variant.projects[index] : variant.experiences[index];
+  if (!item?.id) return null;
+  return { collection, recordId: item.id, field, value };
+}
+
+function upsertStableTextOverride(variant: ResumeV5, override: ResumeVariantTextOverride) {
+  const existing = variant.variantTextOverrides || [];
+  variant.variantTextOverrides = [
+    ...existing.filter((item) => !(
+      item.collection === override.collection
+      && item.recordId === override.recordId
+      && item.field === override.field
+    )),
+    override,
+  ];
+}
+
 async function applySuggestion(suggestion: JobVariantSuggestion) {
   if (appliedIds.value.has(suggestion.id)) return;
   const approved = window.confirm(
@@ -110,20 +134,25 @@ async function applySuggestion(suggestion: JobVariantSuggestion) {
     variant.variantOverrides ||= [];
     variant.variantOrdering ||= {};
     variant.variantPresentation ||= {};
+    variant.variantTextOverrides ||= [];
 
     if (suggestion.type === 'project-order' && suggestion.orderedIds) {
       variant.variantOrdering.projects = [...suggestion.orderedIds];
     } else if (suggestion.type === 'experience-order' && suggestion.orderedIds) {
       variant.variantOrdering.experiences = [...suggestion.orderedIds];
     } else if (
-      (suggestion.type === 'short-description' || suggestion.type === 'self-evaluation')
-      && suggestion.resumeKey
+      suggestion.type === 'self-evaluation'
+      && suggestion.resumeKey === 'basics.selfEvaluation'
       && suggestion.proposedValue
     ) {
       setResumeValue(variant, suggestion.resumeKey, suggestion.proposedValue);
       if (!variant.variantOverrides.includes(suggestion.resumeKey)) {
         variant.variantOverrides.push(suggestion.resumeKey);
       }
+    } else if (suggestion.type === 'short-description' && suggestion.resumeKey && suggestion.proposedValue) {
+      const override = buildStableTextOverride(variant, suggestion.resumeKey, suggestion.proposedValue);
+      if (!override) throw new Error('描述建议无法绑定到稳定的项目/经历记录');
+      upsertStableTextOverride(variant, override);
     } else if (suggestion.type === 'skill-highlight' && suggestion.highlightSkills) {
       variant.variantPresentation.highlightSkills = [...suggestion.highlightSkills];
     } else if (suggestion.type === 'link-selection' && suggestion.selectedLinks) {
