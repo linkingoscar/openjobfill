@@ -1,4 +1,4 @@
-import type { StandardResume, CustomQABankItem } from '../../types/resume';
+import type { StandardResume } from '../../types/resume';
 import type { FieldDescriptor, FillPlan, FillPlanItem, PlatformEnhancer, DriverType } from '../../types/pipeline';
 import { calculateSemanticSimilarity } from '../matcher/similarityEngine';
 import { RESUME_DICTIONARY } from '../matcher/dictionary';
@@ -10,6 +10,7 @@ import { inspectFieldSafety } from './fieldSafety';
 import type { CustomFieldMapping } from '../../types/rule';
 import { resolveCustomRuleMappings } from './customRuleMatcher';
 import { decideFill, type FillDecision } from './decisionPolicy';
+import { matchResumeQABank } from '../engine/scopedQABank';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -37,6 +38,12 @@ function legacyAction(decision: FillDecision): FillPlanItem['action'] {
   if (decision === 'FILL_HIGH_CONFIDENCE' || decision === 'FILL_REVIEW_REQUIRED') return 'FILL';
   if (decision === 'NEEDS_USER') return 'NEEDS_USER';
   return 'SKIP';
+}
+
+function fieldMaxChars(field: FieldDescriptor): number | undefined {
+  const element = field.element as HTMLInputElement | HTMLTextAreaElement;
+  const maxLength = typeof element?.maxLength === 'number' ? element.maxLength : -1;
+  return maxLength > 0 && Number.isFinite(maxLength) ? maxLength : undefined;
 }
 
 export class PlanGenerator {
@@ -156,10 +163,28 @@ export class PlanGenerator {
       }
       if (platformMatched) continue;
 
-      if (resume.qaBank?.length && (field.type === 'textarea' || field.type === 'text')) {
-        const match = this.matchQABank(field, resume.qaBank, matchedSemanticKeys);
-        if (match && hasUsableValue(match.item.answer)) {
-          push({ id: `plan_${field.id}`, field, semanticKey: `qaBank.${match.item.id}`, targetValue: match.item.answer, confidence: match.score, source: 'qa_bank', reason: `命中问答库关键词: ${match.item.keyword}`, driverType: this.resolveDriverType(field), firstVisit: true });
+      if (resume.qaBank?.length && (field.type === 'textarea' || field.type === 'text' || field.type === 'contenteditable')) {
+        const variantContext = (resume as StandardResume & { variantContext?: { jobFamily?: string; jdSnapshotId?: string } }).variantContext;
+        const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
+        const question = field.label || field.placeholder || field.contextText;
+        const match = matchResumeQABank(question, resume.qaBank, {
+          hostname: currentHostname,
+          jobFamily: variantContext?.jobFamily,
+          jobPostingId: variantContext?.jdSnapshotId,
+          maxChars: fieldMaxChars(field),
+        });
+        if (match && !matchedSemanticKeys.has(`qaBank.${match.item.id}`) && hasUsableValue(match.version.answer)) {
+          push({
+            id: `plan_${field.id}`,
+            field,
+            semanticKey: `qaBank.${match.item.id}`,
+            targetValue: match.version.answer,
+            confidence: match.score,
+            source: 'qa_bank',
+            reason: `命中问答库 ${match.item.scope} 作用域 · 版本 ${match.version.maxChars || '原始'} 字`,
+            driverType: this.resolveDriverType(field),
+            firstVisit: true,
+          });
           matchedSemanticKeys.add(`qaBank.${match.item.id}`);
           continue;
         }
@@ -236,26 +261,6 @@ export class PlanGenerator {
       return path.join('-');
     }
     return String(value);
-  }
-
-  private matchQABank(field: FieldDescriptor, qaBank: CustomQABankItem[], alreadyMatchedKeys: Set<string>): { item: CustomQABankItem; score: number } | null {
-    const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
-    const evaluate = (items: CustomQABankItem[]) => {
-      let best: CustomQABankItem | null = null;
-      let highestScore = 0;
-      for (const qa of items) {
-        if (!qa.keyword || !qa.answer || alreadyMatchedKeys.has(`qaBank.${qa.id}`)) continue;
-        const keywords = qa.keyword.split(/[,，/、\s|]+/).map((key) => key.trim()).filter(Boolean);
-        const score = Math.max(calculateTextMatchScore(field.label, keywords), calculateTextMatchScore(field.placeholder, keywords), calculateTextMatchScore(field.contextText, keywords) * 0.8);
-        if (score > highestScore && score >= 0.5) { highestScore = score; best = qa; }
-      }
-      return best ? { item: best, score: highestScore } : null;
-    };
-    if (currentHostname) {
-      const scoped = evaluate(qaBank.filter((qa) => qa.scope === 'domain' && qa.domain && (currentHostname.includes(qa.domain) || qa.domain.includes(currentHostname))));
-      if (scoped) return scoped;
-    }
-    return evaluate(qaBank.filter((qa) => qa.scope !== 'domain' || !qa.domain));
   }
 
   private matchSemanticDictionary(field: FieldDescriptor, resume: StandardResume, alreadyMatchedKeys: Set<string>): { resumeKey: string; name: string; targetValue: any; confidence: number; relatedKeys?: string[] } | null {
