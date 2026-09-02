@@ -5,6 +5,8 @@
  * 保留对象形状，但隐藏手机号、邮箱、身份证、银行卡及明确的敏感键值。
  */
 
+import { getResumeFieldDefinition } from '../schema/resumeFieldRegistry';
+
 const SENSITIVE_KEYS = new Set([
   'idcardnumber',
   'phone',
@@ -18,6 +20,12 @@ const SENSITIVE_KEYS = new Set([
   'bankcard',
   'apikey',
   'authorization',
+  'targetvalue',
+  'currentvalue',
+  'expectedvalue',
+  'actualvalue',
+  'rawresume',
+  'rawdom',
 ]);
 
 export function scrubSensitiveText(value: unknown): string {
@@ -45,9 +53,12 @@ function maskKnownSensitiveValue(key: string, value: unknown): unknown {
 export function scrubSensitiveData<T>(data: T): T {
   const seen = new WeakSet<object>();
 
-  const visit = (value: unknown, key = ''): unknown => {
+  const visit = (value: unknown, key = '', path = ''): unknown => {
     const masked = maskKnownSensitiveValue(key, value);
     if (masked !== undefined) return masked;
+    const resumePath = path.match(/(?:^|\.)(basics|educations|experiences|projects|languages|skills|certificates|familyMembers|awards|academicAchievements|campusExperiences|qaBank)(?:\.|\[).*$/)?.[0].replace(/^\./, '') || path;
+    const metadata = getResumeFieldDefinition(resumePath);
+    if (metadata && !metadata.diagnosticExport && value !== null && value !== undefined && value !== '') return '[REDACTED]';
     if (typeof value === 'string') return scrubSensitiveText(value);
     if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') {
       return value;
@@ -57,12 +68,12 @@ export function scrubSensitiveData<T>(data: T): T {
     seen.add(value);
 
     if (Array.isArray(value)) {
-      return value.map((item) => visit(item));
+      return value.map((item, index) => visit(item, '', `${path}.${index}`));
     }
 
     const result: Record<string, unknown> = {};
     for (const [entryKey, entryValue] of Object.entries(value)) {
-      result[entryKey] = visit(entryValue, entryKey);
+      result[entryKey] = visit(entryValue, entryKey, path ? `${path}.${entryKey}` : entryKey);
     }
     return result;
   };

@@ -218,7 +218,7 @@ export class FormFillerEngine {
     //     （本地优先，未配置时静默跳过；仅发送字段标签，不发送简历内容）
     if (!options.dryRun) {
       try {
-        const { appliedCount } = await applyAIFallbackToPlan(plan, resume, run.signal);
+        const { appliedCount } = await applyAIFallbackToPlan(plan, resume, run.signal, run.runId);
         if (appliedCount > 0) {
           console.log(`[OpenJobFill Pipeline] AI fallback promoted ${appliedCount} fields to FILL.`);
         }
@@ -382,7 +382,7 @@ export class FormFillerEngine {
       const mappingStartedAt = Date.now();
       const plan = planGenerator.generatePlan(newDescriptors, resume, enhancer, customFieldRules);
       try {
-        await applyAIFallbackToPlan(plan, resume, run.signal);
+        await applyAIFallbackToPlan(plan, resume, run.signal, run.runId);
       } catch (err) {
         if (run.signal.aborted) throw err;
         console.warn('[OpenJobFill Pipeline] Incremental AI fallback warning:', err);
@@ -469,7 +469,12 @@ export class FormFillerEngine {
     try {
       run.throwIfAborted();
       // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
-      await assertAnalyzedPlanIsCurrent(analyzed);
+      try {
+        await assertAnalyzedPlanIsCurrent(analyzed);
+      } catch (error) {
+        SnapshotRecorder.record('context-invalidated', { reason: error instanceof Error ? error.message : '预览失效' }, undefined, run.runId);
+        throw error;
+      }
 
       const resume = this.runResumes.get(analyzed.runId)
         || (isExtensionStorageAvailable()
@@ -489,7 +494,7 @@ export class FormFillerEngine {
             controlSelectors: enhancer?.controlSelectors,
           });
           effectivePlan = planGenerator.generatePlan(descriptors, resume, enhancer, customRule?.fields || []);
-          await applyAIFallbackToPlan(effectivePlan, resume, run.signal);
+          await applyAIFallbackToPlan(effectivePlan, resume, run.signal, run.runId);
         }
       }
 
@@ -536,7 +541,7 @@ export class FormFillerEngine {
               }
               const recordPlan = planGenerator.generatePlan(descriptors, resume, enhancer, customRule?.fields || []);
               executedPlanItems.push(...recordPlan.items);
-              await applyAIFallbackToPlan(recordPlan, resume, run.signal);
+              await applyAIFallbackToPlan(recordPlan, resume, run.signal, run.runId);
               const recordResult = await pipelineExecutor.executePlan(recordPlan, {
                 signal: run.signal,
                 runId: run.runId,
@@ -546,6 +551,7 @@ export class FormFillerEngine {
               return { canAdvance: !recordResult.remainingTasks.some((task) => task.required) };
             },
             run.signal,
+            run.runId,
           );
           SnapshotRecorder.record('fill', {
             workflow: action.groupKey,

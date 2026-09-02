@@ -3,6 +3,8 @@
  * 支持中英文别名、多级省市区解析与复杂级联下拉匹配 (如 "中国-北京", "北京市/海淀区", "Beijing, China")
  */
 
+import { findRegionPath } from '../data/regions';
+
 export interface CanonicalLocation {
   country: string;
   province: string;
@@ -17,64 +19,20 @@ interface CityMapping {
   aliases: string[];
 }
 
-const CITY_DATABASE: CityMapping[] = [
-  // 直辖市
-  { province: '北京市', city: '北京市', aliases: ['北京', '北京市', 'beijing', 'bj', '海淀', '朝阳', '西城', '东城'] },
-  { province: '上海市', city: '上海市', aliases: ['上海', '上海市', 'shanghai', 'sh', '浦东', '徐汇', '黄浦', '杨浦'] },
-  { province: '天津市', city: '天津市', aliases: ['天津', '天津市', 'tianjin', 'tj', '滨海新区'] },
-  { province: '重庆市', city: '重庆市', aliases: ['重庆', '重庆市', 'chongqing', 'cq', '渝中'] },
-
-  // 广东省
-  { province: '广东省', city: '广州市', aliases: ['广州', '广州市', 'guangzhou', 'gz', '天河', '番禺'] },
-  { province: '广东省', city: '深圳市', aliases: ['深圳', '深圳市', 'shenzhen', 'sz', '南山', '福田', '宝安'] },
-  { province: '广东省', city: '珠海市', aliases: ['珠海', '珠海市', 'zhuhai'] },
-  { province: '广东省', city: '东莞市', aliases: ['东莞', '东莞市', 'dongguan'] },
-  { province: '广东省', city: '佛山市', aliases: ['佛山', '佛山市', 'foshan'] },
-
-  // 浙江省
-  { province: '浙江省', city: '杭州市', aliases: ['杭州', '杭州市', 'hangzhou', 'hz', '西湖', '余杭', '滨江'] },
-  { province: '浙江省', city: '宁波市', aliases: ['宁波', '宁波市', 'ningbo'] },
-
-  // 江苏省
-  { province: '江苏省', city: '南京市', aliases: ['南京', '南京市', 'nanjing', 'nj', '江宁', '雨花台'] },
-  { province: '江苏省', city: '苏州市', aliases: ['苏州', '苏州市', 'suzhou', '工业园区', '姑苏'] },
-  { province: '江苏省', city: '无锡市', aliases: ['无锡', '无锡市', 'wuxi'] },
-
-  // 四川省
-  { province: '四川省', city: '成都市', aliases: ['成都', '成都市', 'chengdu', 'cd', '高新区', '武侯', '锦江'] },
-
-  // 湖北省
-  { province: '湖北省', city: '武汉市', aliases: ['武汉', '武汉市', 'wuhan', 'wh', '光谷', '洪山', '武昌'] },
-
-  // 陕西省
-  { province: '陕西省', city: '西安市', aliases: ['西安', '西安市', 'xian', 'xa', '雁塔', '高新'] },
-
-  // 山东省
-  { province: '山东省', city: '青岛市', aliases: ['青岛', '青岛市', 'qingdao', 'qd', '市南', '崂山'] },
-  { province: '山东省', city: '济南市', aliases: ['济南', '济南市', 'jinan', 'jn', '历下'] },
-
-  // 福建省
-  { province: '福建省', city: '厦门市', aliases: ['厦门', '厦门市', 'xiamen', 'xm', '思明'] },
-  { province: '福建省', city: '福州市', aliases: ['福州', '福州市', 'fuzhou', 'fz'] },
-
-  // 湖南省
-  { province: '湖南省', city: '长沙市', aliases: ['长沙', '长沙市', 'changsha', '岳麓'] },
-
-  // 河南省
-  { province: '河南省', city: '郑州市', aliases: ['郑州', '郑州市', 'zhengzhou', '金水'] },
-
-  // 安徽省
-  { province: '安徽省', city: '合肥市', aliases: ['合肥', '合肥市', 'hefei', '蜀山'] },
-
-  // 辽宁省
-  { province: '辽宁省', city: '大连市', aliases: ['大连', '大连市', 'dalian', 'dl'] },
-  { province: '辽宁省', city: '沈阳市', aliases: ['沈阳', '沈阳市', 'shenyang'] },
-
-  // 香港 & 澳门 & 台湾
-  { province: '香港特别行政区', city: '香港', aliases: ['香港', 'hong kong', 'hk'] },
-  { province: '澳门特别行政区', city: '澳门', aliases: ['澳门', 'macau', 'mo'] },
-  { province: '台湾省', city: '台北市', aliases: ['台北', 'taipei', '台湾', 'taiwan'] },
-];
+// English abbreviations are a small overlay; Chinese names and hierarchy come only from the full catalog.
+const ENGLISH_CITY_ALIASES: Record<string, string[]> = {
+  北京市: ['beijing', 'bj'], 上海市: ['shanghai', 'sh'], 天津市: ['tianjin', 'tj'], 重庆市: ['chongqing', 'cq'],
+  广州市: ['guangzhou', 'gz'], 深圳市: ['shenzhen', 'sz'], 珠海市: ['zhuhai'], 东莞市: ['dongguan'], 佛山市: ['foshan'],
+  杭州市: ['hangzhou', 'hz'], 宁波市: ['ningbo'], 南京市: ['nanjing', 'nj'], 苏州市: ['suzhou'], 无锡市: ['wuxi'],
+  成都市: ['chengdu', 'cd'], 武汉市: ['wuhan', 'wh'], 西安市: ['xian', 'xa'], 青岛市: ['qingdao', 'qd'],
+  济南市: ['jinan', 'jn'], 厦门市: ['xiamen', 'xm'], 福州市: ['fuzhou', 'fz'], 长沙市: ['changsha'],
+  郑州市: ['zhengzhou'], 合肥市: ['hefei'], 大连市: ['dalian', 'dl'], 沈阳市: ['shenyang'],
+  香港特别行政区: ['hong kong', 'hk'], 澳门特别行政区: ['macau', 'mo'], 台北市: ['taipei'], 台湾省: ['taiwan'],
+};
+const CITY_DATABASE: CityMapping[] = Object.entries(ENGLISH_CITY_ALIASES).flatMap(([name, aliases]) => {
+  const path = findRegionPath(name);
+  return path ? [{ province: path[0], city: path[1] || path[0], aliases }] : [];
+});
 
 export class LocationResolver {
   /**
@@ -85,6 +43,8 @@ export class LocationResolver {
       return { country: '中国', province: '', city: '', raw: '' };
     }
 
+    const path = findRegionPath(rawText);
+    if (path) return { country: '中国', province: path[0], city: path[1] || path[0], district: path[2], raw: rawText };
     const lowerRaw = rawText.toLowerCase();
     const clean = lowerRaw.replace(/[\s\->—_,\./]/g, '');
 
@@ -112,7 +72,9 @@ export class LocationResolver {
         }
       } else {
         const cleanAlias = lowerAlias.replace(/[\s\->—_,\./]/g, '');
-        if (clean.includes(cleanAlias) || cleanAlias.includes(clean)) {
+        const englishToken = /^[a-z ]+$/i.test(lowerAlias)
+          && new RegExp(`(?:^|[^a-z])${lowerAlias}(?:$|[^a-z])`, 'i').test(lowerRaw);
+        if (clean === cleanAlias || englishToken) {
           return {
             country: '中国',
             province: mapping.province,
@@ -156,7 +118,7 @@ export class LocationResolver {
     // 2. 复合层级匹配 (如 "中国-北京市", "广东省-深圳市")
     for (const opt of availableOptions) {
       const cleanOpt = opt.toLowerCase().replace(/[\s\->—_,\./市省区()（）]/g, '');
-      if (cleanOpt.includes(cleanCity) || (cleanProv && cleanOpt.includes(cleanProv))) {
+      if (cleanCity && cleanOpt.includes(cleanCity) && (!canonical.district || !this.normalizeLocation(opt).district)) {
         return opt;
       }
     }

@@ -120,6 +120,7 @@ export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName
     picker.addEventListener('change', async () => {
       const file = picker.files?.[0];
       if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { showHistoryToast('问题包超过 8 MiB 限制'); return; }
       try {
         const result = await SnapshotRecorder.importProblemPackage(await file.text());
         showHistoryToast(`已导入 ${result.imported} 次运行快照（已重新脱敏）`);
@@ -129,6 +130,18 @@ export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName
       }
     }, { once: true });
     picker.click();
+  };
+
+  const handleRunReplay = async () => {
+    try {
+      const { replayRunSnapshot } = await import('@/core/pipeline/deterministicReplay');
+      const recent = JSON.parse(await SnapshotRecorder.exportProblemPackage()).sessions;
+      if (!recent.length) { showHistoryToast('暂无可回放的运行'); return; }
+      const report = await replayRunSnapshot(recent[0]);
+      showHistoryToast(report.replaySuccess
+        ? `确定性回放通过：${report.executionCount} 个执行阶段、${report.sectionCount} 个区块、${report.aiResponseCount} 次 AI 响应；未写入网页`
+        : `回放未通过：${report.differences[0]?.reason}`);
+    } catch (error) { showHistoryToast(error instanceof Error ? error.message : '回放失败'); }
   };
 
   const handleClearFillHistory = async () => {
@@ -151,6 +164,7 @@ export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName
     handleExportDiagnosticHistory,
     handleExportReplayPackage,
     handleImportReplayPackage,
+    handleRunReplay,
     handleClearFillHistory,
   };
 }

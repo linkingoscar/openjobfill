@@ -16,7 +16,7 @@ describe('privacyScrubber', () => {
     const result = scrubSensitiveData(source);
     expect(result.basics.phone).toBe('[PHONE_REDACTED]');
     expect(result.basics.email).toBe('[EMAIL_REDACTED]');
-    expect(result.basics.name).toBe('张三');
+    expect(result.basics.name).toBe('[REDACTED]');
     expect(result.notes[0]).toBe('身份证 [ID_REDACTED]');
     expect(result.notes[1].apiKey).toBe('[REDACTED]');
     expect(source.basics.phone).toBe('13800138000');

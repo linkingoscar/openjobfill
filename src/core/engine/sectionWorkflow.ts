@@ -3,6 +3,8 @@ import { simulateClick } from './dispatcher';
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 import { throwIfAborted } from '../pipeline/runContext';
 
+import { recordRunTrace } from '../pipeline/runTrace';
+
 export type SectionWorkflowState =
   | 'FIND_SECTION'
   | 'ENTER_EDIT'
@@ -29,6 +31,15 @@ export interface SectionWorkflowResult {
 
 export interface SectionRecordFillResult {
   canAdvance: boolean;
+}
+
+export interface SectionWorkflowEnvironment {
+  findRoot: () => HTMLElement | null;
+  editableScope: (root: HTMLElement) => HTMLElement;
+  enterEdit: (root: HTMLElement) => Promise<boolean>;
+  save: (root: HTMLElement) => Promise<boolean>;
+  add: (root: HTMLElement) => Promise<boolean>;
+  trace: (stage: 'section-plan' | 'section-transition' | 'section-result', payload: unknown) => void;
 }
 
 const CONTROL_SELECTOR = 'button, a, [role="button"]';
@@ -207,28 +218,44 @@ export class RepeatableSectionWorkflowRunner {
     recordCount: number,
     fillRecord: (recordIndex: number, editableScope: HTMLElement) => Promise<SectionRecordFillResult>,
     signal?: AbortSignal,
+    runId?: string,
+    environment?: SectionWorkflowEnvironment,
   ): Promise<SectionWorkflowResult> {
+    const env = environment || {
+      findRoot: () => this.findSectionRoot(config),
+      editableScope: (root: HTMLElement) => this.getEditableScope(root, config),
+      enterEdit: (root: HTMLElement) => this.enterEdit(root, config, signal),
+      save: (root: HTMLElement) => this.save(root, config, signal),
+      add: (root: HTMLElement) => this.add(root, config, signal),
+      trace: (stage: 'section-plan' | 'section-transition' | 'section-result', payload: unknown) => recordRunTrace(stage, payload, runId),
+    };
+    env.trace('section-plan', { section: config.sectionKey, recordCount, maxRecords: config.maxRecords || 10, saveAfterLast: config.saveAfterLast === true });
     const steps: SectionWorkflowStep[] = [];
+    const step = (event: SectionWorkflowStep) => {
+      steps.push(event);
+      env.trace('section-transition', { section: config.sectionKey, ...event });
+    };
     const blocked = (recordIndex: number, failureReason: string): SectionWorkflowResult => {
-      steps.push({ state: 'BLOCKED', recordIndex, success: false, message: failureReason });
+      step({ state: 'BLOCKED', recordIndex, success: false, message: failureReason });
+      env.trace('section-result', { section: config.sectionKey, success: false, completedRecords });
       return { success: false, completedRecords, steps, failureReason };
     };
     const maxRecords = Math.min(recordCount, config.maxRecords || 10, 20);
     let completedRecords = 0;
-    const root = this.findSectionRoot(config);
-    steps.push({ state: 'FIND_SECTION', recordIndex: 0, success: !!root });
+    const root = env.findRoot();
+    step({ state: 'FIND_SECTION', recordIndex: 0, success: !!root });
     if (!root) return blocked(0, '未找到重复区块');
 
     for (let index = 0; index < maxRecords; index++) {
       throwIfAborted(signal);
-      const editing = await this.enterEdit(root, config, signal);
-      steps.push({ state: 'ENTER_EDIT', recordIndex: index, success: editing });
+      const editing = await env.enterEdit(root);
+      step({ state: 'ENTER_EDIT', recordIndex: index, success: editing });
       if (!editing) {
         return blocked(index, `第 ${index + 1} 条记录无法进入编辑状态`);
       }
 
-      const result = await fillRecord(index, this.getEditableScope(root, config));
-      steps.push({ state: 'FILL_RECORD', recordIndex: index, success: result.canAdvance });
+      const result = await fillRecord(index, env.editableScope(root));
+      step({ state: 'FILL_RECORD', recordIndex: index, success: result.canAdvance });
       if (!result.canAdvance) {
         return blocked(index, `第 ${index + 1} 条记录仍有必填项未完成`);
       }
@@ -236,24 +263,25 @@ export class RepeatableSectionWorkflowRunner {
 
       const shouldSave = index < maxRecords - 1 || config.saveAfterLast === true;
       if (shouldSave) {
-        const saved = await this.save(root, config, signal);
-        steps.push({ state: 'SAVE_RECORD', recordIndex: index, success: saved });
+        const saved = await env.save(root);
+        step({ state: 'SAVE_RECORD', recordIndex: index, success: saved });
         if (!saved) {
           return blocked(index, `第 ${index + 1} 条记录无法确认保存状态`);
         }
       }
 
       if (index < maxRecords - 1) {
-        const added = await this.add(root, config, signal);
-        steps.push({ state: 'ADD_RECORD', recordIndex: index + 1, success: added });
+        const added = await env.add(root);
+        step({ state: 'ADD_RECORD', recordIndex: index + 1, success: added });
         if (!added) {
           return blocked(index + 1, `保存后未能新增第 ${index + 2} 条记录`);
         }
-        steps.push({ state: 'WAIT_FOR_EDITOR', recordIndex: index + 1, success: true });
+        step({ state: 'WAIT_FOR_EDITOR', recordIndex: index + 1, success: true });
       }
     }
 
-    steps.push({ state: 'COMPLETE', recordIndex: Math.max(0, maxRecords - 1), success: true });
+    step({ state: 'COMPLETE', recordIndex: Math.max(0, maxRecords - 1), success: true });
+    env.trace('section-result', { section: config.sectionKey, success: true, completedRecords });
     return { success: true, completedRecords, steps };
   }
 }

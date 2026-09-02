@@ -50,11 +50,13 @@ import { inspectFieldSafety } from '@/core/pipeline/fieldSafety';
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 import { extractPageJobSnapshot, isApplicationSuccessPage, type PageJobSnapshot } from '@/core/tracker/pageJobExtractor';
 import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
-import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/utils/dom';
+import { generateOptimalSelector } from '@/utils/dom';
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
 import { createApplicationId } from '@/core/tracker/trackerSchema';
+import { createPageFocusTracker } from '@/core/ui/pageFocus';
+import { buildResumeClipboardItems } from '@/core/schema/resumeFieldRegistry';
 import type { ClipboardItem } from '@/types/floatingBall';
 import { useFloatingPosition } from './composables/useFloatingPosition';
 
@@ -261,6 +263,7 @@ const {
   handleExportDiagnosticHistory,
   handleExportReplayPackage,
   handleImportReplayPackage,
+  handleRunReplay,
   handleClearFillHistory,
 } = useFillHistory(copyToastMessage, currentAdapterName);
 
@@ -297,7 +300,9 @@ const handleSwitchResume = async (e: Event) => {
   }, 2500);
 };
 
+const pageFocus = createPageFocusTracker();
 onMounted(async () => {
+  pageFocus.start();
   loadFloatingPosition();
   const enhancer = getEnhancerForUrl(window.location.href, document);
   currentAdapterName.value = enhancer?.name || '智能通用决策引擎 (Pipeline v2)';
@@ -309,6 +314,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  pageFocus.stop();
   window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('resize', handleViewportResize);
   cleanupFloatingPosition();
@@ -532,104 +538,9 @@ const toggleDrawer = async () => {
 };
 
 // 提取结构化简历平铺字段 (供速查剪贴板使用)
-const flatResumeFields = computed<ClipboardItem[]>(() => {
-  if (!currentResume.value) return [];
-  const r = currentResume.value;
-  const list: ClipboardItem[] = [];
-
-  // 基本信息
-  if (r.basics.name) list.push({ id: 'b-name', category: '基本信息', label: '姓名', value: r.basics.name });
-  if (r.basics.gender) list.push({ id: 'b-gender', category: '基本信息', label: '性别', value: r.basics.gender });
-  if (r.basics.phone) list.push({ id: 'b-phone', category: '基本信息', label: '手机号码', value: r.basics.phone });
-  if (r.basics.email) list.push({ id: 'b-email', category: '基本信息', label: '电子邮箱', value: r.basics.email });
-  if (r.basics.idCardNumber) list.push({ id: 'b-idcard', category: '基本信息', label: '身份证号', value: r.basics.idCardNumber });
-  if (r.basics.birthDate) list.push({ id: 'b-birth', category: '基本信息', label: '出生日期', value: r.basics.birthDate });
-  if (r.basics.politicalStatus) list.push({ id: 'b-politics', category: '基本信息', label: '政治面貌', value: r.basics.politicalStatus });
-  if (r.basics.ethnicity) list.push({ id: 'b-ethnicity', category: '基本信息', label: '民族', value: r.basics.ethnicity });
-  if (r.basics.maritalStatus) list.push({ id: 'b-marital', category: '基本信息', label: '婚姻状况', value: r.basics.maritalStatus });
-  if (r.basics.currentLocation?.city) list.push({ id: 'b-city', category: '基本信息', label: '现居城市', value: r.basics.currentLocation.city });
-  if (r.basics.nativePlace?.city) list.push({ id: 'b-native', category: '基本信息', label: '籍贯', value: r.basics.nativePlace.city });
-  if (r.basics.birthPlace?.city) list.push({ id: 'b-birth-place', category: '基本信息', label: '出生地', value: r.basics.birthPlace.city });
-  if (r.basics.expectedRole) list.push({ id: 'b-role', category: '基本信息', label: '期望职位', value: r.basics.expectedRole });
-  if (r.basics.expectedCity) list.push({ id: 'b-exp-city', category: '基本信息', label: '期望工作城市', value: r.basics.expectedCity });
-  if (r.basics.expectedSalaryMin) list.push({ id: 'b-salary', category: '基本信息', label: '期望月薪(k)', value: `${r.basics.expectedSalaryMin}k` });
-  if (r.basics.githubUrl) list.push({ id: 'b-github', category: '基本信息', label: 'GitHub', value: r.basics.githubUrl });
-  if (r.basics.linkedinUrl) list.push({ id: 'b-linkedin', category: '基本信息', label: 'LinkedIn', value: r.basics.linkedinUrl });
-  if (r.basics.blogUrl) list.push({ id: 'b-blog', category: '基本信息', label: '个人网站/博客', value: r.basics.blogUrl });
-  if (r.basics.hobbies) list.push({ id: 'b-hobbies', category: '基本信息', label: '兴趣爱好 / 特长', value: r.basics.hobbies });
-
-  // 教育经历 (支持所有段)
-  r.educations?.forEach((edu, idx) => {
-    const prefix = `[教育${idx + 1}] `;
-    if (edu.schoolName) list.push({ id: `edu-${idx}-school`, category: '教育经历', label: `${prefix}就读学校`, value: edu.schoolName });
-    if (edu.degree) list.push({ id: `edu-${idx}-degree`, category: '教育经历', label: `${prefix}学历层次`, value: edu.degree });
-    if (edu.major) list.push({ id: `edu-${idx}-major`, category: '教育经历', label: `${prefix}所学专业`, value: edu.major });
-    if (edu.startDate || edu.endDate) list.push({ id: `edu-${idx}-date`, category: '教育经历', label: `${prefix}就读起止时间`, value: `${edu.startDate} 至 ${edu.endDate}` });
-    if (edu.gpa) list.push({ id: `edu-${idx}-gpa`, category: '教育经历', label: `${prefix}GPA / 成绩排名`, value: edu.gpa });
-    if (edu.courses) list.push({ id: `edu-${idx}-courses`, category: '教育经历', label: `${prefix}主修核心课程`, value: edu.courses });
-  });
-
-  // 工作与实习经历 (支持所有段)
-  r.experiences?.forEach((exp, idx) => {
-    const prefix = `[经历${idx + 1}] `;
-    if (exp.company) list.push({ id: `exp-${idx}-company`, category: '工作实习', label: `${prefix}公司/单位名称`, value: exp.company });
-    if (exp.title) list.push({ id: `exp-${idx}-title`, category: '工作实习', label: `${prefix}职位岗位`, value: exp.title });
-    if (exp.startDate || exp.endDate) list.push({ id: `exp-${idx}-date`, category: '工作实习', label: `${prefix}任职时间`, value: `${exp.startDate} 至 ${exp.endDate}` });
-    if (exp.description) list.push({ id: `exp-${idx}-desc`, category: '工作实习', label: `${prefix}工作内容与成果`, value: exp.description });
-  });
-
-  // 项目经历 (支持所有段)
-  r.projects?.forEach((proj, idx) => {
-    const prefix = `[项目${idx + 1}] `;
-    if (proj.projectName) list.push({ id: `proj-${idx}-name`, category: '项目经历', label: `${prefix}项目名称`, value: proj.projectName });
-    if (proj.role) list.push({ id: `proj-${idx}-role`, category: '项目经历', label: `${prefix}担任角色`, value: proj.role });
-    if (proj.startDate || proj.endDate) list.push({ id: `proj-${idx}-date`, category: '项目经历', label: `${prefix}项目周期`, value: `${proj.startDate} 至 ${proj.endDate}` });
-    if (proj.techStack) list.push({ id: `proj-${idx}-tech`, category: '项目经历', label: `${prefix}涉及技术栈`, value: proj.techStack });
-    if (proj.description) list.push({ id: `proj-${idx}-desc`, category: '项目经历', label: `${prefix}项目描述`, value: proj.description });
-  });
-
-  // 技能与证书
-  r.skills?.forEach((skill, idx) => {
-    if (skill.name) list.push({ id: `skill-${idx}`, category: '技能证书', label: `专业技能: ${skill.name}`, value: skill.level ? `${skill.name} (${skill.level})` : skill.name });
-  });
-  r.languages?.forEach((lang, idx) => {
-    if (lang.score || lang.language) list.push({ id: `lang-${idx}`, category: '技能证书', label: `${lang.language || '外语'}成绩`, value: `${lang.certificateName || ''} ${lang.score || ''}`.trim() });
-  });
-  r.certificates?.forEach((cert, idx) => {
-    if (cert.name) list.push({ id: `cert-${idx}`, category: '技能证书', label: `证书: ${cert.name}`, value: cert.name });
-  });
-
-  // 家庭与紧急联系人
-  r.familyMembers?.forEach((fm, idx) => {
-    const prefix = `[联系人${idx + 1}] `;
-    if (fm.name) list.push({ id: `fm-${idx}-name`, category: '家庭成员', label: `${prefix}姓名 (${fm.relation})`, value: fm.name });
-    if (fm.phone) list.push({ id: `fm-${idx}-phone`, category: '家庭成员', label: `${prefix}联系电话`, value: fm.phone });
-    if (fm.company) list.push({ id: `fm-${idx}-company`, category: '家庭成员', label: `${prefix}工作单位`, value: fm.company });
-    if (fm.hukouLocation) list.push({ id: `fm-${idx}-hukou`, category: '家庭成员', label: `${prefix}户籍所在地`, value: fm.hukouLocation });
-  });
-
-  r.awards?.forEach((award, idx) => {
-    if (award.name) list.push({ id: `award-${idx}`, category: '成果荣誉', label: `奖项 ${idx + 1}`, value: award.name });
-  });
-  r.academicAchievements?.forEach((achievement, idx) => {
-    if (achievement.title) list.push({ id: `academic-${idx}`, category: '成果荣誉', label: `学术成果 ${idx + 1}`, value: achievement.title });
-  });
-  r.campusExperiences?.forEach((campus, idx) => {
-    if (campus.organization) list.push({ id: `campus-${idx}`, category: '校园经历', label: `${campus.organization} · ${campus.title}`, value: campus.description || campus.responsibility || campus.title });
-  });
-
-  // 问答与自我评价
-  if (r.basics.selfEvaluation) {
-    list.push({ id: 'qa-self-eval', category: '问答与评价', label: '自我评价 / 个人优势', value: r.basics.selfEvaluation });
-  }
-  r.qaBank?.forEach((qa, idx) => {
-    if (qa.keyword && qa.answer) {
-      list.push({ id: `qa-${idx}`, category: '问答与评价', label: `问答: ${qa.keyword}`, value: qa.answer });
-    }
-  });
-
-  return list;
-});
+const flatResumeFields = computed<ClipboardItem[]>(() =>
+  currentResume.value ? buildResumeClipboardItems(currentResume.value) : [],
+);
 
 const filteredFields = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
@@ -644,13 +555,14 @@ const filteredFields = computed(() => {
 // 一键复制或填入当前聚焦元素
 const handleCopyField = async (item: ClipboardItem) => {
   try {
+    const target = pageFocus.getTarget();
     await navigator.clipboard.writeText(item.value);
     copiedFieldKey.value = item.id;
     copyToastMessage.value = `已复制【${item.label}】`;
 
     // 智能点填：如果当前页面有聚焦的输入框，顺手写入
-    const activeEl = document.activeElement;
-    if (activeEl && (isInputElement(activeEl) || isTextAreaElement(activeEl))) {
+    const activeEl = target === pageFocus.getTarget() ? target : null;
+    if (activeEl) {
       const safety = inspectFieldSafety(activeEl as HTMLElement, '', activeEl.closest('.el-form-item, .ant-form-item, .form-item, .form-group, fieldset, tr')?.textContent || '');
       if (!safety.blocked && setNativeValue(activeEl, item.value)) {
         copyToastMessage.value = `已复制并自动填入当前输入框！`;
@@ -1098,10 +1010,12 @@ defineExpose({
               :loading="isHistoryLoading"
               :max-records="MAX_FILL_HISTORY_RECORDS"
               :format-time="formatHistoryTime"
+              :feedback="copyToastMessage"
               @copy="handleCopyDiagnosticHistory"
               @export="handleExportDiagnosticHistory"
               @replay-export="handleExportReplayPackage"
               @replay-import="handleImportReplayPackage"
+              @replay-run="handleRunReplay"
               @clear="handleClearFillHistory"
             />
           </div>

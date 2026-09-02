@@ -29,6 +29,8 @@ import { getValueByPath } from '../../utils/objectPath';
 import { findAssociatedLabelText, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 import { FillRunAbortedError, throwIfAborted } from '../pipeline/runContext';
 
+import { recordRunTrace } from '../pipeline/runTrace';
+
 export interface UnmatchedFieldEntry {
   element: HTMLElement;
   descriptor: UnmatchedFieldDescriptor;
@@ -149,20 +151,27 @@ async function requestFieldMapping(
   fields: UnmatchedFieldDescriptor[],
   options: ResumeKeyOption[],
   signal?: AbortSignal,
+  runId?: string,
 ): Promise<FieldIndexMapping | null> {
   try {
+    recordRunTrace('ai-request', { fields, options }, runId);
     const request = chrome.runtime.sendMessage({
       type: 'AI_MAP_FIELDS',
       payload: { settings, fields, options },
     });
     const response = await raceWithSignal(request, signal) as AIFieldMappingResponse;
 
+    const allowedKeys = new Set(options.map((option) => option.resumeKey));
+    const allowedIndices = new Set(fields.map((field) => String(field.index)));
+    const safeMapping = Object.fromEntries(Object.entries(response?.mapping || {}).filter(([index, key]) => allowedIndices.has(index) && typeof key === 'string' && allowedKeys.has(key)));
+    recordRunTrace('ai-response', { success: !!response?.success, mapping: safeMapping }, runId);
     if (!response?.success || !response.mapping) {
       console.warn('[OpenJobFill] AI 映射失败：', response?.error || '无映射返回');
       return null;
     }
-    return response.mapping;
+    return safeMapping;
   } catch (err: any) {
+    recordRunTrace('ai-response', { success: false, mapping: {}, aborted: !!signal?.aborted }, runId);
     console.warn('[OpenJobFill] AI 映射消息异常：', err?.message || err);
     return null;
   }
@@ -198,6 +207,12 @@ export async function tryAIFallback(
     filledElements: new Set(),
     matchedKeys: new Set(),
   };
+
+  for (const entry of unmatched) {
+    if (mapping[entry.descriptor.index]) continue;
+    outcome.skippedCount++;
+    outcome.logs.push({ status: 'skipped', label: entry.descriptor.label || entry.descriptor.placeholder, field: '', value: '', message: 'AI 未返回允许的有值字段映射，已跳过' });
+  }
 
   for (const [indexStr, resumeKey] of Object.entries(mapping)) {
     const entry = unmatched[Number(indexStr)];
@@ -287,6 +302,7 @@ export async function applyAIFallbackToPlan(
   plan: FillPlan,
   resume: StandardResume,
   signal?: AbortSignal,
+  runId?: string,
 ): Promise<{ appliedCount: number }> {
   throwIfAborted(signal);
   const settings = await getAISettings();
@@ -313,7 +329,7 @@ export async function applyAIFallbackToPlan(
     inputType: item.field.type,
   }));
 
-  const mapping = await requestFieldMapping(settings, fields, options, signal);
+  const mapping = await requestFieldMapping(settings, fields, options, signal, runId);
   if (!mapping) return { appliedCount: 0 };
 
   let appliedCount = 0;
@@ -321,7 +337,7 @@ export async function applyAIFallbackToPlan(
   for (const [indexStr, resumeKey] of Object.entries(mapping)) {
     throwIfAborted(signal);
     const item = candidates[Number(indexStr)];
-    if (!item) continue;
+    if (!item || !options.some((option) => option.resumeKey === resumeKey)) continue;
 
     // 护栏：身份排斥二次校验 + 简历必须有值，否则保持 NEEDS_USER
     if (!isSafeMapping(item.field.element, resumeKey)) continue;

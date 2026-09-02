@@ -5,7 +5,7 @@
  * 传给 LLM 的只有"字段标签"与"简历字段名清单"，简历的实际内容不参与。
  */
 import type { StandardResume } from '../../types/resume';
-import { RESUME_DICTIONARY } from '../matcher/dictionary';
+import { enumerateResumeFields } from '../schema/resumeFieldRegistry';
 import type {
   UnmatchedFieldDescriptor,
   ResumeKeyOption,
@@ -20,55 +20,10 @@ const MAX_FIELDS_PER_CALL = 25;
  * 只取 key 与可读标签，不取值本身。
  */
 export function buildResumeKeyOptions(resume: StandardResume): ResumeKeyOption[] {
-  const options: ResumeKeyOption[] = [];
-  const seen = new Set<string>();
-
-  const push = (resumeKey: string, label: string) => {
-    if (!seen.has(resumeKey)) {
-      seen.add(resumeKey);
-      options.push({ resumeKey, label });
-    }
-  };
-
-  // 基本字段：沿用词典里的可读名称
-  for (const item of RESUME_DICTIONARY) {
-    if (item.resumeKey.startsWith('basics.')) {
-      push(item.resumeKey, item.name);
-    }
-  }
-
-  resume.educations?.forEach((edu, i) => {
-    const n = i + 1;
-    if (edu.schoolName) push(`educations.${i}.schoolName`, `毕业院校(${n})`);
-    if (edu.major) push(`educations.${i}.major`, `专业(${n})`);
-    if (edu.degree) push(`educations.${i}.degree`, `学历(${n})`);
-    if (edu.gpa) push(`educations.${i}.gpa`, `GPA(${n})`);
-  });
-
-  resume.experiences?.forEach((exp, i) => {
-    const n = i + 1;
-    if (exp.company) push(`experiences.${i}.company`, `公司(${n})`);
-    if (exp.title) push(`experiences.${i}.title`, `职位(${n})`);
-    if (exp.description) push(`experiences.${i}.description`, `工作内容(${n})`);
-  });
-
-  resume.projects?.forEach((proj, i) => {
-    const n = i + 1;
-    if (proj.projectName) push(`projects.${i}.projectName`, `项目名称(${n})`);
-    if (proj.role) push(`projects.${i}.role`, `项目角色(${n})`);
-  });
-
-  // 家属字段：专门承接"紧急联系人 / 家属"这类第三方字段，
-  // 让 LLM 有正确的映射目标，避免退而求其次填成本人信息
-  resume.familyMembers?.forEach((fm, i) => {
-    const n = i + 1;
-    if (fm.name) push(`familyMembers.${i}.name`, `家属姓名(${n})`);
-    if (fm.relation) push(`familyMembers.${i}.relation`, `家属关系(${n})`);
-    if (fm.phone) push(`familyMembers.${i}.phone`, `家属电话(${n})`);
-    if (fm.company) push(`familyMembers.${i}.company`, `家属单位(${n})`);
-  });
-
-  return options;
+  return enumerateResumeFields(resume)
+    // Domain-scoped QA answers are handled by the dedicated rule matcher, never by general AI mapping.
+    .filter(({ definition }) => definition.fillable && definition.group !== 'qaBank')
+    .map(({ path, label }) => ({ resumeKey: path, label }));
 }
 
 /**

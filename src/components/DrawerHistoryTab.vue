@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Copy, Download, History, Trash2, Upload, Package } from 'lucide-vue-next';
+import { Copy, Download, History, Trash2, Upload, Package, Play } from 'lucide-vue-next';
 import type { FillHistoryRecord } from '@/types/fillHistory';
 
 defineProps<{
@@ -7,6 +7,7 @@ defineProps<{
   loading: boolean;
   maxRecords: number;
   formatTime: (value: string) => string;
+  feedback?: string;
 }>();
 
 const emit = defineEmits<{
@@ -14,6 +15,7 @@ const emit = defineEmits<{
   (event: 'export'): void;
   (event: 'replay-export'): void;
   (event: 'replay-import'): void;
+  (event: 'replay-run'): void;
   (event: 'clear'): void;
 }>();
 </script>
@@ -41,12 +43,16 @@ const emit = defineEmits<{
         <button type="button" @click="emit('replay-import')" class="p-1.5 rounded-md text-slate-500 hover:text-violet-600 hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500" title="导入运行回放问题包" aria-label="导入运行回放问题包">
           <Upload class="w-3.5 h-3.5" aria-hidden="true" />
         </button>
+        <button type="button" @click="emit('replay-run')" class="p-1.5 rounded-md text-slate-500 hover:text-violet-600 focus-visible:ring-2 focus-visible:ring-violet-500" title="离线回放最近运行（不写网页）" aria-label="离线回放最近运行（不写网页）">
+          <Play class="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
         <button type="button" @click="emit('clear')" :disabled="records.length === 0" class="p-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-rose-500" title="清空填表历史" aria-label="清空填表历史">
           <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
         </button>
       </div>
     </div>
 
+    <p v-if="feedback" role="status" aria-live="polite" class="text-xs text-violet-700 bg-violet-50 rounded p-2 mb-2">{{ feedback }}</p>
     <p class="text-[10px] text-slate-400 mb-2 leading-relaxed">
       不保存字段实际填写值；错误文本中的联系方式、证件号和期望/实际值会自动隐藏。
     </p>

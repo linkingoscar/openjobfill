@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { RepeatableSectionWorkflowRunner } from '@/core/engine/sectionWorkflow';
 import type { RepeatableWorkflowConfig } from '@/types/siteProfile';
+import { SnapshotRecorder } from '@/core/pipeline/snapshotRecorder';
+import { replayRunSnapshot } from '@/core/pipeline/deterministicReplay';
 
 const CONFIG: RepeatableWorkflowConfig = {
   sectionKey: 'education',
@@ -35,12 +37,13 @@ describe('受控重复区块状态机', () => {
     root.querySelector('.add')!.addEventListener('click', () => root.prepend(card(root.querySelectorAll('.record-card').length)));
 
     const filled: number[] = [];
+    const session = SnapshotRecorder.start('', '', 'section-deterministic-replay');
     const result = await new RepeatableSectionWorkflowRunner().run(CONFIG, 2, async (index, scope) => {
       const input = scope.querySelector<HTMLInputElement>('input')!;
       input.value = `学校${index + 1}`;
       filled.push(index);
       return { canAdvance: true };
-    });
+    }, undefined, session.sessionId);
 
     expect(result.success).toBe(true);
     expect(result.completedRecords).toBe(2);
@@ -49,6 +52,12 @@ describe('受控重复区块状态机', () => {
       'FIND_SECTION', 'ENTER_EDIT', 'FILL_RECORD', 'SAVE_RECORD', 'ADD_RECORD', 'WAIT_FOR_EDITOR',
       'ENTER_EDIT', 'FILL_RECORD', 'SAVE_RECORD', 'COMPLETE',
     ]);
+    const before = root.innerHTML;
+    expect(await replayRunSnapshot(session)).toMatchObject({ replaySuccess: true, sectionCount: 1 });
+    expect(root.innerHTML).toBe(before);
+    const transition = session.records.find((record) => record.stage === 'section-transition' && (record.payload as any).state === 'ADD_RECORD')!;
+    (transition.payload as any).recordIndex = 9;
+    expect((await replayRunSnapshot(session)).replaySuccess).toBe(false);
   });
 
   it('即使文案为保存，也绝不点击 submit 类型按钮', async () => {

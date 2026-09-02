@@ -7,15 +7,34 @@ import { sleep } from '../../utils/dom';
 import { inspectFieldSafety } from './fieldSafety';
 import { throwIfAborted, isFillRunAbortedError } from './runContext';
 
+import { recordRunTrace, type RunTraceStage } from './runTrace';
+
+export interface ExecutionEnvironment {
+  strategiesForField: typeof retryLadder.getStrategiesForField;
+  inspectSafety: typeof inspectFieldSafety;
+  wait: typeof sleep;
+  decorate: typeof decorateElement;
+  trace: (stage: RunTraceStage, payload: unknown) => void;
+}
+
 export class PipelineExecutor {
   /**
    * 调度执行 FillPlan，执行 Write -> Read-Back -> Verify -> Retry 闭环
    */
   async executePlan(
     plan: FillPlan,
-    options: { signal?: AbortSignal; runId?: string; pageUrl?: string } = {},
+    options: { signal?: AbortSignal; runId?: string; pageUrl?: string; environment?: ExecutionEnvironment } = {},
   ): Promise<PipelineExecutionResult> {
     const signal = options.signal;
+    const env: ExecutionEnvironment = options.environment || {
+      strategiesForField: retryLadder.getStrategiesForField.bind(retryLadder),
+      inspectSafety: inspectFieldSafety, wait: sleep, decorate: decorateElement,
+      trace: (stage, payload) => recordRunTrace(stage, payload, options.runId),
+    };
+    env.trace('execution-plan', { items: plan.items.map((item) => ({
+      id: item.id, action: item.action, semanticKey: item.semanticKey, driverType: item.driverType,
+      field: { id: item.field.id, type: item.field.type, required: item.field.required },
+    })) });
     const startTime = Date.now();
     const logs: FillLogItem[] = [];
     const remainingTasks: RemainingTaskItem[] = [];
@@ -32,7 +51,8 @@ export class PipelineExecutor {
 
       // 最终写入闸门再次读取实时 DOM 语义，防止分析之后字段被替换为
       // 密码、验证码、支付或提交相关控件时仍沿用旧计划。
-      const safety = inspectFieldSafety(field.element, label, field.contextText);
+      const safety = env.inspectSafety(field.element, label, field.contextText);
+      env.trace('field-gate', { fieldId: field.id, blocked: safety.blocked });
       if (safety.blocked) {
         skippedCount++;
         logs.push({
@@ -73,7 +93,7 @@ export class PipelineExecutor {
           locator: field.locator,
         });
 
-        decorateElement(field.element, {
+        env.decorate(field.element, {
           status: 'warning',
           label: `[需人工] ${label}`,
           value: '',
@@ -91,10 +111,11 @@ export class PipelineExecutor {
       }
 
       // 3. 执行填表 (FILL) 并进行读回验证 (Read-Back)
-      const strategies = retryLadder.getStrategiesForField(field, item.driverType, {
+      const strategies = env.strategiesForField(field, item.driverType, {
         runId: options.runId,
         pageUrl: options.pageUrl,
       });
+      env.trace('adapter-route', { fieldId: field.id, strategies: strategies.map((strategy) => ({ name: strategy.name, adapterId: strategy.adapterId, executionWorld: strategy.executionWorld })) });
       let isSuccess = false;
       let actualReadValue: any = null;
       const attempts: Array<{
@@ -113,13 +134,14 @@ export class PipelineExecutor {
             executionWorld: strategy.executionWorld,
           };
           const handled = await strategy.execute(field, item.targetValue, signal);
+          env.trace('adapter-attempt', { fieldId: field.id, strategy: strategy.name, handled });
           if (!handled) {
             attempts.push({ strategy: strategy.name, outcome: 'not_handled', ...attemptMeta });
             continue;
           }
           
           // 等待 DOM / Vue / React 受控状态响应
-          await sleep(50, signal);
+          await env.wait(50, signal);
           throwIfAborted(signal);
 
           // 读回验证 (Read-Back)
@@ -133,6 +155,7 @@ export class PipelineExecutor {
             item.driverType,
           );
 
+          env.trace('read-back', { fieldId: field.id, strategy: strategy.name, equivalent: isEquivalent });
           if (isEquivalent) {
             attempts.push({ strategy: strategy.name, outcome: 'success', ...attemptMeta });
             isSuccess = true;
@@ -146,6 +169,7 @@ export class PipelineExecutor {
           }
         } catch (err) {
           if (signal?.aborted || isFillRunAbortedError(err)) throw err;
+          env.trace('adapter-attempt', { fieldId: field.id, strategy: strategy.name, error: true });
           attempts.push({
             strategy: strategy.name,
             outcome: 'error',
@@ -167,7 +191,7 @@ export class PipelineExecutor {
           attempts,
         });
 
-        decorateElement(field.element, {
+        env.decorate(field.element, {
           status: 'success',
           label,
           value: String(item.targetValue),
@@ -194,7 +218,7 @@ export class PipelineExecutor {
           locator: field.locator,
         });
 
-        decorateElement(field.element, {
+        env.decorate(field.element, {
           status: 'warning',
           label: `[验证未通过] ${label}`,
           value: String(item.targetValue),
@@ -214,6 +238,7 @@ export class PipelineExecutor {
       }
     }
 
+    env.trace('execution-result', { filledCount, skippedCount, failedCount, verifiedCount });
     return {
       success: filledCount > 0,
       filledCount,

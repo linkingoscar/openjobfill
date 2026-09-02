@@ -206,7 +206,21 @@ async function main() {
       'PhoenixInput 应通过受限 MAIN-world Adapter 完成，而不是静默降级',
     );
 
-    console.log('extension smoke passed: shadow UI sizing + persistence + MAIN-world PhoenixInput + preview fill');
+    await reopenedHost.getByRole('button', { name: '离线回放最近运行（不写网页）' }).click();
+    await reopenedHost.getByText(/确定性回放通过/).waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await reopenedPage.locator('input[name="candidateName"]').inputValue(), 'Smoke Persistence Candidate', '回放不得修改真实页面');
+
+    // Real Chromium focus crosses the extension Shadow DOM, including its search box.
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: url });
+    await reopenedPage.locator('input[name="candidateName"]').fill('before clipboard fill');
+    await reopenedPage.locator('input[name="candidateName"]').focus();
+    await reopenedHost.locator('#drawer-tab-clipboard').click();
+    await reopenedHost.getByRole('textbox', { name: '搜索简历字段' }).fill('姓名');
+    await reopenedHost.getByRole('button', { name: '复制 基本信息 姓名: Smoke Persistence Candidate', exact: true }).click();
+    await reopenedPage.waitForFunction(() => document.querySelector('input[name="candidateName"]')?.value === 'Smoke Persistence Candidate');
+    assert.equal(await reopenedHost.getByRole('textbox', { name: '搜索简历字段' }).inputValue(), '姓名', '点填不能覆盖扩展自己的搜索框');
+
+    console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + deterministic replay + clipboard focus');
   } finally {
     await context?.close().catch(() => {});
     await new Promise((resolve) => server.close(resolve));

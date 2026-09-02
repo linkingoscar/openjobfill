@@ -7,11 +7,14 @@ import type { SiteProfileMatchTrace } from '../../types/siteProfile';
 import type { PlatformEnhancerMatchTrace } from '../adapters/enhancers';
 import { getMatchingControlAdapters } from '../adapters/controlAdapters';
 
-export type SnapshotStage = 'scan' | 'plan' | 'fill' | 'error';
-export type SnapshotSchemaVersion = 1 | 2;
+import { setRunTraceSink, type RunTraceStage } from './runTrace';
+
+export type SnapshotStage = 'scan' | 'plan' | 'fill' | 'error' | RunTraceStage;
+export type SnapshotSchemaVersion = 1 | 2 | 3;
 
 export interface SnapshotRecord {
   stage: SnapshotStage;
+  sequence?: number;
   timestamp: number;
   durationMs?: number;
   payload: unknown;
@@ -26,6 +29,7 @@ export interface FillSnapshotSession {
   pageTitle: string;
   createdAt: number;
   records: SnapshotRecord[];
+  truncated?: boolean;
   summary?: {
     totalFields: number;
     filledFields: number;
@@ -35,7 +39,7 @@ export interface FillSnapshotSession {
 }
 
 export interface SnapshotProblemPackage {
-  schemaVersion: 2;
+  schemaVersion: 3;
   product: 'OpenJobFill';
   exportedAt: string;
   redaction: {
@@ -97,10 +101,12 @@ export interface AssociationDryRunReport {
 }
 
 export const MAX_REPLAY_SNAPSHOTS = 10;
+export const MAX_RECORDS_PER_RUN = 6000;
+export const MAX_PROBLEM_PACKAGE_BYTES = 8 * 1024 * 1024;
 export const SNAPSHOT_STORAGE_KEY = 'openjobfill_replay_snapshots';
 const LEGACY_SNAPSHOT_STORAGE_KEY = 'openjobfill_last_replay_snapshot';
 const MAX_LABEL_LENGTH = 180;
-const SNAPSHOT_STAGES = new Set<SnapshotStage>(['scan', 'plan', 'fill', 'error']);
+const SNAPSHOT_STAGES = new Set<SnapshotStage>(['scan', 'plan', 'fill', 'error', 'ai-request', 'ai-response', 'execution-plan', 'field-gate', 'adapter-route', 'adapter-attempt', 'read-back', 'execution-result', 'section-plan', 'section-transition', 'section-result', 'context-invalidated']);
 
 function isExtensionEnv(): boolean {
   try {
@@ -127,6 +133,7 @@ function normalizeSnapshotRecord(value: unknown): SnapshotRecord | null {
   if (!isRecord(value) || !SNAPSHOT_STAGES.has(value.stage)) return null;
   return {
     stage: value.stage,
+    sequence: Number.isInteger(value.sequence) ? value.sequence : undefined,
     timestamp: typeof value.timestamp === 'number' ? value.timestamp : Date.now(),
     durationMs: typeof value.durationMs === 'number' ? value.durationMs : undefined,
     payload: scrubSensitiveData(value.payload),
@@ -135,20 +142,21 @@ function normalizeSnapshotRecord(value: unknown): SnapshotRecord | null {
 
 function normalizeSnapshotSession(value: unknown): FillSnapshotSession | null {
   if (!isRecord(value) || typeof value.sessionId !== 'string' || !Array.isArray(value.records)) return null;
-  const records = value.records
+  const records = value.records.slice(0, MAX_RECORDS_PER_RUN)
     .map(normalizeSnapshotRecord)
     .filter((record): record is SnapshotRecord => !!record);
   const sessionId = value.sessionId.slice(0, 160);
   const runId = typeof value.runId === 'string' ? value.runId.slice(0, 160) : sessionId;
   const rawSummary = isRecord(value.summary) ? value.summary : undefined;
   return scrubSensitiveData({
-    schemaVersion: value.schemaVersion === 1 ? 1 : 2,
+    schemaVersion: value.schemaVersion === 3 ? 3 : value.schemaVersion === 1 ? 1 : 2,
     sessionId,
     runId,
     pageUrl: safePageUrl(typeof value.pageUrl === 'string' ? value.pageUrl : ''),
     pageTitle: String(value.pageTitle || '').slice(0, 180),
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : Date.now(),
     records,
+    truncated: value.truncated === true || value.records.length > MAX_RECORDS_PER_RUN,
     summary: rawSummary ? {
       totalFields: Number(rawSummary.totalFields) || 0,
       filledFields: Number(rawSummary.filledFields) || 0,
@@ -349,6 +357,8 @@ export class SnapshotRecorder {
     if (session.runId && session.runId !== session.sessionId) this.sessions.set(session.runId, session);
     this.recentSessions = [session, ...this.recentSessions.filter((item) => item.sessionId !== session.sessionId)]
       .slice(0, MAX_REPLAY_SNAPSHOTS);
+    const retained = new Set(this.recentSessions.flatMap((item) => [item.sessionId, item.runId]));
+    for (const key of this.sessions.keys()) if (!retained.has(key)) this.sessions.delete(key);
     if (makeCurrent) {
       this.current = session;
       this.currentRunId = session.runId || session.sessionId;
@@ -371,7 +381,10 @@ export class SnapshotRecorder {
     const stored = await readStorage([SNAPSHOT_STORAGE_KEY, LEGACY_SNAPSHOT_STORAGE_KEY]);
     const persisted = parseStoredSessions(stored[SNAPSHOT_STORAGE_KEY]);
     if (persisted.length === 0) persisted.push(...parseStoredSessions(stored[LEGACY_SNAPSHOT_STORAGE_KEY]));
-    for (const session of persisted.reverse()) this.remember(session, false);
+    const liveIds = new Set(this.recentSessions.map((session) => session.sessionId));
+    const merged = [...this.recentSessions, ...persisted.filter((session) => !liveIds.has(session.sessionId))]
+      .sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_REPLAY_SNAPSHOTS);
+    for (const session of [...merged].reverse()) this.remember(session, false);
   }
 
   static start(
@@ -382,7 +395,7 @@ export class SnapshotRecorder {
     const createdAt = Date.now();
     const sessionId = runId || `session-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     return this.remember({
-      schemaVersion: 2,
+      schemaVersion: 3,
       sessionId,
       runId: sessionId,
       pageUrl: safePageUrl(pageUrl),
@@ -398,8 +411,10 @@ export class SnapshotRecorder {
       typeof document !== 'undefined' ? document.title : '',
       runId,
     );
+    if (session.records.length >= MAX_RECORDS_PER_RUN) { session.truncated = true; return; }
     session.records.push({
       stage,
+      sequence: session.records.length,
       timestamp: Date.now(),
       durationMs,
       payload: scrubSensitiveData(payload),
@@ -459,7 +474,7 @@ export class SnapshotRecorder {
       ? (selected ? [selected] : [])
       : this.recentSessions;
     const problemPackage: SnapshotProblemPackage = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       product: 'OpenJobFill',
       exportedAt: new Date().toISOString(),
       redaction: {
@@ -475,6 +490,7 @@ export class SnapshotRecorder {
   static async importProblemPackage(input: string | unknown): Promise<SnapshotImportResult> {
     let parsed: unknown = input;
     if (typeof input === 'string') {
+      if (new TextEncoder().encode(input).byteLength > MAX_PROBLEM_PACKAGE_BYTES) throw new Error('问题包超过 8 MiB 限制');
       try {
         parsed = JSON.parse(input);
       } catch {
@@ -541,3 +557,5 @@ export async function replaySnapshot<T>(
 // Kept as a type-only import anchor for consumers that want to narrow locator payloads
 // without importing the whole pipeline type module at runtime.
 export type SnapshotLocator = FieldLocatorEvidence;
+
+setRunTraceSink((stage, payload, runId) => SnapshotRecorder.record(stage, payload, undefined, runId));
