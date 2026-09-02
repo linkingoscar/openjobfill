@@ -50,3 +50,5 @@ pnpm test:e2e
 ```
 
 端到端冒烟测试使用实际加载的 Chromium 扩展，覆盖网页焦点跨 Shadow DOM 搜索后点填、真实 MAIN-world 驱动、历史面板回放与回放不改写网页。
+
+干净检出时 `pnpm install` 的 `postinstall` 会先运行 `wxt prepare`，生成 `.wxt/types`；若显式禁用了安装脚本，需要手动运行 `pnpm exec wxt prepare` 后再做类型检查。
