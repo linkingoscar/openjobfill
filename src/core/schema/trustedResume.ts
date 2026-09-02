@@ -184,19 +184,57 @@ function rank(meta?: FieldMeta): number {
 }
 
 export function mergeParsedCandidates(current: ResumeV5, candidates: ParsedCandidate[], source: Extract<FieldMetaSource, 'local-parser' | 'ai-parser' | 'json-import'>, now = Date.now()): ImportMergeResult {
-  const next = clone(current); const acceptedPaths: string[] = []; const conflicts: ImportConflict[] = [];
+  const next = clone(current);
+  const acceptedPaths: string[] = [];
+  const conflicts: ImportConflict[] = [];
+
   for (const candidate of candidates) {
     let currentValue: unknown;
-    try { currentValue = getResumeValue(next, candidate.path); } catch {
-      conflicts.push({ path: candidate.path, currentValue: undefined, candidateValue: candidate.value, candidateMeta: incomingMeta(candidate, source, now), reason: 'invalid' }); continue;
+    const candidateMeta = incomingMeta(candidate, source, now);
+    try {
+      currentValue = getResumeValue(next, candidate.path);
+    } catch {
+      conflicts.push({ path: candidate.path, currentValue: undefined, candidateValue: candidate.value, candidateMeta, reason: 'invalid' });
+      continue;
     }
-    const currentMeta = next.fieldMeta[candidate.path]; const candidateMeta = incomingMeta(candidate, source, now);
+
+    const currentMeta = next.fieldMeta[candidate.path];
     const differs = JSON.stringify(currentValue ?? null) !== JSON.stringify(candidate.value ?? null);
-    if (currentMeta?.locked && differs) { conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'locked' }); continue; }
-    if (currentMeta?.confirmed && differs) { conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'confirmed-different' }); continue; }
-    if (differs && rank(currentMeta) > rank(candidateMeta)) { conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'parser-disagreement' }); continue; }
-    setResumeValue(next, candidate.path, clone(candidate.value)); next.fieldMeta[candidate.path] = candidateMeta; acceptedPaths.push(candidate.path);
+
+    if (currentMeta?.locked && differs) {
+      conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'locked' });
+      continue;
+    }
+    if (currentMeta?.confirmed && differs) {
+      conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'confirmed-different' });
+      continue;
+    }
+
+    // Matching a trusted fact is useful corroboration, but must never downgrade its lock,
+    // confirmation or provenance by replacing metadata with a weaker parser candidate.
+    if (!differs && currentMeta && rank(currentMeta) >= rank(candidateMeta)) {
+      acceptedPaths.push(candidate.path);
+      continue;
+    }
+
+    if (source === 'ai-parser' && differs && (!candidate.evidence || candidate.evidence.length === 0)) {
+      conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'no-evidence' });
+      continue;
+    }
+    if (source === 'ai-parser' && differs && candidate.confidence < 0.70) {
+      conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'low-confidence' });
+      continue;
+    }
+    if (differs && rank(currentMeta) > rank(candidateMeta)) {
+      conflicts.push({ path: candidate.path, currentValue, candidateValue: candidate.value, currentMeta, candidateMeta, reason: 'parser-disagreement' });
+      continue;
+    }
+
+    setResumeValue(next, candidate.path, clone(candidate.value));
+    next.fieldMeta[candidate.path] = candidateMeta;
+    acceptedPaths.push(candidate.path);
   }
+
   if (acceptedPaths.length) next.updatedAt = now;
   return { resume: next, acceptedPaths, conflicts };
 }
