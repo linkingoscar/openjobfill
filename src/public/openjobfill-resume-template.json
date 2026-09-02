@@ -4,7 +4,10 @@
   "isDefault": false,
   "createdAt": 0,
   "updatedAt": 0,
-  "schemaVersion": 4,
+  "schemaVersion": 5,
+  "fieldMeta": {},
+  "variantType": "master",
+  "variantOverrides": [],
   "basics": {
     "name": "张三",
     "firstName": "三",
@@ -19,30 +22,10 @@
     "ethnicity": "汉族",
     "maritalStatus": "未婚",
     "country": "China",
-    "nativePlace": {
-      "province": "辽宁省",
-      "city": "沈阳市",
-      "district": "",
-      "detail": "辽宁省沈阳市"
-    },
-    "birthPlace": {
-      "province": "辽宁省",
-      "city": "沈阳市",
-      "district": "",
-      "detail": "辽宁省沈阳市"
-    },
-    "currentLocation": {
-      "province": "辽宁省",
-      "city": "沈阳市",
-      "district": "",
-      "detail": "辽宁省沈阳市"
-    },
-    "hukouLocation": {
-      "province": "辽宁省",
-      "city": "沈阳市",
-      "district": "",
-      "detail": "辽宁省沈阳市"
-    },
+    "nativePlace": { "province": "辽宁省", "city": "沈阳市", "district": "", "detail": "辽宁省沈阳市" },
+    "birthPlace": { "province": "辽宁省", "city": "沈阳市", "district": "", "detail": "辽宁省沈阳市" },
+    "currentLocation": { "province": "辽宁省", "city": "沈阳市", "district": "", "detail": "辽宁省沈阳市" },
+    "hukouLocation": { "province": "辽宁省", "city": "沈阳市", "district": "", "detail": "辽宁省沈阳市" },
     "workingYears": 0,
     "jobStatus": "应届毕业生",
     "expectedRole": "产品运营、产品经理",
@@ -50,124 +33,25 @@
     "selfEvaluation": "沟通协调能力强，具备项目执行、材料撰写和数据分析经验。",
     "hobbies": "羽毛球"
   },
-  "educations": [
-    {
-      "id": "edu-1",
-      "schoolName": "示例大学",
-      "degree": "硕士",
-      "degreeEn": "Master",
-      "major": "应用经济学",
-      "college": "商学院",
-      "startDate": "2024-09",
-      "endDate": "2027-06",
-      "gpa": "92.18/100",
-      "ranking": "1/10",
-      "isFullTime": true,
-      "isHighest": true,
-      "courses": "计量经济学、战略管理、国际经济学"
-    }
-  ],
-  "experiences": [
-    {
-      "id": "exp-1",
-      "company": "示例公司",
-      "department": "人力资源部",
-      "title": "人力资源实习生",
-      "jobType": "实习",
-      "city": "沈阳",
-      "startDate": "2024-06",
-      "endDate": "2024-09",
-      "description": "负责简历筛选、候选人沟通和招聘台账维护。",
-      "achievements": "累计协助筛选简历 500 余份。"
-    }
-  ],
-  "projects": [
-    {
-      "id": "project-1",
-      "projectName": "校园用户调研项目",
-      "role": "项目成员",
-      "startDate": "2025-03",
-      "endDate": "2025-08",
-      "description": "围绕校园服务需求开展用户访谈和问卷调研。",
-      "responsibility": "负责访谈资料整理、数据分析和报告撰写。",
-      "techStack": "Excel、SPSS",
-      "achievements": "形成完整调研报告并完成成果汇报。"
-    }
-  ],
-  "languages": [
-    {
-      "id": "language-1",
-      "language": "英语",
-      "proficiency": "良好",
-      "certificateName": "CET-6",
-      "score": "500"
-    }
-  ],
-  "skills": [
-    {
-      "id": "skill-1",
-      "name": "Excel",
-      "level": "熟练"
-    }
-  ],
-  "certificates": [
-    {
-      "id": "certificate-1",
-      "name": "全国计算机二级",
-      "issueDate": "2023-06",
-      "authority": "教育部教育考试院"
-    }
-  ],
-  "familyMembers": [
-    {
-      "id": "family-1",
-      "relation": "父亲",
-      "name": "张某某",
-      "company": "示例单位",
-      "jobTitle": "职员",
-      "phone": "",
-      "politicalStatus": "群众",
-      "hukouLocation": "辽宁省沈阳市"
-    }
-  ],
-  "awards": [
-    {
-      "id": "award-1",
-      "name": "研究生一等学业奖学金",
-      "issueDate": "2025-07",
-      "level": "校级",
-      "grade": "一等奖",
-      "description": "根据学年综合评定结果获得。"
-    }
-  ],
-  "academicAchievements": [
-    {
-      "id": "academic-1",
-      "title": "示例论文或学术成果标题",
-      "venue": "示例学术会议",
-      "authorOrder": "第二作者",
-      "url": "",
-      "date": "2025-08",
-      "abstract": "填写论文摘要或成果简介。"
-    }
-  ],
-  "campusExperiences": [
-    {
-      "id": "campus-1",
-      "organization": "示例大学研究生会",
-      "title": "学术部部长",
-      "startDate": "2024-10",
-      "endDate": "至今",
-      "description": "参与校级学术活动组织与执行。",
-      "responsibility": "负责成员分工、材料审核和现场协调。"
-    }
-  ],
-  "qaBank": [
-    {
-      "id": "qa-1",
-      "keyword": "自我评价",
-      "answer": "填写可复用于网申问答的完整回答。",
-      "scope": "global"
-    }
-  ]
+  "educations": [{
+    "id": "edu-1", "schoolName": "示例大学", "degree": "硕士", "degreeEn": "Master", "major": "应用经济学", "college": "商学院",
+    "startDate": "2024-09", "endDate": "2027-06", "gpa": "92.18/100", "ranking": "1/10", "isFullTime": true, "isHighest": true,
+    "courses": "计量经济学、战略管理、国际经济学"
+  }],
+  "experiences": [{
+    "id": "exp-1", "company": "示例公司", "department": "人力资源部", "title": "人力资源实习生", "jobType": "实习", "city": "沈阳",
+    "startDate": "2024-06", "endDate": "2024-09", "description": "负责简历筛选、候选人沟通和招聘台账维护。", "achievements": "累计协助筛选简历 500 余份。"
+  }],
+  "projects": [{
+    "id": "project-1", "projectName": "校园用户调研项目", "role": "项目成员", "startDate": "2025-03", "endDate": "2025-08",
+    "description": "围绕校园服务需求开展用户访谈和问卷调研。", "responsibility": "负责访谈资料整理、数据分析和报告撰写。", "techStack": "Excel、SPSS", "achievements": "形成完整调研报告并完成成果汇报。"
+  }],
+  "languages": [{ "id": "language-1", "language": "英语", "proficiency": "良好", "certificateName": "CET-6", "score": "500" }],
+  "skills": [{ "id": "skill-1", "name": "Excel", "level": "熟练" }],
+  "certificates": [{ "id": "certificate-1", "name": "全国计算机二级", "issueDate": "2023-06", "authority": "教育部教育考试院" }],
+  "familyMembers": [{ "id": "family-1", "relation": "父亲", "name": "张某某", "company": "示例单位", "jobTitle": "职员", "phone": "", "politicalStatus": "群众", "hukouLocation": "辽宁省沈阳市" }],
+  "awards": [{ "id": "award-1", "name": "研究生一等学业奖学金", "issueDate": "2025-07", "level": "校级", "grade": "一等奖", "description": "根据学年综合评定结果获得。" }],
+  "academicAchievements": [{ "id": "academic-1", "title": "示例论文或学术成果标题", "venue": "示例学术会议", "authorOrder": "第二作者", "url": "", "date": "2025-08", "abstract": "填写论文摘要或成果简介。" }],
+  "campusExperiences": [{ "id": "campus-1", "organization": "示例大学研究生会", "title": "学术部部长", "startDate": "2024-10", "endDate": "至今", "description": "参与校级学术活动组织与执行。", "responsibility": "负责成员分工、材料审核和现场协调。" }],
+  "qaBank": [{ "id": "qa-1", "keyword": "自我评价", "answer": "填写可复用于网申问答的完整回答。", "scope": "global" }]
 }
