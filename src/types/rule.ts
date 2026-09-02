@@ -23,6 +23,11 @@ export interface CustomFieldMapping {
   status?: CustomRuleStatus;
   occurrenceMode?: CustomRuleOccurrenceMode;
   staticIndex?: number;
+  /** Read-back verification health. No field values are stored here. */
+  successCount?: number;
+  failureCount?: number;
+  lastVerifiedAt?: number;
+  lastFailureReason?: string;
 }
 
 export interface CustomSiteRule {
