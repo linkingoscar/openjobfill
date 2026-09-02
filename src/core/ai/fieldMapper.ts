@@ -12,6 +12,14 @@ import type {
 
 const MAX_FIELDS_PER_CALL = 25;
 
+function riskForResumeField(path: string, valueKind: string): ResumeKeyOption['riskLevel'] {
+  if (/^basics\.(name|firstName|lastName|phone|email|idCardNumber)$/.test(path)) return 'CRITICAL';
+  if (/politicalStatus|ethnicity|familyMembers|emergencyContact|expectedSalary|birthDate|startDate|endDate|nativePlace|birthPlace|currentLocation|hukouLocation|expectedCity/.test(path)) return 'HIGH';
+  if (valueKind === 'LONG_TEXT') return 'LONG_TEXT';
+  if (/schoolName|major|company|title|certificates|degree/.test(path)) return 'MEDIUM';
+  return 'LOW';
+}
+
 export function buildResumeKeyOptions(resume: StandardResume): ResumeKeyOption[] {
   return enumerateResumeFields(resume)
     .filter(({ definition }) => definition.fillable && definition.group !== 'qaBank')
@@ -19,7 +27,8 @@ export function buildResumeKeyOptions(resume: StandardResume): ResumeKeyOption[]
       resumeKey: path,
       label,
       hasValue: value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0),
-      valueType: definition.valueType,
+      valueType: definition.valueKind,
+      riskLevel: riskForResumeField(path, definition.valueKind),
     }))
     .filter((option) => option.hasValue);
 }
@@ -89,7 +98,7 @@ export function parseMappingSuggestions(response: string): AIFieldMappingSuggest
         fieldIndex,
         resumeKey: item.resumeKey.trim(),
         confidence,
-        reasonCode: typeof item.reasonCode === 'string' && item.reasonCode.trim() ? item.reasonCode.trim() : 'model_unspecified',
+        reasonCode: typeof item.reasonCode === 'string' && item.reasonCode.trim() ? item.reasonCode.trim().slice(0, 80) : 'model_unspecified',
         alternatives: Array.isArray(item.alternatives)
           ? item.alternatives.flatMap((alt) => {
               if (!alt || typeof alt !== 'object') return [];
