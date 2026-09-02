@@ -1,5 +1,15 @@
 import type { StandardResume } from '../../types/resume';
-import type { FieldMeta, FieldMetaSource, ImportConflict, ImportMergeResult, ParsedCandidate, ResumeV5, ResumeVariantOrdering, ResumeVariantPresentation } from '../../types/trustedResume';
+import type {
+  FieldMeta,
+  FieldMetaSource,
+  ImportConflict,
+  ImportMergeResult,
+  ParsedCandidate,
+  ResumeV5,
+  ResumeVariantOrdering,
+  ResumeVariantPresentation,
+  ResumeVariantTextOverride,
+} from '../../types/trustedResume';
 import { parseResumePayload } from './resumeSchema';
 
 function clone<T>(value: T): T {
@@ -8,6 +18,7 @@ function clone<T>(value: T): T {
 
 const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 const PROFILE_LINK_PATHS = new Set(['basics.githubUrl', 'basics.linkedinUrl', 'basics.blogUrl', 'basics.portfolioUrl']);
+const TEXT_OVERRIDE_FIELDS = new Set(['description', 'responsibility', 'achievements']);
 
 function partsFor(path: string): string[] {
   const parts = path.split('.').filter(Boolean);
@@ -61,6 +72,29 @@ function normalizePresentation(raw: unknown): ResumeVariantPresentation {
   };
 }
 
+function normalizeTextOverrides(raw: unknown): ResumeVariantTextOverride[] {
+  if (!Array.isArray(raw)) return [];
+  const byKey = new Map<string, ResumeVariantTextOverride>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const collection = record.collection;
+    const recordId = typeof record.recordId === 'string' ? record.recordId.trim() : '';
+    const field = record.field;
+    const value = typeof record.value === 'string' ? record.value.trim() : '';
+    if ((collection !== 'projects' && collection !== 'experiences') || !recordId || !TEXT_OVERRIDE_FIELDS.has(String(field)) || !value) continue;
+    if (collection === 'experiences' && field === 'responsibility') continue;
+    const override: ResumeVariantTextOverride = {
+      collection,
+      recordId,
+      field: field as ResumeVariantTextOverride['field'],
+      value: value.slice(0, 5000),
+    };
+    byKey.set(`${collection}:${recordId}:${field}`, override);
+  }
+  return [...byKey.values()];
+}
+
 function applyIdOrdering<T extends { id: string }>(items: T[], order?: string[]): T[] {
   if (!order?.length) return items;
   const rank = new Map(order.map((id, index) => [id, index]));
@@ -72,6 +106,16 @@ function applyIdOrdering<T extends { id: string }>(items: T[], order?: string[])
     if (bRank === undefined) return -1;
     return aRank - bRank;
   });
+}
+
+function applyTextOverrides(resume: ResumeV5, overrides: ResumeVariantTextOverride[]): void {
+  for (const override of overrides) {
+    const items = override.collection === 'projects' ? resume.projects : resume.experiences;
+    const item = items.find((candidate) => candidate.id === override.recordId) as Record<string, unknown> | undefined;
+    if (!item) continue;
+    if (override.collection === 'experiences' && override.field === 'responsibility') continue;
+    item[override.field] = override.value;
+  }
 }
 
 export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
@@ -106,6 +150,7 @@ export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
     }) : [],
     variantOrdering: normalizeOrdering(raw.variantOrdering),
     variantPresentation: normalizePresentation(raw.variantPresentation),
+    variantTextOverrides: normalizeTextOverrides(raw.variantTextOverrides),
   };
 }
 
@@ -197,6 +242,7 @@ export function createJobVariant(master: ResumeV5, context: ResumeV5['variantCon
     variantOverrides: [],
     variantOrdering: {},
     variantPresentation: {},
+    variantTextOverrides: [],
   };
 }
 
@@ -205,6 +251,7 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
   const resolved = clone(master);
   const ordering = normalizeOrdering(variant.variantOrdering);
   const presentation = normalizePresentation(variant.variantPresentation);
+  const textOverrides = normalizeTextOverrides(variant.variantTextOverrides);
   Object.assign(resolved, {
     id: variant.id,
     title: variant.title,
@@ -218,6 +265,7 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
     variantOverrides: clone(variant.variantOverrides || []),
     variantOrdering: clone(ordering),
     variantPresentation: clone(presentation),
+    variantTextOverrides: clone(textOverrides),
     fieldMeta: { ...clone(master.fieldMeta), ...clone(variant.fieldMeta) },
   });
   for (const path of variant.variantOverrides || []) setResumeValue(resolved, path, clone(getResumeValue(variant, path)));
@@ -227,5 +275,6 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
   }
   resolved.projects = applyIdOrdering(resolved.projects, ordering.projects);
   resolved.experiences = applyIdOrdering(resolved.experiences, ordering.experiences);
+  applyTextOverrides(resolved, textOverrides);
   return resolved;
 }
