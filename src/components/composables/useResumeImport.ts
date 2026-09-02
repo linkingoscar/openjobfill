@@ -3,6 +3,7 @@ import {
   importPastedResume, importResumeDocument, importResumeImage,
   type DocumentImportOptions, type ResumeImportOutcome,
 } from '@/core/importers/resumeImportService';
+import type { StandardResume } from '@/types/resume';
 
 /** Owns import progress and results; late responses cannot restore a discarded preview. */
 export function useResumeImport() {
@@ -44,10 +45,14 @@ export function useResumeImport() {
     errorMessage: computed(() => error.value),
     parsedResume: computed(() => outcome.value?.resume || null),
     enhancementNotice: computed(() => outcome.value?.notice || ''),
+    localCandidates: computed(() => outcome.value?.localCandidates || []),
+    aiCandidates: computed(() => outcome.value?.aiCandidates || []),
+    importConflicts: computed(() => outcome.value?.conflicts || []),
+    acceptedPaths: computed(() => outcome.value?.acceptedPaths || []),
     reset,
     reportError: (message: string) => { error.value = message; },
     importDocument: (file: File, options: DocumentImportOptions) => run((signal) => importResumeDocument(file, options, signal)),
-    importImage: (file: File, consent: boolean) => run((signal) => importResumeImage(file, consent, signal)),
-    importText: (text: string) => run(() => importPastedResume(text)),
+    importImage: (file: File, consent: boolean, baseResume?: StandardResume | null) => run((signal) => importResumeImage(file, consent, signal, baseResume)),
+    importText: (text: string, baseResume?: StandardResume | null) => run(() => importPastedResume(text, baseResume)),
   };
 }
