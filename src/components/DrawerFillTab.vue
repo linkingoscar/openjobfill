@@ -37,6 +37,8 @@ const aiItems = computed(() => props.previewFillItems.filter((item) => item.sour
 const blockedItems = computed(() => props.previewNeedsUserItems.filter((item) => item.decision === 'BLOCKED'));
 const optionalItems = computed(() => props.previewNeedsUserItems.filter((item) => item.decision === 'OPTIONAL_UNMATCHED'));
 const manualItems = computed(() => props.previewNeedsUserItems.filter((item) => item.decision !== 'BLOCKED' && item.decision !== 'OPTIONAL_UNMATCHED'));
+const consistencyBlockers = computed(() => props.fillResult?.consistencyIssues?.filter((issue) => issue.severity === 'BLOCKER') || []);
+const consistencyWarnings = computed(() => props.fillResult?.consistencyIssues?.filter((issue) => issue.severity !== 'BLOCKER') || []);
 
 const sourceLabel = (source?: PreviewItem['source']) => ({
   user_rule: '个人规则', platform_rule: '平台规则', qa_bank: '问答库', semantic_dictionary: '确定性语义', fallback: '兜底', ai: 'AI 建议',
@@ -142,6 +144,20 @@ const riskLabel = (risk?: FieldRiskLevel) => ({ CRITICAL: 'Critical', HIGH: 'Hig
           <span class="text-slate-500">耗时 {{ fillResult.durationMs }}ms</span>
         </div>
         <div v-if="fillResult.failedCount > 0" class="p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">{{ fillResult.failedCount }} 项未通过读回验证或无法可靠处理，已进入待办。</div>
+
+        <section v-if="consistencyBlockers.length || consistencyWarnings.length" class="space-y-1">
+          <div class="text-[11px] font-bold text-slate-700 flex items-center gap-1"><ShieldAlert class="w-3.5 h-3.5 text-rose-600" />自行提交前一致性检查</div>
+          <div v-for="issue in consistencyBlockers" :key="`${issue.code}-${issue.resumeKey || issue.pageLabel || issue.message}`" class="p-2 rounded-lg border border-rose-200 bg-rose-50 text-[11px] text-rose-800">
+            <div class="font-bold">阻断项 · {{ issue.code }}</div>
+            <div class="mt-0.5">{{ issue.message }}</div>
+            <div v-if="issue.resumeKey || issue.pageLabel" class="mt-0.5 text-[10px] text-rose-600">{{ issue.pageLabel || issue.resumeKey }}<span v-if="issue.pageLabel && issue.resumeKey"> · {{ issue.resumeKey }}</span></div>
+          </div>
+          <div v-for="issue in consistencyWarnings" :key="`${issue.code}-${issue.resumeKey || issue.pageLabel || issue.message}`" class="p-2 rounded-lg border border-amber-200 bg-amber-50 text-[11px] text-amber-800">
+            <div class="font-semibold">{{ issue.severity === 'WARNING' ? '警告项' : '提示项' }} · {{ issue.code }}</div>
+            <div class="mt-0.5">{{ issue.message }}</div>
+          </div>
+          <p class="text-[10px] text-slate-500">这些检查只提供定位与阻断提示；OpenJobFill 不会点击提交或下一步。</p>
+        </section>
 
         <div class="text-xs font-semibold text-slate-700 pt-1 flex items-center justify-between">
           <span>字段执行详情：</span>
