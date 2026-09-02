@@ -4,11 +4,8 @@ import { resumeStorage } from '@/core/storage/resumeStorage';
 import type { StandardResume } from '@/types/resume';
 import { 
   FileText, 
-  Settings, 
   Zap, 
-  CheckCircle2, 
-  ChevronRight, 
-  Sparkles,
+  ChevronRight,
   ShieldCheck,
   TrendingUp,
   Sliders,
@@ -34,7 +31,7 @@ const handleSelectResume = async (e: Event) => {
   const select = e.target as HTMLSelectElement;
   const id = select.value;
   await resumeStorage.setActiveResumeId(id);
-  activeResume.value = resumes.value.find((r) => r.id === id) || null;
+  activeResume.value = await resumeStorage.getResumeForFill(id);
 };
 
 const hasText = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -84,11 +81,10 @@ const handleTriggerFill = async () => {
   statusMessage.value = '正在向当前网页发送填表指令...';
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error('未找到当前标签页');
-
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: 'TRIGGER_AUTO_FILL',
+    // The popup action is a user gesture, so activeTab grants temporary access to
+    // an unknown current site without requiring a permanent all-sites host permission.
+    const response = await chrome.runtime.sendMessage({
+      type: 'TRIGGER_ACTIVE_TAB_FILL',
       payload: { resumeId: activeResume.value.id },
     });
     if (!response?.success) {
@@ -101,7 +97,7 @@ const handleTriggerFill = async () => {
       : `已打开填表面板，${response.needsUserCount || 0} 项需要手动处理。`;
   } catch (err: any) {
     statusType.value = 'error';
-    statusMessage.value = err?.message || '请刷新招聘网页后再试（当前页面可能不支持插件）';
+    statusMessage.value = err?.message || '当前页面不允许扩展注入，请确认它是普通 http/https 招聘页面';
   } finally {
     isFilling.value = false;
   }
@@ -121,7 +117,6 @@ const openOptionsPage = async (tabName?: string) => {
 
 <template>
   <main class="p-4 w-[380px] flex flex-col gap-3.5 font-sans select-none bg-slate-50 text-slate-800" aria-label="OpenJobFill 弹出面板">
-    <!-- Header -->
     <header class="flex items-center justify-between border-b border-slate-200/80 pb-3 bg-white -mx-4 -mt-4 px-4 pt-3.5 shadow-xs">
       <div class="flex items-center gap-2.5">
         <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/25">
@@ -132,7 +127,7 @@ const openOptionsPage = async (tabName?: string) => {
             <h1 class="text-sm font-bold text-slate-900 leading-tight">OpenJobFill</h1>
             <span v-if="extensionVersion" class="px-1.5 py-0.2 bg-blue-100 text-blue-700 font-mono text-3xs font-bold rounded">v{{ extensionVersion }}</span>
           </div>
-          <p class="text-2xs text-slate-500">智能简历秒填 & 投递追踪管家</p>
+          <p class="text-2xs text-slate-500">可信求职档案 · 预览后填写</p>
         </div>
       </div>
       <button
@@ -147,7 +142,6 @@ const openOptionsPage = async (tabName?: string) => {
       </button>
     </header>
 
-    <!-- Quick Navigation Hub -->
     <div class="grid grid-cols-2 gap-2">
       <button
         type="button"
@@ -178,7 +172,6 @@ const openOptionsPage = async (tabName?: string) => {
       </button>
     </div>
 
-    <!-- Active Resume Selector -->
     <section class="flex flex-col gap-2 bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs" aria-label="当前填表简历配置">
       <div class="flex items-center justify-between text-xs text-slate-600">
         <label for="active-resume-select" class="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
@@ -219,7 +212,6 @@ const openOptionsPage = async (tabName?: string) => {
       </div>
     </section>
 
-    <!-- Quick Fill Action Button -->
     <div class="space-y-1.5">
       <button
         type="button"
@@ -229,11 +221,10 @@ const openOptionsPage = async (tabName?: string) => {
         :aria-label="isFilling ? '正在执行填表操作' : '一键自动填写当前页面表单'"
       >
         <Zap class="w-4 h-4 fill-white" aria-hidden="true" />
-        <span>{{ isFilling ? '正在识别页面...' : hasFillableResumeData ? '一键填入当前页面' : '先完善简历资料' }}</span>
+        <span>{{ isFilling ? '正在识别页面...' : hasFillableResumeData ? '识别并生成风险预览' : '先完善简历资料' }}</span>
         <kbd class="px-1.5 py-0.5 bg-white/20 rounded text-3xs font-mono">Alt+Shift+F</kbd>
       </button>
 
-      <!-- Dynamic Status Message with Live Region -->
       <div
         v-if="statusMessage"
         role="status"
@@ -251,13 +242,12 @@ const openOptionsPage = async (tabName?: string) => {
       </div>
     </div>
 
-    <!-- Footer Privacy Note -->
     <footer class="flex items-center justify-between text-3xs text-slate-400 pt-0.5 px-1">
       <span class="flex items-center gap-1 text-emerald-600 font-medium">
         <ShieldCheck class="w-3.5 h-3.5" aria-hidden="true" />
-        <span>100% 浏览器本地存储</span>
+        <span>本地存储 · 陌生站点按次授权</span>
       </span>
-      <span>按 Esc 可收起悬浮面板</span>
+      <span>不会自动提交/下一步</span>
     </footer>
   </main>
 </template>

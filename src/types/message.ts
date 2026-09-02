@@ -1,4 +1,4 @@
-import type { AISettings, AIFieldMappingResponse, ResumeKeyOption, UnmatchedFieldDescriptor } from './ai';
+import type { AIAnswerDraft, AISettings, AIFieldMappingResponse, ResumeKeyOption, UnmatchedFieldDescriptor } from './ai';
 import type { StandardResume } from './resume';
 import type { FillResult } from './adapter';
 import type { RemoteFramePlan } from './pipeline';
@@ -11,6 +11,7 @@ export interface FrameTarget {
 
 export type ExtensionMessage =
   | { type: 'TRIGGER_AUTO_FILL'; payload?: { resumeId?: string } }
+  | { type: 'TRIGGER_ACTIVE_TAB_FILL'; payload?: { resumeId?: string } }
   | { type: 'RECRUITMENT_PAGE_DETECTED' }
   | { type: 'ENSURE_RUNTIME_AND_FORWARD'; payload?: { resumeId?: string } }
   | { type: 'RUNTIME_TRIGGER_AUTO_FILL'; payload?: { resumeId?: string } }
@@ -40,6 +41,24 @@ export type ExtensionMessage =
       };
     }
   | { type: 'AI_MAP_FIELDS'; payload: { settings: AISettings; fields: UnmatchedFieldDescriptor[]; options: ResumeKeyOption[] } }
+  | {
+      type: 'AI_DRAFT_ANSWER';
+      payload: {
+        settings: AISettings;
+        question: string;
+        maxChars?: number;
+        context: Record<string, unknown>;
+        confirmedExternalProcessing: true;
+      };
+    }
+  | {
+      type: 'AI_SUGGEST_JOB_VARIANT';
+      payload: {
+        settings: AISettings;
+        context: Record<string, unknown>;
+        confirmedExternalProcessing: true;
+      };
+    }
   | { type: 'AI_PARSE_RESUME_IMAGE'; payload: { settings: AISettings; imageDataUrl: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'AI_PARSE_RESUME_DOCUMENT'; payload: { settings: AISettings; imageDataUrls: string[]; documentText: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'RESUME_STORAGE_SAVE'; payload: { resume: StandardResume } }
@@ -75,6 +94,13 @@ function isMainWorldValue(value: unknown): value is string | string[] {
       && value.length > 0
       && value.length <= 6
       && value.every((item) => isString(item) && item.length > 0 && item.length <= 240));
+}
+
+function isBoundedJson(value: unknown, maxLength: number): boolean {
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === 'string' && serialized.length <= maxLength;
+  } catch { return false; }
 }
 
 const MAIN_WORLD_CONTROL_ADAPTER_IDS = new Set([
@@ -125,6 +151,7 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
     case 'RECRUITMENT_PAGE_DETECTED':
       return payload === undefined;
     case 'TRIGGER_AUTO_FILL':
+    case 'TRIGGER_ACTIVE_TAB_FILL':
     case 'ENSURE_RUNTIME_AND_FORWARD':
     case 'RUNTIME_TRIGGER_AUTO_FILL':
       return payload === undefined || (isRecord(payload) && (payload.resumeId === undefined || isString(payload.resumeId)));
@@ -173,6 +200,20 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && isRecord(payload.settings)
         && Array.isArray(payload.fields)
         && Array.isArray(payload.options);
+    case 'AI_DRAFT_ANSWER':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && isBoundedString(payload.question, 500)
+        && (payload.maxChars === undefined || (typeof payload.maxChars === 'number' && Number.isInteger(payload.maxChars) && payload.maxChars > 0 && payload.maxChars <= 5000))
+        && isRecord(payload.context)
+        && isBoundedJson(payload.context, 80_000)
+        && payload.confirmedExternalProcessing === true;
+    case 'AI_SUGGEST_JOB_VARIANT':
+      return isRecord(payload)
+        && isRecord(payload.settings)
+        && isRecord(payload.context)
+        && isBoundedJson(payload.context, 120_000)
+        && payload.confirmedExternalProcessing === true;
     case 'AI_PARSE_RESUME_IMAGE':
       return isRecord(payload)
         && isRecord(payload.settings)
@@ -243,6 +284,8 @@ export interface ExtensionResponse {
   error?: string;
   plans?: RemoteFramePlan[];
   mapping?: AIFieldMappingResponse['mapping'];
+  draft?: AIAnswerDraft;
+  suggestions?: unknown[];
   resume?: StandardResume;
   applications?: JobApplicationRecord[];
 }

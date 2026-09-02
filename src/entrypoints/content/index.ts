@@ -1,8 +1,12 @@
 import { isIgnoredDomain, observeRecruitmentPage } from '@/core/whitelist';
+import { BUILTIN_RECRUITMENT_MATCHES } from '@/core/recruitmentPermissions';
 import { isExtensionMessage } from '@/types/message';
 
 export default defineContentScript({
-  matches: ['<all_urls>'],
+  // Unknown sites no longer receive an install-time all-sites content script.
+  // They can still be filled after a user gesture through activeTab, while explicitly
+  // whitelisted custom domains receive their own optional origin permission.
+  matches: BUILTIN_RECRUITMENT_MATCHES,
   runAt: 'document_idle',
 
   main() {

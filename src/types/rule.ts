@@ -1,7 +1,7 @@
 import type { FieldInputType } from './adapter';
 import type { FieldLocatorEvidence } from './pipeline';
 
-export type CustomRuleStatus = 'ACTIVE' | 'STALE';
+export type CustomRuleStatus = 'ACTIVE' | 'STALE' | 'DISABLED';
 export type CustomRuleOccurrenceMode = 'NONE' | 'FIELD_REPEAT_INDEX' | 'STATIC';
 export type CustomRuleMatchMethod = 'selector' | 'fingerprint' | 'locator';
 
@@ -23,6 +23,11 @@ export interface CustomFieldMapping {
   status?: CustomRuleStatus;
   occurrenceMode?: CustomRuleOccurrenceMode;
   staticIndex?: number;
+  /** Read-back verification health. No field values are stored here. */
+  successCount?: number;
+  failureCount?: number;
+  lastVerifiedAt?: number;
+  lastFailureReason?: string;
 }
 
 export interface CustomSiteRule {

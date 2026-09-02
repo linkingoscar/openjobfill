@@ -1,4 +1,4 @@
-import type { StandardResume, CustomQABankItem } from '../../types/resume';
+import type { StandardResume } from '../../types/resume';
 import type { FieldDescriptor, FillPlan, FillPlanItem, PlatformEnhancer, DriverType } from '../../types/pipeline';
 import { calculateSemanticSimilarity } from '../matcher/similarityEngine';
 import { RESUME_DICTIONARY } from '../matcher/dictionary';
@@ -9,6 +9,8 @@ import { deriveLanguageSummary } from '../derivation/profileDeriver';
 import { inspectFieldSafety } from './fieldSafety';
 import type { CustomFieldMapping } from '../../types/rule';
 import { resolveCustomRuleMappings } from './customRuleMatcher';
+import { decideFill, type FillDecision } from './decisionPolicy';
+import { matchResumeQABank } from '../engine/scopedQABank';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -19,264 +21,220 @@ const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
 function getValueByPath(obj: any, path: string): any {
   if (!obj || !path) return undefined;
   if (path === 'derived.languageSummary') return deriveLanguageSummary(obj as StandardResume);
-  const parts = path.split('.');
-  let curr = obj;
-  for (const part of parts) {
-    if (curr === null || curr === undefined) return undefined;
-    curr = curr[part];
+  let current = obj;
+  for (const part of path.split('.')) {
+    if (current == null) return undefined;
+    current = current[part];
   }
-  return curr;
+  return current;
 }
 
-export function hasUsableValue(val: any): boolean {
-  if (val === undefined || val === null) return false;
-  if (typeof val === 'string') {
-    return val.trim().length > 0;
-  }
-  return true;
+export function hasUsableValue(value: any): boolean {
+  if (value === undefined || value === null) return false;
+  return typeof value !== 'string' || value.trim().length > 0;
+}
+
+function legacyAction(decision: FillDecision): FillPlanItem['action'] {
+  if (decision === 'FILL_HIGH_CONFIDENCE' || decision === 'FILL_REVIEW_REQUIRED') return 'FILL';
+  if (decision === 'NEEDS_USER') return 'NEEDS_USER';
+  return 'SKIP';
+}
+
+function fieldMaxChars(field: FieldDescriptor): number | undefined {
+  const element = field.element as HTMLInputElement | HTMLTextAreaElement;
+  const maxLength = typeof element?.maxLength === 'number' ? element.maxLength : -1;
+  return maxLength > 0 && Number.isFinite(maxLength) ? maxLength : undefined;
 }
 
 export class PlanGenerator {
-  /**
-   * 基于页面字段列表、简历数据与平台增强器，生成两阶段 FillPlan
-   */
-  generatePlan(
-    fields: FieldDescriptor[],
-    resume: StandardResume,
-    enhancer?: PlatformEnhancer | null,
-    customRules?: CustomFieldMapping[]
-  ): FillPlan {
+  generatePlan(fields: FieldDescriptor[], resume: StandardResume, enhancer?: PlatformEnhancer | null, customRules?: CustomFieldMapping[]): FillPlan {
     const items: FillPlanItem[] = [];
     const matchedSemanticKeys = new Set<string>();
-
-    let highConfidenceCount = 0;
-    let needsUserCount = 0;
-    let skipCount = 0;
     const customRuleResolution = resolveCustomRuleMappings(fields, customRules);
+    let directlyHighConfidenceCount = 0;
+    let reviewRequiredCount = 0;
+    let optionalUnmatchedCount = 0;
+    let needsUserCount = 0;
+    let blockedCount = 0;
+    let skipCount = 0;
+
+    const push = (input: Omit<FillPlanItem, 'action' | 'decision' | 'riskLevel'> & {
+      hasValue?: boolean;
+      hasUserValue?: boolean;
+      safetyBlocked?: boolean;
+      firstVisit?: boolean;
+      forcedDecision?: FillDecision;
+    }): FillPlanItem => {
+      const policy = input.forcedDecision
+        ? {
+            decision: input.forcedDecision,
+            risk: decideFill({ field: input.field, resumeKey: input.semanticKey, confidence: input.confidence, source: input.source, hasValue: input.hasValue ?? hasUsableValue(input.targetValue) }).risk,
+            reason: input.reason || '',
+          }
+        : decideFill({
+            field: input.field,
+            resumeKey: input.semanticKey,
+            confidence: input.confidence,
+            source: input.source,
+            hasValue: input.hasValue ?? hasUsableValue(input.targetValue),
+            hasUserValue: input.hasUserValue,
+            safetyBlocked: input.safetyBlocked,
+            firstVisit: input.firstVisit,
+          });
+
+      const item: FillPlanItem = {
+        id: input.id,
+        field: input.field,
+        semanticKey: input.semanticKey,
+        targetValue: input.targetValue,
+        confidence: input.confidence,
+        action: legacyAction(policy.decision),
+        decision: policy.decision,
+        riskLevel: policy.risk,
+        reason: input.reason || policy.reason,
+        source: input.source,
+        driverType: input.driverType,
+        requiresExplicitReview: policy.decision === 'FILL_REVIEW_REQUIRED',
+        learnedRuleMappingId: input.learnedRuleMappingId,
+      };
+      items.push(item);
+      if (policy.decision === 'FILL_HIGH_CONFIDENCE') directlyHighConfidenceCount++;
+      else if (policy.decision === 'FILL_REVIEW_REQUIRED') reviewRequiredCount++;
+      else if (policy.decision === 'OPTIONAL_UNMATCHED') { optionalUnmatchedCount++; skipCount++; }
+      else if (policy.decision === 'NEEDS_USER') needsUserCount++;
+      else if (policy.decision === 'BLOCKED') { blockedCount++; skipCount++; }
+      else skipCount++;
+      return item;
+    };
 
     for (const field of fields) {
-      // 0. 调用 PlatformEnhancer.enhanceField Hook 进行字段增强
-      if (enhancer && enhancer.enhanceField) {
+      if (enhancer?.enhanceField) {
         const enhancement = enhancer.enhanceField(field);
-        if (enhancement) {
-          Object.assign(field, enhancement);
-        }
+        if (enhancement) Object.assign(field, enhancement);
       }
 
-      // 安全策略优先于所有语义匹配和用户规则：即使自定义规则或 AI
-      // 错误地命中，也不能让凭据、支付或提交相关控件进入执行计划。
       const safety = field.safety || inspectFieldSafety(field.element, field.label, field.contextText);
       field.safety = safety;
       if (safety.blocked) {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          action: 'SKIP',
-          confidence: 1.0,
-          reason: safety.reason || '安全策略禁止自动填写',
-          driverType: this.resolveDriverType(field),
-        });
-        skipCount++;
+        push({ id: `plan_${field.id}`, field, confidence: 1, reason: safety.reason || '安全策略禁止自动填写', driverType: this.resolveDriverType(field), safetyBlocked: true });
         continue;
       }
 
-      // 1. 用户输入保护：如果字段已有内容或选项已被用户手动选过，默认跳过以保护用户输入
-      let isAlreadyFilledByUser = false;
-      let skipReason = '字段已有内容，自动保护跳过';
-
-      if (field.type === 'checkbox') {
-        if (isInputElement(field.element) && field.element.checked) {
-          isAlreadyFilledByUser = true;
-          skipReason = '复选框已被勾选，自动保护跳过';
-        }
-      } else if (field.type === 'radio') {
-        const el = field.element;
-        if (isInputElement(el)) {
-          const name = el.getAttribute('name');
-          const doc = el.ownerDocument || document;
-          const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || doc;
-          const groupRadios = name
-            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
-            : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
-          if (groupRadios.some((r) => r.checked)) {
-            isAlreadyFilledByUser = true;
-            skipReason = '单选框组已有选定项，自动保护跳过';
-          }
-        }
-      } else if (field.currentValue && String(field.currentValue).trim().length > 0) {
-        isAlreadyFilledByUser = true;
+      if (this.hasUserValue(field)) {
+        push({ id: `plan_${field.id}`, field, confidence: 1, reason: '字段已有内容，自动保护跳过', driverType: this.resolveDriverType(field), hasUserValue: true, forcedDecision: 'SKIP' });
+        continue;
       }
-
-      if (isAlreadyFilledByUser) {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          action: 'SKIP',
-          confidence: 1.0,
-          reason: skipReason,
-          driverType: this.resolveDriverType(field),
-        });
-        skipCount++;
+      if (field.disabled || field.readOnly) {
+        push({ id: `plan_${field.id}`, field, confidence: 1, reason: field.disabled ? '字段已禁用，自动跳过' : '字段只读，自动跳过', driverType: this.resolveDriverType(field), forcedDecision: 'SKIP' });
         continue;
       }
 
-      // 禁用控件不可能被页面真正接收；直接标记跳过，避免执行阶段反复
-      // 写入并把一个明确不可编辑的字段误报成失败待办。
-      if (field.disabled) {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          action: 'SKIP',
-          confidence: 1.0,
-          reason: '字段已禁用，自动跳过',
-          driverType: this.resolveDriverType(field),
-        });
-        skipCount++;
-        continue;
-      }
-
-      // 2. 优先检查用户自定义网站规则 (User Rules)
-      const resolvedCustomMatch = customRuleResolution.matches.get(field.id);
-      const customMatch = resolvedCustomMatch?.mapping || null;
-
-      if (customMatch) {
-        let customResumeKey = customMatch.resumeKey;
-        if (field.section && field.section.index > 0 && customResumeKey.includes('.0.')) {
-          customResumeKey = customResumeKey.replace('.0.', `.${field.section.index}.`);
-        }
-        const val = getValueByPath(resume, customResumeKey);
-        if (hasUsableValue(val)) {
-          items.push({
-            id: `plan_${field.id}`,
-            field,
-            semanticKey: customResumeKey,
-            targetValue: this.toFieldTargetValue(field, resume, customResumeKey, val),
-            confidence: 1.0,
-            action: 'FILL',
-            source: 'user_rule',
-            reason: `命中用户自定义规则（${resolvedCustomMatch?.method || 'selector'}）: ${customMatch.description || customMatch.resumeKey}`,
-            driverType: this.resolveDriverType(field),
+      const resolved = customRuleResolution.matches.get(field.id);
+      if (resolved?.mapping) {
+        let resumeKey = resolved.mapping.resumeKey;
+        if (field.section && field.section.index > 0 && resumeKey.includes('.0.')) resumeKey = resumeKey.replace('.0.', `.${field.section.index}.`);
+        const value = getValueByPath(resume, resumeKey);
+        if (hasUsableValue(value)) {
+          const item = push({
+            id: `plan_${field.id}`, field, semanticKey: resumeKey,
+            targetValue: this.toFieldTargetValue(field, resume, resumeKey, value), confidence: 1,
+            source: 'user_rule', reason: `命中用户自定义规则（${resolved.method || 'selector'}）: ${resolved.mapping.description || resolved.mapping.resumeKey}`,
+            driverType: this.resolveDriverType(field), firstVisit: false,
+            learnedRuleMappingId: resolved.mapping.id,
           });
-          highConfidenceCount++;
-          matchedSemanticKeys.add(customResumeKey);
+          if (item.action === 'FILL') matchedSemanticKeys.add(resumeKey);
           continue;
         }
       }
 
-      // 3. 检查平台专属增强映射 (Platform Enhancer)
       let platformMatched = false;
-      if (enhancer && enhancer.fieldMappings) {
-        for (const [selector, resumeKey] of Object.entries(enhancer.fieldMappings)) {
-          if (field.element.matches && field.element.matches(selector)) {
-            let targetKey = resumeKey;
-            if (field.section && field.section.index > 0 && targetKey.includes('.0.')) {
-              targetKey = targetKey.replace('.0.', `.${field.section.index}.`);
-            }
-            const val = getValueByPath(resume, targetKey);
-            if (hasUsableValue(val)) {
-              items.push({
-                id: `plan_${field.id}`,
-                field,
-                semanticKey: targetKey,
-                targetValue: this.toFieldTargetValue(field, resume, targetKey, val),
-                confidence: 0.98,
-                action: 'FILL',
-                source: 'platform_rule',
-                reason: `命中 ${enhancer.name} 专属增强规则`,
-                driverType: this.resolveDriverType(field),
-              });
-              highConfidenceCount++;
-              matchedSemanticKeys.add(targetKey);
-              platformMatched = true;
-              break;
-            }
-          }
+      if (enhancer?.fieldMappings) {
+        for (const [selector, originalKey] of Object.entries(enhancer.fieldMappings)) {
+          if (!field.element.matches?.(selector)) continue;
+          let resumeKey = originalKey;
+          if (field.section && field.section.index > 0 && resumeKey.includes('.0.')) resumeKey = resumeKey.replace('.0.', `.${field.section.index}.`);
+          const value = getValueByPath(resume, resumeKey);
+          if (!hasUsableValue(value)) continue;
+          push({ id: `plan_${field.id}`, field, semanticKey: resumeKey, targetValue: this.toFieldTargetValue(field, resume, resumeKey, value), confidence: 0.98, source: 'platform_rule', reason: `命中 ${enhancer.name} 专属增强规则`, driverType: this.resolveDriverType(field), firstVisit: true });
+          matchedSemanticKeys.add(resumeKey);
+          platformMatched = true;
+          break;
         }
       }
-      if (platformMatched) {
-        continue;
-      }
+      if (platformMatched) continue;
 
-      // 4. 检查问答库 (Q&A Bank)
-      if (resume.qaBank && resume.qaBank.length > 0 && (field.type === 'textarea' || field.type === 'text')) {
-        const qaMatch = this.matchQABank(field, resume.qaBank, matchedSemanticKeys);
-        if (qaMatch && hasUsableValue(qaMatch.item.answer)) {
-          items.push({
+      if (resume.qaBank?.length && (field.type === 'textarea' || field.type === 'text' || field.type === 'contenteditable')) {
+        const variantContext = (resume as StandardResume & { variantContext?: { jobFamily?: string; jdSnapshotId?: string } }).variantContext;
+        const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
+        const question = field.label || field.placeholder || field.contextText;
+        const match = matchResumeQABank(question, resume.qaBank, {
+          hostname: currentHostname,
+          jobFamily: variantContext?.jobFamily,
+          jobPostingId: variantContext?.jdSnapshotId,
+          maxChars: fieldMaxChars(field),
+        });
+        if (match && !matchedSemanticKeys.has(`qaBank.${match.item.id}`) && hasUsableValue(match.version.answer)) {
+          push({
             id: `plan_${field.id}`,
             field,
-            semanticKey: `qaBank.${qaMatch.item.id}`,
-            targetValue: qaMatch.item.answer,
-            confidence: qaMatch.score,
-            action: 'FILL',
+            semanticKey: `qaBank.${match.item.id}`,
+            targetValue: match.version.answer,
+            confidence: match.score,
             source: 'qa_bank',
-            reason: `命中问答库关键词: ${qaMatch.item.keyword}`,
+            reason: `命中问答库 ${match.item.scope} 作用域 · 版本 ${match.version.maxChars || '原始'} 字`,
             driverType: this.resolveDriverType(field),
+            firstVisit: true,
           });
-          highConfidenceCount++;
-          matchedSemanticKeys.add(`qaBank.${qaMatch.item.id}`);
+          matchedSemanticKeys.add(`qaBank.${match.item.id}`);
           continue;
         }
       }
 
-      // 5. 通用启发式与语义字典匹配
-      const semanticMatch = this.matchSemanticDictionary(field, resume, matchedSemanticKeys);
-      if (semanticMatch && semanticMatch.confidence >= 0.65 && hasUsableValue(semanticMatch.targetValue)) {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          semanticKey: semanticMatch.resumeKey,
-          targetValue: semanticMatch.targetValue,
-          confidence: semanticMatch.confidence,
-          action: 'FILL',
-          source: 'semantic_dictionary',
-          reason: `高置信度语义匹配: ${semanticMatch.name} (${(semanticMatch.confidence * 100).toFixed(0)}%)`,
-          driverType: this.resolveDriverType(field),
-        });
-        highConfidenceCount++;
-        matchedSemanticKeys.add(semanticMatch.resumeKey);
-        for (const relatedKey of semanticMatch.relatedKeys || []) matchedSemanticKeys.add(relatedKey);
+      const semantic = this.matchSemanticDictionary(field, resume, matchedSemanticKeys);
+      if (semantic && hasUsableValue(semantic.targetValue)) {
+        const item = push({ id: `plan_${field.id}`, field, semanticKey: semantic.resumeKey, targetValue: semantic.targetValue, confidence: semantic.confidence, source: 'semantic_dictionary', reason: `语义匹配: ${semantic.name} (${(semantic.confidence * 100).toFixed(0)}%)`, driverType: this.resolveDriverType(field), firstVisit: true });
+        if (item.action === 'FILL') {
+          matchedSemanticKeys.add(semantic.resumeKey);
+          for (const related of semantic.relatedKeys || []) matchedSemanticKeys.add(related);
+        }
         continue;
       }
 
-      // 6. 如果未匹配成功，但该字段为必填项 (Required)，标记为 NEEDS_USER (待办补漏)
-      if (field.required) {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          action: 'NEEDS_USER',
-          confidence: 0,
-          reason: '必填项未在简历中找到对应高置信度信息，需人工确认',
-          driverType: this.resolveDriverType(field),
-        });
-        needsUserCount++;
-      } else {
-        items.push({
-          id: `plan_${field.id}`,
-          field,
-          action: 'SKIP',
-          confidence: 0,
-          reason: '非必填且未匹配字段',
-          driverType: this.resolveDriverType(field),
-        });
-        skipCount++;
-      }
+      push({ id: `plan_${field.id}`, field, confidence: 0, reason: field.required ? '必填项未找到可靠映射，需人工确认' : '非必填陌生字段，保留为可选映射建议', driverType: this.resolveDriverType(field), hasValue: false });
     }
 
     return {
       items,
-      highConfidenceCount,
+      // Compatibility: historical callers used this as “preview-fillable mappings”.
+      // New callers must inspect decision/reviewRequiredCount to distinguish review-required items.
+      highConfidenceCount: directlyHighConfidenceCount + reviewRequiredCount,
+      reviewRequiredCount,
+      optionalUnmatchedCount,
       needsUserCount,
+      blockedCount,
       skipCount,
       totalFieldsCount: fields.length,
-      diagnostics: {
-        customRules: {
-          matchedCount: customRuleResolution.matches.size,
-          staleMappingIds: customRuleResolution.staleMappingIds,
-          unmatchedMappingIds: customRuleResolution.unmatchedMappingIds,
-          methodCounts: customRuleResolution.methodCounts,
-        },
-      },
+      diagnostics: { customRules: {
+        matchedCount: customRuleResolution.matches.size,
+        staleMappingIds: customRuleResolution.staleMappingIds,
+        unmatchedMappingIds: customRuleResolution.unmatchedMappingIds,
+        methodCounts: customRuleResolution.methodCounts,
+      } },
     };
+  }
+
+  private hasUserValue(field: FieldDescriptor): boolean {
+    if (field.type === 'checkbox') return isInputElement(field.element) && field.element.checked;
+    if (field.type === 'radio') {
+      const el = field.element;
+      if (!isInputElement(el)) return false;
+      const name = el.getAttribute('name');
+      const doc = el.ownerDocument || document;
+      const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || doc;
+      const radios = name ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`)) : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+      return radios.some((radio) => radio.checked);
+    }
+    return !!field.currentValue && String(field.currentValue).trim().length > 0;
   }
 
   private resolveDriverType(field: FieldDescriptor): DriverType {
@@ -292,179 +250,67 @@ export class PlanGenerator {
 
   private toFieldTargetValue(field: FieldDescriptor, resume: StandardResume, resumeKey: string, value: any): any {
     if (field.type === 'date-range' && /\.(startDate|endDate)$/.test(resumeKey)) {
-      const baseKey = resumeKey.replace(/\.(startDate|endDate)$/, '');
-      return {
-        startDate: String(getValueByPath(resume, `${baseKey}.startDate`) || ''),
-        endDate: String(getValueByPath(resume, `${baseKey}.endDate`) || ''),
-      };
+      const base = resumeKey.replace(/\.(startDate|endDate)$/, '');
+      return { startDate: String(getValueByPath(resume, `${base}.startDate`) || ''), endDate: String(getValueByPath(resume, `${base}.endDate`) || '') };
     }
-    if (typeof value === 'boolean') {
-      return field.type === 'checkbox' ? value : value ? '是' : '否';
-    }
-    if (field.type === 'cascader' && /educations\.\d+\.major$/.test(resumeKey)) {
-      return inferMajorHierarchy(String(value)).join('-');
-    }
+    if (typeof value === 'boolean') return field.type === 'checkbox' ? value : value ? '是' : '否';
+    if (field.type === 'cascader' && /educations\.\d+\.major$/.test(resumeKey)) return inferMajorHierarchy(String(value)).join('-');
     if (field.type === 'cascader' && value && typeof value === 'object' && ('city' in value || 'province' in value)) {
       const location = value as { province?: string; city?: string; district?: string };
-      const path = location.province
-        ? [location.province, location.city, location.district].filter(Boolean)
-        : [...inferLocationPath(location.city || ''), location.district].filter(Boolean);
+      const path = location.province ? [location.province, location.city, location.district].filter(Boolean) : [...inferLocationPath(location.city || ''), location.district].filter(Boolean);
       return path.join('-');
     }
     return String(value);
   }
 
-  private matchQABank(
-    field: FieldDescriptor,
-    qaBank: CustomQABankItem[],
-    alreadyMatchedKeys: Set<string>
-  ): { item: CustomQABankItem; score: number } | null {
-    const currentHostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
-
-    const evaluateQA = (qaList: CustomQABankItem[]) => {
-      let bestItem: CustomQABankItem | null = null;
-      let highestScore = 0;
-
-      for (const qa of qaList) {
-        if (!qa.keyword || !qa.answer) continue;
-        const keyId = `qaBank.${qa.id}`;
-        if (alreadyMatchedKeys.has(keyId)) continue;
-
-        const keywords = qa.keyword.split(/[,，/、\s|]+/).map((k) => k.trim()).filter(Boolean);
-        const score = Math.max(
-          calculateTextMatchScore(field.label, keywords),
-          calculateTextMatchScore(field.placeholder, keywords),
-          calculateTextMatchScore(field.contextText, keywords) * 0.8
-        );
-
-        if (score > highestScore && score >= 0.5) {
-          highestScore = score;
-          bestItem = qa;
-        }
-      }
-
-      return bestItem ? { item: bestItem, score: highestScore } : null;
-    };
-
-    // 第一遍：优先匹配当前 Domain 专属 QA 问答 (最高优先级)
-    if (currentHostname) {
-      const domainQAs = qaBank.filter(
-        (qa) => qa.scope === 'domain' && qa.domain && (currentHostname.includes(qa.domain) || qa.domain.includes(currentHostname))
-      );
-      const domainMatch = evaluateQA(domainQAs);
-      if (domainMatch) {
-        return domainMatch;
-      }
-    }
-
-    // 第二遍：无专属匹配时，降级匹配 Global 通用问答
-    const globalQAs = qaBank.filter((qa) => qa.scope !== 'domain' || !qa.domain);
-    return evaluateQA(globalQAs);
-  }
-
-  private matchSemanticDictionary(
-    field: FieldDescriptor,
-    resume: StandardResume,
-    alreadyMatchedKeys: Set<string>
-  ): { resumeKey: string; name: string; targetValue: any; confidence: number; relatedKeys?: string[] } | null {
+  private matchSemanticDictionary(field: FieldDescriptor, resume: StandardResume, alreadyMatchedKeys: Set<string>): { resumeKey: string; name: string; targetValue: any; confidence: number; relatedKeys?: string[] } | null {
+    const queryText = field.label || field.placeholder || field.name || field.ariaLabel;
     let bestKey = '';
     let bestName = '';
     let highestScore = 0;
 
-    const queryText = field.label || field.placeholder || field.name || field.ariaLabel;
-
-    for (const item of RESUME_DICTIONARY) {
-      let targetResumeKey = item.resumeKey;
-
-      // 如果字段属于多段经历卡片且序号 > 0，将 .0. 动态替换为检测到的序号
+    for (const entry of RESUME_DICTIONARY) {
+      let targetKey = entry.resumeKey;
       if (field.section && field.section.index > 0) {
-        if (field.section.type === 'education' && targetResumeKey.startsWith('educations.')) {
-          targetResumeKey = targetResumeKey.replace('educations.0.', `educations.${field.section.index}.`);
-        } else if (field.section.type === 'experience' && targetResumeKey.startsWith('experiences.')) {
-          targetResumeKey = targetResumeKey.replace('experiences.0.', `experiences.${field.section.index}.`);
-        } else if (field.section.type === 'project' && targetResumeKey.startsWith('projects.')) {
-          targetResumeKey = targetResumeKey.replace('projects.0.', `projects.${field.section.index}.`);
-        } else if (field.section.type === 'family' && targetResumeKey.startsWith('familyMembers.')) {
-          targetResumeKey = targetResumeKey.replace('familyMembers.0.', `familyMembers.${field.section.index}.`);
-        }
+        if (field.section.type === 'education' && targetKey.startsWith('educations.')) targetKey = targetKey.replace('educations.0.', `educations.${field.section.index}.`);
+        else if (field.section.type === 'experience' && targetKey.startsWith('experiences.')) targetKey = targetKey.replace('experiences.0.', `experiences.${field.section.index}.`);
+        else if (field.section.type === 'project' && targetKey.startsWith('projects.')) targetKey = targetKey.replace('projects.0.', `projects.${field.section.index}.`);
+        else if (field.section.type === 'family' && targetKey.startsWith('familyMembers.')) targetKey = targetKey.replace('familyMembers.0.', `familyMembers.${field.section.index}.`);
       }
-
-      if (alreadyMatchedKeys.has(targetResumeKey)) {
-        continue;
-      }
-
-      // 排斥上下文检测
-      if (this.shouldExclude(targetResumeKey, field.contextText)) {
-        continue;
-      }
-
-      const semanticScore = calculateSemanticSimilarity(queryText, item.resumeKey);
-      const textScore = calculateTextMatchScore(queryText, item.keywords);
-      const totalScore = Math.max(semanticScore, textScore);
-
-      if (totalScore > highestScore && totalScore >= 0.6) {
-        highestScore = totalScore;
-        bestKey = targetResumeKey;
-        bestName = item.name;
-      }
+      if (alreadyMatchedKeys.has(targetKey) || this.shouldExclude(targetKey, field.contextText)) continue;
+      const score = Math.max(calculateSemanticSimilarity(queryText, entry.resumeKey), calculateTextMatchScore(queryText, entry.keywords));
+      if (score > highestScore && score >= 0.6) { highestScore = score; bestKey = targetKey; bestName = entry.name; }
     }
 
-    if (bestKey && highestScore >= 0.6) {
-      const val = getValueByPath(resume, bestKey);
-      if (hasUsableValue(val)) {
-        let stringVal: any = this.toFieldTargetValue(field, resume, bestKey, val);
-        // 如果是 Location 对象，序列化为省-市-区
-        if (field.type !== 'cascader' && typeof val === 'object' && val !== null && ('province' in val || 'city' in val)) {
-          const loc = val as any;
-          stringVal = [loc.province, loc.city, loc.district].filter(Boolean).join('-');
-        } else if (field.type === 'cascader' && bestKey.startsWith('basics.') && (bestKey.includes('Location') || bestKey.includes('nativePlace'))) {
-          // 如果字段是 Cascader，优先获取完整的省-市-区
-          const parentLocKey = bestKey.replace(/\.(city|province|district)$/, '');
-          const parentLoc = getValueByPath(resume, parentLocKey) as any;
-          if (parentLoc && typeof parentLoc === 'object') {
-            stringVal = [parentLoc.province, parentLoc.city, parentLoc.district].filter(Boolean).join('-');
-          }
-        }
+    if (!bestKey || highestScore < 0.6) return null;
+    const value = getValueByPath(resume, bestKey);
+    if (!hasUsableValue(value)) return null;
+    let targetValue: any = this.toFieldTargetValue(field, resume, bestKey, value);
 
-        if (field.type === 'date-range' && /\.(startDate|endDate)$/.test(bestKey)) {
-          const baseKey = bestKey.replace(/\.(startDate|endDate)$/, '');
-          const startKey = `${baseKey}.startDate`;
-          const endKey = `${baseKey}.endDate`;
-          const startDate = getValueByPath(resume, startKey);
-          const endDate = getValueByPath(resume, endKey);
-          if (hasUsableValue(startDate) || hasUsableValue(endDate)) {
-            return {
-              resumeKey: startKey,
-              name: bestName,
-              targetValue: { startDate: String(startDate || ''), endDate: String(endDate || '') },
-              confidence: highestScore,
-              relatedKeys: [endKey],
-            };
-          }
-        }
-
-        return {
-          resumeKey: bestKey,
-          name: bestName,
-          targetValue: stringVal,
-          confidence: highestScore,
-        };
-      }
+    if (field.type !== 'cascader' && typeof value === 'object' && value !== null && ('province' in value || 'city' in value)) {
+      const location = value as any;
+      targetValue = [location.province, location.city, location.district].filter(Boolean).join('-');
+    } else if (field.type === 'cascader' && bestKey.startsWith('basics.') && (bestKey.includes('Location') || bestKey.includes('nativePlace'))) {
+      const parent = getValueByPath(resume, bestKey.replace(/\.(city|province|district)$/, '')) as any;
+      if (parent && typeof parent === 'object') targetValue = [parent.province, parent.city, parent.district].filter(Boolean).join('-');
     }
 
-    return null;
+    if (field.type === 'date-range' && /\.(startDate|endDate)$/.test(bestKey)) {
+      const base = bestKey.replace(/\.(startDate|endDate)$/, '');
+      const startKey = `${base}.startDate`;
+      const endKey = `${base}.endDate`;
+      const startDate = getValueByPath(resume, startKey);
+      const endDate = getValueByPath(resume, endKey);
+      if (hasUsableValue(startDate) || hasUsableValue(endDate)) return { resumeKey: startKey, name: bestName, targetValue: { startDate: String(startDate || ''), endDate: String(endDate || '') }, confidence: highestScore, relatedKeys: [endKey] };
+    }
+
+    return { resumeKey: bestKey, name: bestName, targetValue, confidence: highestScore };
   }
 
   private shouldExclude(resumeKey: string, contextText: string): boolean {
     const exclusions = CONTEXT_EXCLUSION_RULES[resumeKey];
     if (!exclusions || !contextText) return false;
-
-    for (const word of exclusions) {
-      if (contextText.toLowerCase().includes(word.toLowerCase())) {
-        return true;
-      }
-    }
-    return false;
+    return exclusions.some((word) => contextText.toLowerCase().includes(word.toLowerCase()));
   }
 }
 

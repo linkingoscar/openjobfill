@@ -3,8 +3,11 @@ import { AnalyzedPlanStaleError, formFillerEngine, type AnalyzedPlan } from '@/c
 import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 import { mergeAnalyzedPlans } from '@/core/pipeline/mergeAnalyzedPlans';
+import { recordPersonalLearningFeedback } from '@/core/storage/personalLearningFeedback';
+import { runPreSubmitConsistencyChecks } from '@/core/ai/preSubmitConsistency';
 import type { StandardResume } from '@/types/resume';
 import type { FillResult } from '@/types/adapter';
+import type { FillPlan } from '@/types/pipeline';
 
 interface FillSessionOptions {
   loadResume: () => Promise<StandardResume>;
@@ -13,7 +16,7 @@ interface FillSessionOptions {
   persistError: (phase: 'analysis' | 'execution', error: unknown) => Promise<void>;
 }
 
-/** Owns the entire analysis → preview → execution lifecycle. UI receives read-only views. */
+/** Owns the entire analysis → preview → execution lifecycle. UI receives controlled preview mutation helpers. */
 export function useFillSession(options: FillSessionOptions) {
   const phase = ref<'idle' | 'analyzing' | 'executing'>('idle');
   const preview = shallowRef<AnalyzedPlan | null>(null);
@@ -28,17 +31,79 @@ export function useFillSession(options: FillSessionOptions) {
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   const isCurrent = (ticket: number) => !disposed && ticket === revision;
 
-  const remoteItems = (action: 'FILL' | 'NEEDS_USER') =>
+  const remoteItems = (action: 'FILL' | 'NEEDS_USER' | 'SKIP') =>
     (preview.value?.remoteFrames || []).flatMap((frame) => frame.items
       .filter((item) => item.action === action)
       .map((item) => ({ ...item, id: `frame-${frame.frameId}-${item.id}`, field: { label: `${item.label}（子页面）` } })));
+
   const previewFillItems = computed(() => [
-    ...(preview.value?.plan.items.filter((item) => item.action === 'FILL') || []), ...remoteItems('FILL'),
+    ...(preview.value?.plan.items.filter((item) => item.action === 'FILL') || []),
+    ...remoteItems('FILL'),
   ]);
+
   const previewNeedsUserItems = computed(() => [
-    ...(preview.value?.plan.items.filter((item) => item.action === 'NEEDS_USER') || []), ...remoteItems('NEEDS_USER'),
+    ...(preview.value?.plan.items.filter((item) =>
+      item.action === 'NEEDS_USER' || item.decision === 'OPTIONAL_UNMATCHED' || item.decision === 'BLOCKED') || []),
+    ...remoteItems('NEEDS_USER'),
+    ...remoteItems('SKIP').filter((item) => item.decision === 'OPTIONAL_UNMATCHED' || item.decision === 'BLOCKED'),
   ]);
+
   const previewWorkflowItems = computed(() => preview.value?.sectionPreparation?.actions || []);
+
+  function recomputePlanCounters(plan: FillPlan): void {
+    let highConfidenceCount = 0;
+    let reviewRequiredCount = 0;
+    let optionalUnmatchedCount = 0;
+    let needsUserCount = 0;
+    let blockedCount = 0;
+    let skipCount = 0;
+    for (const item of plan.items) {
+      if (item.action === 'FILL') {
+        highConfidenceCount += 1;
+        if (item.decision === 'FILL_REVIEW_REQUIRED') reviewRequiredCount += 1;
+      } else if (item.action === 'NEEDS_USER') {
+        needsUserCount += 1;
+      } else {
+        skipCount += 1;
+        if (item.decision === 'OPTIONAL_UNMATCHED') optionalUnmatchedCount += 1;
+        if (item.decision === 'BLOCKED') blockedCount += 1;
+      }
+    }
+    plan.highConfidenceCount = highConfidenceCount;
+    plan.reviewRequiredCount = reviewRequiredCount;
+    plan.optionalUnmatchedCount = optionalUnmatchedCount;
+    plan.needsUserCount = needsUserCount;
+    plan.blockedCount = blockedCount;
+    plan.skipCount = skipCount;
+  }
+
+  function updatePreviewItemValue(itemId: string, targetValue: unknown): boolean {
+    if (!preview.value || phase.value !== 'idle') return false;
+    const item = preview.value.plan.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.action !== 'FILL') return false;
+    const primitive = typeof targetValue === 'string' || typeof targetValue === 'number' || typeof targetValue === 'boolean';
+    if (!primitive) return false;
+    if (typeof targetValue === 'string' && targetValue.length > 20_000) return false;
+    item.targetValue = targetValue;
+    item.confidence = 1;
+    item.reason = '用户在本次填写预览中临时修改；仅影响本次执行，不回写主档案';
+    // Keep risk/decision unchanged: editing a Critical/High field must not remove its review treatment.
+    preview.value = { ...preview.value, plan: { ...preview.value.plan, items: [...preview.value.plan.items] } };
+    return true;
+  }
+
+  function skipPreviewItem(itemId: string): boolean {
+    if (!preview.value || phase.value !== 'idle') return false;
+    const item = preview.value.plan.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.action !== 'FILL') return false;
+    item.action = 'SKIP';
+    item.decision = 'SKIP';
+    item.requiresExplicitReview = false;
+    item.reason = '用户在本次预览中取消填写';
+    recomputePlanCounters(preview.value.plan);
+    preview.value = { ...preview.value, plan: { ...preview.value.plan, items: [...preview.value.plan.items] } };
+    return true;
+  }
 
   async function release(plan: AnalyzedPlan | null, reason: string) {
     if (plan?.runId) formFillerEngine.cancelRun(plan.runId, reason);
@@ -75,17 +140,13 @@ export function useFillSession(options: FillSessionOptions) {
       const resume = await options.loadResume();
       if (!isCurrent(ticket)) return { fillCount: 0, needsUserCount: 0 };
       analyzed = previous
-        ? await formFillerEngine.analyzeIncremental(resume, previous, {
-          changedRoots: changedRoots.map((node) => node.parentElement || node),
-        })
+        ? await formFillerEngine.analyzeIncremental(resume, previous, { changedRoots: changedRoots.map((node) => node.parentElement || node) })
         : await formFillerEngine.analyze(resume);
       if (!isCurrent(ticket)) {
         await release(analyzed, '过期分析结果');
         return { fillCount: 0, needsUserCount: 0 };
       }
-      if (!previous) {
-        analyzed.remoteFrames = await analyzeRemoteFrames(resume.id, { runId: analyzed.runId });
-      }
+      if (!previous) analyzed.remoteFrames = await analyzeRemoteFrames(resume.id, { runId: analyzed.runId });
       if (!isCurrent(ticket)) {
         await release(analyzed, '过期子页面分析结果');
         return { fillCount: 0, needsUserCount: 0 };
@@ -108,9 +169,27 @@ export function useFillSession(options: FillSessionOptions) {
     }
   }
 
+  async function addConsistencyIssues(filled: FillResult): Promise<void> {
+    if (!filled.plan) return;
+    const resume = await options.loadResume();
+    const variant = resume as StandardResume & { variantContext?: { company?: string; role?: string } };
+    filled.consistencyIssues = runPreSubmitConsistencyChecks({
+      resume,
+      currentCompany: variant.variantContext?.company,
+      currentRole: variant.variantContext?.role,
+      pageFields: filled.plan.items
+        .filter((item) => item.action === 'FILL')
+        .map((item) => ({
+          semanticKey: item.semanticKey,
+          label: item.field.label,
+          value: item.actualValue ?? item.targetValue,
+          verificationStatus: item.verificationStatus || 'UNREADABLE',
+        })),
+    });
+  }
+
   async function confirmFill() {
-    if (disposed || phase.value !== 'idle' || !preview.value
-      || (!previewFillItems.value.length && !previewWorkflowItems.value.length)) return;
+    if (disposed || phase.value !== 'idle' || !preview.value || (!previewFillItems.value.length && !previewWorkflowItems.value.length)) return;
     const ticket = ++revision;
     const plan = preview.value;
     const previous = basePlan.value;
@@ -119,12 +198,22 @@ export function useFillSession(options: FillSessionOptions) {
     try {
       const filled = await formFillerEngine.executePlan(plan);
       if (!isCurrent(ticket)) return;
+      try {
+        await addConsistencyIssues(filled);
+      } catch (consistencyError) {
+        console.warn('[OpenJobFill] Consistency check was not completed:', consistencyError);
+      }
       const executed = { ...plan, plan: filled.plan || plan.plan };
       lastPlan.value = previous ? mergeAnalyzedPlans(previous, executed) : executed;
       result.value = filled;
       preview.value = null;
       basePlan.value = null;
       await options.persistResult(filled);
+      try {
+        await recordPersonalLearningFeedback(plan.pageUrl || window.location.href, filled);
+      } catch (feedbackError) {
+        console.warn('[OpenJobFill] Personal learning feedback was not persisted:', feedbackError);
+      }
       if (isCurrent(ticket)) options.present();
     } catch (cause) {
       if (!isCurrent(ticket)) return;
@@ -145,10 +234,7 @@ export function useFillSession(options: FillSessionOptions) {
     void cancel('页面步骤已变化');
     changedRoots = nodes;
     const incremental = !!lastPlan.value && url === lastPlan.value.pageUrl && nodes.length > 0;
-    notification.value = {
-      show: true,
-      text: incremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页',
-    };
+    notification.value = { show: true, text: incremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页' };
     clearTimeout(notificationTimer);
     notificationTimer = setTimeout(() => { notification.value = { ...notification.value, show: false }; }, 8000);
   }
@@ -167,6 +253,8 @@ export function useFillSession(options: FillSessionOptions) {
     stepNotification: computed(() => notification.value),
     previewFillItems, previewNeedsUserItems, previewWorkflowItems,
     analyze: () => analyze(), confirmFill, cancel, notifyStepChange,
+    updatePreviewItemValue,
+    skipPreviewItem,
     analyzeChangedPage: () => analyze(!!lastPlan.value && window.location.href === lastPlan.value.pageUrl && changedRoots.length > 0),
     invalidateResume: async () => {
       lastPlan.value = null;

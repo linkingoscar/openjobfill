@@ -42,6 +42,12 @@ import type { ClipboardItem, DrawerTab } from '@/types/floatingBall';
 import type { RemainingTaskItem } from '@/types/pipeline';
 import { useFloatingPosition } from './composables/useFloatingPosition';
 
+interface PreviewRuleItem {
+  id: string;
+  field: { label: string; element?: HTMLElement; fingerprint?: string; locator?: any };
+  semanticKey?: string;
+}
+
 const isDrawerOpen = ref(false);
 const drawerTab = ref<DrawerTab>('logs');
 const currentAdapterName = ref('');
@@ -105,6 +111,29 @@ const handleSaveTaskMapping = async (task: RemainingTaskItem) => {
   );
   activeTaskMappingId.value = null;
   copyToastMessage.value = `🎯 已为当前网站记住映射【${task.label} -> ${selectedMappingKey.value}】！下次自动填表将精准命中。`;
+  setTimeout(() => { copyToastMessage.value = ''; }, 3500);
+};
+
+const handleSavePreviewRule = async (item: PreviewRuleItem) => {
+  if (!item.field.element || !item.semanticKey) return;
+  const selector = generateOptimalSelector(item.field.element);
+  if (!selector) {
+    copyToastMessage.value = '当前字段无法生成稳定选择器，本次不会保存个人规则';
+    setTimeout(() => { copyToastMessage.value = ''; }, 3000);
+    return;
+  }
+  try {
+    await ruleStorage.bindFieldToSite(
+      window.location.href,
+      selector,
+      item.semanticKey,
+      item.field.label,
+      { fingerprint: item.field.fingerprint, locator: item.field.locator },
+    );
+    copyToastMessage.value = `已保存当前站点规则：${item.field.label} → ${item.semanticKey}`;
+  } catch (error) {
+    copyToastMessage.value = error instanceof Error ? error.message : '个人站点规则保存失败';
+  }
   setTimeout(() => { copyToastMessage.value = ''; }, 3500);
 };
 
@@ -371,6 +400,7 @@ const fillSession = useFillSession({
 const {
   isFilling, fillResult, operationError, stepNotification,
   previewPlan, previewFillItems, previewNeedsUserItems, previewWorkflowItems, confirmFill,
+  updatePreviewItemValue, skipPreviewItem,
 } = fillSession;
 const cancelPreview = () => fillSession.cancel();
 const handlePreviewManualFill = async () => {
@@ -556,77 +586,24 @@ defineExpose({
           </select>
         </div>
 
-        <!-- Tab Toggle Bar (3 Tabs) -->
+        <!-- Tab Toggle Bar -->
         <div 
           role="tablist" 
           aria-label="控制面板功能切换" 
           class="flex items-center border-b border-slate-100 bg-slate-50 text-xs font-bold p-1 gap-1"
         >
-          <button
-            id="drawer-tab-logs"
-            role="tab"
-            type="button"
-            :aria-selected="drawerTab === 'logs'"
-            aria-controls="drawer-panel-logs"
-            @click="drawerTab = 'logs'"
-            :class="[
-              'flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500',
-              drawerTab === 'logs' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            ]"
-          >
-            <Sparkles class="w-3.5 h-3.5" aria-hidden="true" />
-            <span>一键填表</span>
+          <button id="drawer-tab-logs" role="tab" type="button" :aria-selected="drawerTab === 'logs'" aria-controls="drawer-panel-logs" @click="drawerTab = 'logs'" :class="['flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500', drawerTab === 'logs' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800']">
+            <Sparkles class="w-3.5 h-3.5" aria-hidden="true" /><span>一键填表</span>
           </button>
-          <button
-            id="drawer-tab-review"
-            role="tab"
-            type="button"
-            :aria-selected="drawerTab === 'review'"
-            aria-controls="drawer-panel-review"
-            @click="drawerTab = 'review'"
-            :class="[
-              'flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500 relative',
-              drawerTab === 'review' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            ]"
-          >
-            <AlertTriangle class="w-3.5 h-3.5" aria-hidden="true" />
-            <span>待办核对</span>
-            <span 
-              v-if="fillResult?.remainingTasks && fillResult.remainingTasks.length > 0"
-              class="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold"
-            >
-              {{ fillResult.remainingTasks.length }}
-            </span>
+          <button id="drawer-tab-review" role="tab" type="button" :aria-selected="drawerTab === 'review'" aria-controls="drawer-panel-review" @click="drawerTab = 'review'" :class="['flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500 relative', drawerTab === 'review' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800']">
+            <AlertTriangle class="w-3.5 h-3.5" aria-hidden="true" /><span>待办核对</span>
+            <span v-if="fillResult?.remainingTasks && fillResult.remainingTasks.length > 0" class="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">{{ fillResult.remainingTasks.length }}</span>
           </button>
-          <button
-            id="drawer-tab-jd"
-            role="tab"
-            type="button"
-            :aria-selected="drawerTab === 'jdMatch'"
-            aria-controls="drawer-panel-jd"
-            @click="handleSwitchToJDTab"
-            :class="[
-              'flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500',
-              drawerTab === 'jdMatch' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            ]"
-          >
-            <Target class="w-3.5 h-3.5" aria-hidden="true" />
-            <span>岗位匹配</span>
+          <button id="drawer-tab-jd" role="tab" type="button" :aria-selected="drawerTab === 'jdMatch'" aria-controls="drawer-panel-jd" @click="handleSwitchToJDTab" :class="['flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500', drawerTab === 'jdMatch' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800']">
+            <Target class="w-3.5 h-3.5" aria-hidden="true" /><span>岗位匹配</span>
           </button>
-          <button
-            id="drawer-tab-clipboard"
-            role="tab"
-            type="button"
-            :aria-selected="drawerTab === 'clipboard'"
-            aria-controls="drawer-panel-clipboard"
-            @click="drawerTab = 'clipboard'"
-            :class="[
-              'flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500',
-              drawerTab === 'clipboard' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            ]"
-          >
-            <Copy class="w-3.5 h-3.5" aria-hidden="true" />
-            <span>剪贴板 ({{ flatResumeFields.length }})</span>
+          <button id="drawer-tab-clipboard" role="tab" type="button" :aria-selected="drawerTab === 'clipboard'" aria-controls="drawer-panel-clipboard" @click="drawerTab = 'clipboard'" :class="['flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 focus-visible:ring-2 focus-visible:ring-blue-500', drawerTab === 'clipboard' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800']">
+            <Copy class="w-3.5 h-3.5" aria-hidden="true" /><span>剪贴板 ({{ flatResumeFields.length }})</span>
           </button>
         </div>
 
@@ -646,6 +623,9 @@ defineExpose({
           @analyze="handleQuickFill"
           @manual="handleManualFill"
           @upload="handleUploadResume"
+          @update-preview-value="updatePreviewItemValue"
+          @skip-preview-item="skipPreviewItem"
+          @save-preview-rule="handleSavePreviewRule"
           @cancel="isFilling ? handleCancelActiveRun() : cancelPreview()"
         >
           <template #history>
@@ -665,7 +645,6 @@ defineExpose({
           </template>
         </DrawerFillTab>
 
-        <!-- TAB: 待办与核对 (Review) -->
         <DrawerReviewTab
           v-if="drawerTab === 'review'"
           :fill-result="fillResult"
@@ -690,7 +669,6 @@ defineExpose({
           @copy-keyword="handleCopyKeyword"
         />
 
-        <!-- TAB 3: 简历速查剪贴板 -->
         <DrawerClipboardTab
           v-if="drawerTab === 'clipboard'"
           :items="filteredFields"
@@ -704,74 +682,23 @@ defineExpose({
       </div>
     </transition>
 
-    <!-- Step Change Mini Notification Toast -->
-    <transition
-      enter-active-class="transition duration-300 ease-out transform"
-      enter-from-class="-translate-y-2 opacity-0"
-      enter-to-class="translate-y-0 opacity-100"
-      leave-active-class="transition duration-200 ease-in transform"
-      leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="-translate-y-2 opacity-0"
-    >
-      <div 
-        v-if="stepNotification.show"
-        @click="handleStepNotification"
-        class="absolute bottom-full right-0 cursor-pointer w-[248px] max-w-[calc(100vw-24px)] bg-slate-900/95 text-white px-3 py-2.5 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-start gap-2.5 hover:bg-blue-900 transition mb-2"
-        role="button"
-        tabindex="0"
-        @keydown.enter.prevent="handleStepNotification"
-        @keydown.space.prevent="handleStepNotification"
-      >
+    <transition enter-active-class="transition duration-300 ease-out transform" enter-from-class="-translate-y-2 opacity-0" enter-to-class="translate-y-0 opacity-100" leave-active-class="transition duration-200 ease-in transform" leave-from-class="translate-y-0 opacity-100" leave-to-class="-translate-y-2 opacity-0">
+      <div v-if="stepNotification.show" @click="handleStepNotification" class="absolute bottom-full right-0 cursor-pointer w-[248px] max-w-[calc(100vw-24px)] bg-slate-900/95 text-white px-3 py-2.5 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-start gap-2.5 hover:bg-blue-900 transition mb-2" role="button" tabindex="0" @keydown.enter.prevent="handleStepNotification" @keydown.space.prevent="handleStepNotification">
         <Sparkles class="w-4 h-4 mt-0.5 text-amber-400 flex-shrink-0 animate-bounce" aria-hidden="true" />
-        <span class="min-w-0 text-left">
-          <strong class="block text-xs font-semibold leading-4">检测到网申新步骤</strong>
-          <span class="block mt-0.5 text-[11px] text-slate-200 leading-4 whitespace-normal break-words">{{ stepNotification.text }}</span>
-        </span>
+        <span class="min-w-0 text-left"><strong class="block text-xs font-semibold leading-4">检测到网申新步骤</strong><span class="block mt-0.5 text-[11px] text-slate-200 leading-4 whitespace-normal break-words">{{ stepNotification.text }}</span></span>
       </div>
     </transition>
 
-    <!-- Main Floating Bubble Button -->
     <div class="w-[74px] flex flex-col items-center gap-1.5">
-      <button
-        type="button"
-        @pointerdown="startBallDrag"
-        @click="handleBubbleClick"
-        :class="[
-          'w-12 h-12 rounded-full shadow-2xl flex items-center justify-center text-white transition-all transform hover:scale-110 active:scale-95 group relative focus-visible:ring-4 focus-visible:ring-blue-400 touch-none cursor-move',
-          isFilling ? 'bg-blue-700 animate-pulse' : 'bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-blue-500/50 shadow-blue-600/30'
-        ]"
-        title="点击一键自动填表；按住可拖动位置 (Alt+Shift+F)"
-        aria-label="一键自动填写当前页面；按住可拖动位置 (快捷键 Alt+Shift+F)"
-      >
+      <button type="button" @pointerdown="startBallDrag" @click="handleBubbleClick" :class="['w-12 h-12 rounded-full shadow-2xl flex items-center justify-center text-white transition-all transform hover:scale-110 active:scale-95 group relative focus-visible:ring-4 focus-visible:ring-blue-400 touch-none cursor-move', isFilling ? 'bg-blue-700 animate-pulse' : 'bg-gradient-to-tr from-blue-600 to-indigo-600 hover:shadow-blue-500/50 shadow-blue-600/30']" title="点击一键自动填表；按住可拖动位置 (Alt+Shift+F)" aria-label="一键自动填写当前页面；按住可拖动位置 (快捷键 Alt+Shift+F)">
         <Zap v-if="!isFilling" class="w-6 h-6 fill-white" aria-hidden="true" />
         <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-
-        <!-- Tooltip -->
-        <span class="absolute right-14 whitespace-nowrap bg-slate-900 text-white text-xs px-2.5 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition shadow-lg pointer-events-none">
-          点击一键填表 (Alt+Shift+F)
-        </span>
+        <span class="absolute right-14 whitespace-nowrap bg-slate-900 text-white text-xs px-2.5 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition shadow-lg pointer-events-none">点击一键填表 (Alt+Shift+F)</span>
       </button>
 
-      <!-- Toggle Drawer Button -->
       <div class="flex items-center gap-1">
-        <button
-          type="button"
-          @click="toggleDrawer"
-          :aria-expanded="isDrawerOpen"
-          aria-controls="openjobfill-drawer-panel"
-          class="px-2.5 py-1 min-h-[26px] bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-white flex items-center justify-center gap-0.5 transition focus-visible:ring-2 focus-visible:ring-blue-500"
-        >
-          <span>{{ isDrawerOpen ? '收起' : '面板' }}</span>
-        </button>
-        <button
-          type="button"
-          @click="handleHideFloatingBall"
-          class="w-6 h-6 bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-slate-500 hover:text-rose-600 hover:bg-white flex items-center justify-center transition focus-visible:ring-2 focus-visible:ring-rose-500"
-          title="在当前页面隐藏悬浮球（刷新或使用快捷键可恢复）"
-          aria-label="在当前页面隐藏悬浮球"
-        >
-          <X class="w-3.5 h-3.5" aria-hidden="true" />
-        </button>
+        <button type="button" @click="toggleDrawer" :aria-expanded="isDrawerOpen" aria-controls="openjobfill-drawer-panel" class="px-2.5 py-1 min-h-[26px] bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-white flex items-center justify-center gap-0.5 transition focus-visible:ring-2 focus-visible:ring-blue-500"><span>{{ isDrawerOpen ? '收起' : '面板' }}</span></button>
+        <button type="button" @click="handleHideFloatingBall" class="w-6 h-6 bg-white/90 backdrop-blur border border-slate-200/80 rounded-full shadow-md text-slate-500 hover:text-rose-600 hover:bg-white flex items-center justify-center transition focus-visible:ring-2 focus-visible:ring-rose-500" title="在当前页面隐藏悬浮球（刷新或使用快捷键可恢复）" aria-label="在当前页面隐藏悬浮球"><X class="w-3.5 h-3.5" aria-hidden="true" /></button>
       </div>
     </div>
   </aside>

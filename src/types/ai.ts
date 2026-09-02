@@ -1,28 +1,15 @@
-/**
- * AI 字段兜底相关类型
- *
- * 设计约束（个人使用、体验第一、本地优先、省成本、隐私）：
- *   - 规则引擎始终优先，AI 只处理规则没命中的长尾字段
- *   - 所有未命中字段合并为一次 LLM 调用（省成本），而非每字段一次
- *   - 字段映射只发送字段"标签"（label/placeholder/name），不包含简历"值"
- *   - 独立的视觉导入功能只有在用户逐次确认后才发送完整简历图片
- *   - LLM 只返回 标签→resumeKey 的映射，简历值在本地取出填充，内容不出本机
- */
-
+/** AI 能力类型。规则引擎始终优先，字段映射不发送档案实际值。 */
 export type AIProviderType = 'ollama' | 'openai-compatible';
 
 export interface AISettings {
-  /** 是否启用 AI 兜底。默认关闭 —— 未配置时保持纯本地规则模式 */
   enabled: boolean;
   provider: AIProviderType;
-  /**
-   * Ollama: 形如 http://localhost:11434
-   * OpenAI 兼容: 形如 https://api.deepseek.com（将拼接 /chat/completions）
-   */
   baseUrl: string;
-  /** Ollama 本地调用无需 Key；云端 OpenAI 兼容接口必填 */
   apiKey?: string;
   model: string;
+  /** Full-document parsing and answer drafting require an explicit per-request confirmation by default. */
+  confirmFullResumeSend?: boolean;
+  timeoutMs?: number;
 }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
@@ -30,9 +17,11 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   provider: 'ollama',
   baseUrl: 'http://localhost:11434',
   model: 'qwen2.5:7b',
+  confirmFullResumeSend: true,
+  timeoutMs: 30_000,
 };
 
-/** 规则引擎未命中的页面字段描述。注意：只含"问题"，不含简历"答案" */
+/** Value-free page context. No resume values are permitted in this object. */
 export interface UnmatchedFieldDescriptor {
   index: number;
   label: string;
@@ -40,20 +29,70 @@ export interface UnmatchedFieldDescriptor {
   name: string;
   ariaLabel: string;
   inputType: string;
+  required?: boolean;
+  section?: 'basic' | 'education' | 'experience' | 'project' | 'family' | 'qa' | 'unknown';
+  sectionIndex?: number;
+  nearbyLabels?: string[];
+  pageTitle?: string;
+  siteProfile?: string;
+  optionSummary?: string[];
+  riskLevel?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LONG_TEXT' | 'LOW';
 }
 
-/** 可供映射的简历字段候选（key + 可读标签，不含值） */
+/** Value-free resume field option. hasValue is boolean only; the actual value never leaves the browser for field mapping. */
 export interface ResumeKeyOption {
   resumeKey: string;
   label: string;
+  valueType?: string;
+  hasValue?: boolean;
+  riskLevel?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LONG_TEXT' | 'LOW';
 }
 
-/** LLM 返回的映射：未命中字段 index → resumeKey */
+/** Legacy mapping shape retained for existing callers. */
 export type FieldIndexMapping = Record<number, string>;
 
-/** background 返回给 content script 的 AI 映射结果 */
+export interface AIFieldMappingSuggestion {
+  fieldIndex: number;
+  resumeKey: string;
+  confidence: number;
+  reasonCode: string;
+  alternatives?: Array<{ resumeKey: string; confidence: number }>;
+}
+
+export interface AIFieldMappingV2Payload {
+  fields: UnmatchedFieldDescriptor[];
+  options: ResumeKeyOption[];
+}
+
+export interface AIFieldMappingV2Response {
+  success: boolean;
+  mappings?: AIFieldMappingSuggestion[];
+  error?: string;
+}
+
+/** Backward-compatible background response. New implementations should prefer mappings. */
 export interface AIFieldMappingResponse {
   success: boolean;
   mapping?: FieldIndexMapping;
+  mappings?: AIFieldMappingSuggestion[];
   error?: string;
+}
+
+export interface AIDocumentCandidate {
+  path: string;
+  value: unknown;
+  confidence: number;
+  evidence?: { page?: number; quote?: string };
+}
+
+export interface AIDocumentParseResponse {
+  candidates: AIDocumentCandidate[];
+  warnings: string[];
+}
+
+export interface AIAnswerDraft {
+  text: string;
+  usedResumeKeys: string[];
+  warnings: string[];
+  requestedLimit?: number;
 }

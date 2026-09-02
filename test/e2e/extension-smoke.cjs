@@ -175,7 +175,7 @@ async function main() {
     const stepNoticeWidth = await stepNotice.evaluate((element) => element.getBoundingClientRect().width);
     assert.equal(stepNoticeWidth, 248, '步骤提示条宽度不应被宿主页面样式压缩');
     await reopenedBubble.click();
-    const confirmFill = reopenedHost.getByRole('button', { name: /^确认填写/ });
+    const confirmFill = reopenedHost.getByRole('button', { name: /确认填写/ });
     await confirmFill.waitFor({ state: 'visible', timeout: 15000 });
     const drawer = reopenedHost.locator('#openjobfill-drawer-panel');
     const drawerWidth = await drawer.evaluate((element) => element.getBoundingClientRect().width);

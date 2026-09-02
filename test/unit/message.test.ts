@@ -13,7 +13,12 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({ type: 'TRACKER_STORAGE_UPDATE_STATUS', payload: { id: 'app-1', status: 'unknown' } })).toBe(false);
   });
 
-  it('accepts the storage and cross-frame messages used by current callers', () => {
+  it('accepts active-tab, storage and cross-frame messages used by current callers', () => {
+    expect(isExtensionMessage({
+      type: 'TRIGGER_ACTIVE_TAB_FILL',
+      payload: { resumeId: 'resume-1' },
+    })).toBe(true);
+    expect(isExtensionMessage({ type: 'TRIGGER_ACTIVE_TAB_FILL' })).toBe(true);
     expect(isExtensionMessage({
       type: 'RESUME_STORAGE_UPDATE_FIELDS',
       payload: { id: 'resume-1', updates: { 'basics.name': '候选人' } },
@@ -25,6 +30,24 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({
       type: 'AI_MAP_FIELDS',
       payload: { settings: { enabled: false }, fields: [], options: [] },
+    })).toBe(true);
+    expect(isExtensionMessage({
+      type: 'AI_DRAFT_ANSWER',
+      payload: {
+        settings: { enabled: true },
+        question: '为什么选择我们？',
+        maxChars: 200,
+        context: { company: 'Example', facts: { 'projects.0.description': '项目事实' } },
+        confirmedExternalProcessing: true,
+      },
+    })).toBe(true);
+    expect(isExtensionMessage({
+      type: 'AI_SUGGEST_JOB_VARIANT',
+      payload: {
+        settings: { enabled: true },
+        context: { role: '前端工程师', jdText: '需要 TypeScript', facts: { 'skills.0.name': 'TypeScript' } },
+        confirmedExternalProcessing: true,
+      },
     })).toBe(true);
     expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
@@ -59,10 +82,19 @@ describe('Extension message protocol', () => {
   });
 
   it('rejects malformed or unknown payloads before they reach handlers', () => {
+    expect(isExtensionMessage({ type: 'TRIGGER_ACTIVE_TAB_FILL', payload: { resumeId: 123 } })).toBe(false);
     expect(isExtensionMessage({ type: 'RESUME_STORAGE_UPDATE_FIELDS', payload: { id: 'resume-1', updates: [] } })).toBe(false);
     expect(isExtensionMessage({ type: 'FRAME_EXECUTE', payload: { analysisId: '' } })).toBe(false);
     expect(isExtensionMessage({ type: 'EXECUTE_CROSS_ORIGIN_FRAMES', payload: { targets: [{ frameId: '3', analysisId: 'x' }] } })).toBe(false);
     expect(isExtensionMessage({ type: 'UNKNOWN_MESSAGE', payload: {} })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'AI_DRAFT_ANSWER',
+      payload: { settings: { enabled: true }, question: '为什么选择我们？', context: { facts: {} }, confirmedExternalProcessing: false },
+    })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'AI_SUGGEST_JOB_VARIANT',
+      payload: { settings: { enabled: true }, context: { facts: {} }, confirmedExternalProcessing: false },
+    })).toBe(false);
     expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
       payload: { settings: {}, imageDataUrl: 'https://example.com/resume.jpg', fileName: 'resume.jpg' },

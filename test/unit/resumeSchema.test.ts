@@ -3,7 +3,7 @@ import { parseResumePayload, ResumeSchemaError } from '@/core/schema/resumeSchem
 import { importJsonResume } from '@/core/importers/jsonResumeImporter';
 
 describe('StandardResume runtime schema', () => {
-  it('按版本迁移旧字段名，而不是只覆盖 schemaVersion', () => {
+  it('按版本迁移旧字段名并升级到 v5 可信档案结构', () => {
     const result = parseResumePayload({
       id: 'legacy-v2',
       title: '旧版简历',
@@ -15,41 +15,34 @@ describe('StandardResume runtime schema', () => {
     }, { strict: true, now: 1000 });
 
     expect(result.migratedFrom).toBe(2);
-    expect(result.resume.schemaVersion).toBe(4);
+    expect(result.resume.schemaVersion).toBe(5);
     expect(result.resume.basics.height).toBe('180');
     expect(result.resume.educations[0]).toMatchObject({ schoolName: '示例大学', courses: '数据结构' });
     expect(result.resume.experiences[0]).toMatchObject({ title: '工程师', achievements: '上线项目' });
     expect(result.resume.qaBank[0]).toMatchObject({ keyword: '动机', answer: '共同成长', scope: 'global' });
+    expect((result.resume as any).fieldMeta).toEqual({});
+    expect((result.resume as any).variantType).toBe('master');
   });
 
   it('拒绝未来版本和损坏的已知字段类型', () => {
-    expect(() => parseResumePayload({ schemaVersion: 99, basics: {} }, { strict: true }))
-      .toThrow(ResumeSchemaError);
-    expect(() => parseResumePayload({
-      id: 'broken',
-      schemaVersion: 4,
-      basics: { name: '张三' },
-      educations: 'not-an-array',
-    }, { strict: true })).toThrow(/educations 必须是数组/);
+    expect(() => parseResumePayload({ schemaVersion: 99, basics: {} }, { strict: true })).toThrow(ResumeSchemaError);
+    expect(() => parseResumePayload({ id: 'broken', schemaVersion: 4, basics: { name: '张三' }, educations: 'not-an-array' }, { strict: true })).toThrow(/educations 必须是数组/);
   });
 
-  it('导入时删除未知字段并拒绝损坏的数组项', () => {
+  it('导入时删除未知字段、拒绝损坏数组，并保留合法 fieldMeta', () => {
     const clean = parseResumePayload({
-      id: 'known',
-      title: '已知结构',
-      schemaVersion: 4,
-      basics: { name: '张三', injected: 'drop-me' },
-      educations: [],
-      privatePayload: { arbitrary: true },
-    }, { strict: true }).resume as unknown as Record<string, unknown>;
+      id: 'known', title: '已知结构', schemaVersion: 5,
+      basics: { name: '张三', injected: 'drop-me' }, educations: [], privatePayload: { arbitrary: true },
+      fieldMeta: {
+        'basics.name': { source: 'manual', confirmed: true, locked: true, updatedAt: 1000, evidence: [{ type: 'manual' }] },
+        '__proto__.x': { source: 'manual', confirmed: true, locked: true, updatedAt: 1000 },
+      },
+    }, { strict: false }).resume as unknown as Record<string, unknown>;
     expect(clean.privatePayload).toBeUndefined();
     expect((clean.basics as Record<string, unknown>).injected).toBeUndefined();
+    expect((clean.fieldMeta as Record<string, unknown>)['basics.name']).toBeTruthy();
+    expect((clean.fieldMeta as Record<string, unknown>)['__proto__.x']).toBeUndefined();
 
-    expect(() => importJsonResume({
-      id: 'broken-import',
-      schemaVersion: 4,
-      basics: { name: '张三' },
-      educations: ['bad-item'],
-    })).toThrow(/educations\[0\] 必须是对象/);
+    expect(() => importJsonResume({ id: 'broken-import', schemaVersion: 4, basics: { name: '张三' }, educations: ['bad-item'] })).toThrow(/educations\[0\] 必须是对象/);
   });
 });

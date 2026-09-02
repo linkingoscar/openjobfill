@@ -1,8 +1,5 @@
 /**
- * AI 字段映射：把规则引擎未命中的页面字段，批量映射到简历字段
- *
- * 一次 LLM 调用处理全部未命中字段（而非每字段一次），把成本压到最低。
- * 传给 LLM 的只有"字段标签"与"简历字段名清单"，简历的实际内容不参与。
+ * AI 字段映射 v2：只发送页面结构与档案字段元信息，不发送档案实际值。
  */
 import type { StandardResume } from '../../types/resume';
 import { enumerateResumeFields } from '../schema/resumeFieldRegistry';
@@ -10,87 +7,122 @@ import type {
   UnmatchedFieldDescriptor,
   ResumeKeyOption,
   FieldIndexMapping,
+  AIFieldMappingSuggestion,
 } from '../../types/ai';
 
-/** 单次喂给 LLM 的未命中字段上限，防止超长表单撑爆上下文与费用 */
 const MAX_FIELDS_PER_CALL = 25;
 
-/**
- * 从简历中提取"有值"的字段清单，作为 LLM 可映射的候选。
- * 只取 key 与可读标签，不取值本身。
- */
+function riskForResumeField(path: string, valueKind: string): ResumeKeyOption['riskLevel'] {
+  if (/^basics\.(name|firstName|lastName|phone|email|idCardNumber)$/.test(path)) return 'CRITICAL';
+  if (/politicalStatus|ethnicity|familyMembers|emergencyContact|expectedSalary|birthDate|startDate|endDate|nativePlace|birthPlace|currentLocation|hukouLocation|expectedCity/.test(path)) return 'HIGH';
+  if (valueKind === 'LONG_TEXT') return 'LONG_TEXT';
+  if (/schoolName|major|company|title|certificates|degree/.test(path)) return 'MEDIUM';
+  return 'LOW';
+}
+
 export function buildResumeKeyOptions(resume: StandardResume): ResumeKeyOption[] {
   return enumerateResumeFields(resume)
-    // Domain-scoped QA answers are handled by the dedicated rule matcher, never by general AI mapping.
     .filter(({ definition }) => definition.fillable && definition.group !== 'qaBank')
-    .map(({ path, label }) => ({ resumeKey: path, label }));
+    .map(({ path, label, value, definition }) => ({
+      resumeKey: path,
+      label,
+      hasValue: value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0),
+      valueType: definition.valueKind,
+      riskLevel: riskForResumeField(path, definition.valueKind),
+    }))
+    .filter((option) => option.hasValue);
 }
 
-/**
- * 构造字段映射 prompt
- */
-export function buildMappingPrompt(
-  fields: UnmatchedFieldDescriptor[],
-  options: ResumeKeyOption[]
-): string {
+export function buildMappingPrompt(fields: UnmatchedFieldDescriptor[], options: ResumeKeyOption[]): string {
   const limited = fields.slice(0, MAX_FIELDS_PER_CALL);
+  const fieldList = limited.map((field) => JSON.stringify({
+    fieldIndex: field.index,
+    label: field.label,
+    placeholder: field.placeholder,
+    name: field.name,
+    ariaLabel: field.ariaLabel,
+    type: field.inputType || 'text',
+    required: field.required === true,
+    section: field.section || 'unknown',
+    sectionIndex: field.sectionIndex,
+    nearbyLabels: field.nearbyLabels || [],
+    pageTitle: field.pageTitle,
+    siteProfile: field.siteProfile,
+    optionSummary: (field.optionSummary || []).slice(0, 20),
+    riskLevel: field.riskLevel,
+  })).join('\n');
+  const optionList = options.map((option) => JSON.stringify({
+    resumeKey: option.resumeKey,
+    label: option.label,
+    valueType: option.valueType,
+    hasValue: option.hasValue !== false,
+    riskLevel: option.riskLevel,
+  })).join('\n');
 
-  const fieldList = limited
-    .map((f) => {
-      const hints = [f.label, f.placeholder, f.ariaLabel, f.name].filter(Boolean).join(' / ');
-      return `[${f.index}] ${hints} (类型:${f.inputType || 'text'})`;
-    })
-    .join('\n');
+  return `你是招聘表单字段映射助手。你只能做语义候选判断，不能操作网页，也不能补造求职者事实。
 
-  const optionList = options.map((o) => `${o.resumeKey} = ${o.label}`).join('\n');
+【待映射字段】\n${fieldList || '（无）'}
 
-  return `你是招聘表单的字段映射助手。下面左边是一个招聘网页上自动识别失败的表单字段，右边是求职者简历里可用的字段（resumeKey = 中文含义）。
+【可用档案字段】\n${optionList || '（无）'}
 
-【待映射的表单字段】（编号只是索引，不是顺序）
-${fieldList || '（无）'}
+输出严格 JSON：
+{"mappings":[{"fieldIndex":0,"resumeKey":"basics.phone","confidence":0.96,"reasonCode":"label_and_section_match","alternatives":[]}]}
 
-【简历可用字段】
-${optionList}
-
-请输出一个 JSON 对象，把每个表单字段编号映射到最合适的 resumeKey，例如 {"0":"basics.nativePlace.city","3":"familyMembers.0.name"}。
-
-严格遵守：
-1. 只输出 JSON 对象本身，不要 markdown 代码块、不要任何解释文字。
-2. 没有合适的简历字段时，该编号映射为 null。
-3. 涉及"紧急联系人 / 家属 / 父母 / 配偶 / 推荐人 / 证明人"的字段，只能映射到 familyMembers.* 系列，绝不能映射到 basics.name / basics.phone / basics.email / basics.idCardNumber（那是求职者本人的信息）。
-4. 拿不准就映射为 null，不要硬猜。
-
-现在输出 JSON：`;
+约束：
+1. 只能返回上方出现过的 fieldIndex 和 resumeKey；没有可靠匹配的字段不要返回。
+2. confidence 必须为 0~1；拿不准必须降低 confidence，不要为了覆盖率硬猜。
+3. 紧急联系人、家属、父母、配偶、推荐人、证明人、emergency、reference 等他人字段只能映射到 familyMembers.* 或明确的 basics.emergencyContact*。这类字段绝不能映射到 basics.name / basics.phone / basics.email / basics.idCardNumber。
+4. Critical/High 字段必须依据明确标签、模块和相邻字段，普通包含关系不够。
+5. 重复教育/工作/项目必须结合 sectionIndex；日期字段必须结合相邻字段判断开始/结束。
+6. 只输出 JSON，不要 markdown 或解释。`;
 }
 
-/**
- * 从 LLM 响应中提取映射 JSON
- *
- * LLM 常会用 ```json 包裹或附带前后文，这里做宽松提取；
- * 解析失败时返回空映射（宁可不填，不可错填）。
- */
-export function parseMappingResponse(response: string): FieldIndexMapping {
-  if (!response) return {};
-
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return {};
-
+export function parseMappingSuggestions(response: string): AIFieldMappingSuggestion[] {
+  if (!response) return [];
+  const match = response.match(/\{[\s\S]*\}/);
+  if (!match) return [];
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch {
-    return {};
+  try { parsed = JSON.parse(match[0]); } catch { return []; }
+  if (!parsed || typeof parsed !== 'object') return [];
+
+  const object = parsed as Record<string, unknown>;
+  if (Array.isArray(object.mappings)) {
+    return object.mappings.flatMap((raw) => {
+      if (!raw || typeof raw !== 'object') return [];
+      const item = raw as Record<string, unknown>;
+      const fieldIndex = Number(item.fieldIndex);
+      const confidence = Number(item.confidence);
+      if (!Number.isInteger(fieldIndex) || typeof item.resumeKey !== 'string' || !item.resumeKey.trim()) return [];
+      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return [];
+      return [{
+        fieldIndex,
+        resumeKey: item.resumeKey.trim(),
+        confidence,
+        reasonCode: typeof item.reasonCode === 'string' && item.reasonCode.trim() ? item.reasonCode.trim().slice(0, 80) : 'model_unspecified',
+        alternatives: Array.isArray(item.alternatives)
+          ? item.alternatives.flatMap((alt) => {
+              if (!alt || typeof alt !== 'object') return [];
+              const candidate = alt as Record<string, unknown>;
+              const candidateConfidence = Number(candidate.confidence);
+              return typeof candidate.resumeKey === 'string' && Number.isFinite(candidateConfidence)
+                ? [{ resumeKey: candidate.resumeKey, confidence: Math.max(0, Math.min(1, candidateConfidence)) }]
+                : [];
+            }).slice(0, 3)
+          : [],
+      }];
+    });
   }
 
-  if (typeof parsed !== 'object' || parsed === null) return {};
+  // Backward compatibility for older local models returning {"0":"basics.name"}.
+  return Object.entries(object).flatMap(([key, value]) => {
+    const fieldIndex = Number(key);
+    return Number.isInteger(fieldIndex) && typeof value === 'string' && value.trim()
+      ? [{ fieldIndex, resumeKey: value.trim(), confidence: 0.75, reasonCode: 'legacy_mapping_response', alternatives: [] }]
+      : [];
+  });
+}
 
-  const mapping: FieldIndexMapping = {};
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    const idx = parseInt(key, 10);
-    if (Number.isNaN(idx)) continue;
-    if (typeof value === 'string' && value.trim()) {
-      mapping[idx] = value.trim();
-    }
-  }
-  return mapping;
+/** Legacy caller compatibility. */
+export function parseMappingResponse(response: string): FieldIndexMapping {
+  return Object.fromEntries(parseMappingSuggestions(response).map((item) => [item.fieldIndex, item.resumeKey]));
 }

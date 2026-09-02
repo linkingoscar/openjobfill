@@ -1,6 +1,8 @@
 import type { StandardResume } from '../../types/resume';
+import type { ResumeVariantContext, ResumeV5 } from '../../types/trustedResume';
 import { EMPTY_RESUME, DEMO_RESUME, DEFAULT_RESUME } from './defaultData';
 import { parseResumePayload } from '../schema/resumeSchema';
+import { createJobVariant as buildJobVariant, migrateToResumeV5, resolveVariant } from '../schema/trustedResume';
 
 const STORAGE_KEY_RESUMES = 'openjobfill_resumes';
 export const RESUME_STORAGE_INDEX_KEY = 'openjobfill_resume_ids';
@@ -30,6 +32,18 @@ function nextResumeUpdatedAt(previous: unknown): number {
 }
 
 const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+const FIELD_META_PROPERTIES = new Set(['source', 'confidence', 'evidence', 'confirmed', 'locked', 'confirmedAt', 'updatedAt', 'autoFillEnabled']);
+const VARIANT_OVERRIDE_PATHS = new Set([
+  'basics.expectedRole',
+  'basics.expectedCity',
+  'basics.expectedSalaryMin',
+  'basics.expectedSalaryMax',
+  'basics.selfEvaluation',
+  'basics.githubUrl',
+  'basics.linkedinUrl',
+  'basics.blogUrl',
+  'basics.portfolioUrl',
+]);
 
 function parseResumePath(path: string): string[] {
   if (typeof path !== 'string') throw new Error('简历字段路径必须是字符串');
@@ -38,6 +52,57 @@ function parseResumePath(path: string): string[] {
     throw new Error(`简历字段路径无效：${path}`);
   }
   return parts;
+}
+
+function isVariantOverridePath(path: string): boolean {
+  return VARIANT_OVERRIDE_PATHS.has(path) || path === 'qaBank' || path.startsWith('qaBank.');
+}
+
+function idOrder(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || typeof (item as { id?: unknown }).id !== 'string')) return null;
+  return value.map((item) => (item as { id: string }).id);
+}
+
+function isPureIdReorder(previous: unknown, next: unknown): boolean {
+  const beforeOrder = idOrder(previous);
+  const afterOrder = idOrder(next);
+  if (!beforeOrder || !afterOrder || beforeOrder.length !== afterOrder.length) return false;
+  if (beforeOrder.join('\u0000') === afterOrder.join('\u0000')) return false;
+  const beforeById = new Map((previous as Array<{ id: string }>).map((item) => [item.id, JSON.stringify(item)]));
+  return (next as Array<{ id: string }>).every((item) => beforeById.get(item.id) === JSON.stringify(item));
+}
+
+function setIncrementalUpdate(resume: ResumeV5, path: string, value: unknown): void {
+  const parts = parseResumePath(path);
+  if (parts[0] === 'fieldMeta' && parts.length >= 2) {
+    resume.fieldMeta ||= {};
+    const last = parts[parts.length - 1];
+    if (FIELD_META_PROPERTIES.has(last) && parts.length >= 3) {
+      const fieldPath = parts.slice(1, -1).join('.');
+      const current = resume.fieldMeta[fieldPath] || {
+        source: 'manual' as const,
+        confirmed: false,
+        locked: false,
+        updatedAt: Date.now(),
+      };
+      (current as unknown as Record<string, unknown>)[last] = value;
+      resume.fieldMeta[fieldPath] = current;
+      return;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const fieldPath = parts.slice(1).join('.');
+      resume.fieldMeta[fieldPath] = value as ResumeV5['fieldMeta'][string];
+      return;
+    }
+  }
+
+  let target: Record<string, unknown> = resume as unknown as Record<string, unknown>;
+  for (const part of parts.slice(0, -1)) {
+    const existing = target[part];
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) target[part] = {};
+    target = target[part] as Record<string, unknown>;
+  }
+  target[parts[parts.length - 1]] = value;
 }
 
 function createDefaultResumeList(): StandardResume[] {
@@ -75,8 +140,6 @@ class ResumeStorage {
         }
       } catch (e) {
         console.error('Failed to parse resumes from localStorage', e);
-        // Keep the original bytes recoverable. A downgrade or corrupt payload must
-        // not be overwritten with defaults merely because the current reader rejects it.
         return createDefaultResumeList();
       }
     }
@@ -156,8 +219,17 @@ class ResumeStorage {
     return resumes;
   }
 
+  private resolveStoredResume(resume: StandardResume, resumes: StandardResume[]): ResumeV5 {
+    const candidate = migrateToResumeV5(resume);
+    if (candidate.variantType !== 'job-variant' || !candidate.parentResumeId) return candidate;
+    const parent = resumes.find((item) => item.id === candidate.parentResumeId);
+    if (!parent) return candidate;
+    return resolveVariant(migrateToResumeV5(parent), candidate);
+  }
+
   /**
-   * 获取所有存储的简历列表
+   * 获取所有存储的简历列表。岗位版本在这里保持原始持久化形态，
+   * 便于管理 parentResumeId / variantOverrides；真正填写时通过 getActiveResume 解析继承。
    */
   async getAllResumes(): Promise<StandardResume[]> {
     if (this.isExtensionEnv()) {
@@ -178,8 +250,6 @@ class ResumeStorage {
       const migrated = await this.migrateLegacyResumes(result[STORAGE_KEY_RESUMES]);
       if (migrated) return migrated;
 
-      // 首次安装时直接初始化底层存储。不能调用 saveResume()：
-      // saveResume() 会再次调用 getAllResumes()，从而在空存储上无限递归。
       const defaults = createDefaultResumeList();
       await this.writeResumeEntries(defaults);
       return defaults;
@@ -188,8 +258,16 @@ class ResumeStorage {
     }
   }
 
+  /** 获取指定简历用于填写的解析结果；岗位版本会继承主档案最新未覆盖事实。 */
+  async getResumeForFill(id: string): Promise<ResumeV5> {
+    const resumes = await this.getAllResumes();
+    const selected = resumes.find((resume) => resume.id === id);
+    if (!selected) throw new Error(`找不到简历：${id}`);
+    return this.resolveStoredResume(selected, resumes);
+  }
+
   /**
-   * 获取当前选中的激活简历
+   * 获取当前选中的激活简历。若当前是岗位版本，返回与最新 master 合成后的视图。
    */
   async getActiveResume(): Promise<StandardResume> {
     const resumes = await this.getAllResumes();
@@ -209,11 +287,26 @@ class ResumeStorage {
 
     if (activeId) {
       const found = resumes.find((r) => r.id === activeId);
-      if (found) return found;
+      if (found) return this.resolveStoredResume(found, resumes);
     }
 
     const defaultResume = resumes.find((r) => r.isDefault) || resumes[0];
-    return defaultResume;
+    return this.resolveStoredResume(defaultResume, resumes);
+  }
+
+  /** 从主档案创建岗位版本，不改写 master。 */
+  async createJobVariant(masterId: string, context: ResumeVariantContext = {}): Promise<ResumeV5> {
+    const resumes = await this.getAllResumes();
+    let master = resumes.find((resume) => resume.id === masterId);
+    if (!master) throw new Error(`找不到主档案：${masterId}`);
+    const selected = migrateToResumeV5(master);
+    if (selected.variantType === 'job-variant' && selected.parentResumeId) {
+      master = resumes.find((resume) => resume.id === selected.parentResumeId) || master;
+    }
+    const trustedMaster = migrateToResumeV5(master);
+    const variant = buildJobVariant(trustedMaster, context);
+    await this.saveResume(variant);
+    return variant;
   }
 
   /**
@@ -278,7 +371,6 @@ class ResumeStorage {
 
     const resumes = await this.getAllResumes();
     const index = resumes.findIndex((r) => r.id === cleanResume.id);
-    
     cleanResume.updatedAt = nextResumeUpdatedAt(index >= 0 ? resumes[index].updatedAt : undefined);
     if (index >= 0) {
       resumes[index] = cleanResume;
@@ -291,7 +383,7 @@ class ResumeStorage {
 
   /**
    * 以字段路径更新最新简历快照，供 content script 的学习器等并发调用方使用。
-   * updates 的 key 支持 basics.name、qaBank 等点号路径。
+   * 对 fieldMeta 的 dotted-key 做专门还原；岗位版本只记录允许的内容 override。
    */
   async updateResumeFields(id: string, updates: Record<string, unknown>): Promise<void> {
     if (this.shouldBrokerWrites()) {
@@ -317,17 +409,23 @@ class ResumeStorage {
     }
     const current = (await this.getAllResumes()).find((resume) => resume.id === id);
     if (!current) throw new Error(`找不到要更新的简历：${id}`);
-    const next = normalizeResume(current, { strict: true });
+    const next = migrateToResumeV5(normalizeResume(current, { strict: true }));
+    const isVariant = next.variantType === 'job-variant' && !!next.parentResumeId;
+    const overrides = new Set(next.variantOverrides || []);
+    next.variantOrdering ||= {};
+
     for (const [path, value] of Object.entries(updates)) {
-      const parts = parseResumePath(path);
-      let target: Record<string, unknown> = next as unknown as Record<string, unknown>;
-      for (const part of parts.slice(0, -1)) {
-        const existing = target[part];
-        if (!existing || typeof existing !== 'object' || Array.isArray(existing)) target[part] = {};
-        target = target[part] as Record<string, unknown>;
+      parseResumePath(path);
+      if (isVariant && (path === 'projects' || path === 'experiences') && isPureIdReorder((current as unknown as Record<string, unknown>)[path], value)) {
+        const order = idOrder(value) || [];
+        if (path === 'projects') next.variantOrdering.projects = order;
+        else next.variantOrdering.experiences = order;
+        continue;
       }
-      target[parts[parts.length - 1]] = value;
+      setIncrementalUpdate(next, path, value);
+      if (isVariant && isVariantOverridePath(path)) overrides.add(path);
     }
+    next.variantOverrides = [...overrides];
     await this.saveResumeDirect(next);
   }
 
