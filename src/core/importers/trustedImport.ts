@@ -107,6 +107,17 @@ export interface TrustedImportReview {
   acceptedPaths: string[];
 }
 
+function blankImportSeed(fileName: string | undefined, now: number): StandardResume {
+  return {
+    ...structuredClone(EMPTY_RESUME),
+    id: `resume-${now}`,
+    title: (fileName || 'AI 导入简历').replace(/\.[^/.]+$/, ''),
+    isDefault: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export function buildTrustedImportReview(input: {
   localResume?: StandardResume | null;
   aiResume?: StandardResume | null;
@@ -119,17 +130,13 @@ export function buildTrustedImportReview(input: {
 }): TrustedImportReview {
   const now = input.now ?? Date.now();
   const hasDirectAI = Array.isArray(input.aiCandidates) && input.aiCandidates.length > 0;
-  const seed = input.baseResume || input.localResume || input.aiResume || (hasDirectAI ? {
-    ...structuredClone(EMPTY_RESUME),
-    id: `resume-${now}`,
-    title: (input.fileName || 'AI 导入简历').replace(/\.[^/.]+$/, ''),
-    isDefault: false,
-    createdAt: now,
-    updatedAt: now,
-  } : null);
+  const hasAnyAI = hasDirectAI || !!input.aiResume;
+  // AI data is never the trusted starting state. Without a base/local parser result we
+  // start from an empty profile, so every AI fact must pass evidence/confidence gates.
+  const seed = input.baseResume || input.localResume || (hasAnyAI ? blankImportSeed(input.fileName, now) : null);
   if (!seed) throw new Error('没有可用于审核的简历候选');
 
-  let resume = migrateToResumeV5(input.baseResume || seed, now);
+  let resume = migrateToResumeV5(seed, now);
   const localCandidates = input.localResume
     ? resumeToParsedCandidates(input.localResume, { source: 'local', documentText: input.documentText, fileName: input.fileName })
     : [];
