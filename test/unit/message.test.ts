@@ -27,6 +27,16 @@ describe('Extension message protocol', () => {
       payload: { settings: { enabled: false }, fields: [], options: [] },
     })).toBe(true);
     expect(isExtensionMessage({
+      type: 'AI_DRAFT_ANSWER',
+      payload: {
+        settings: { enabled: true },
+        question: '为什么选择我们？',
+        maxChars: 200,
+        context: { company: 'Example', facts: { 'projects.0.description': '项目事实' } },
+        confirmedExternalProcessing: true,
+      },
+    })).toBe(true);
+    expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
       payload: { settings: { enabled: true }, imageDataUrl: 'data:image/jpeg;base64,YQ==', fileName: 'resume.jpg', confirmedExternalProcessing: true },
     })).toBe(true);
@@ -63,6 +73,10 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({ type: 'FRAME_EXECUTE', payload: { analysisId: '' } })).toBe(false);
     expect(isExtensionMessage({ type: 'EXECUTE_CROSS_ORIGIN_FRAMES', payload: { targets: [{ frameId: '3', analysisId: 'x' }] } })).toBe(false);
     expect(isExtensionMessage({ type: 'UNKNOWN_MESSAGE', payload: {} })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'AI_DRAFT_ANSWER',
+      payload: { settings: { enabled: true }, question: '为什么选择我们？', context: { facts: {} }, confirmedExternalProcessing: false },
+    })).toBe(false);
     expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
       payload: { settings: {}, imageDataUrl: 'https://example.com/resume.jpg', fileName: 'resume.jpg' },
