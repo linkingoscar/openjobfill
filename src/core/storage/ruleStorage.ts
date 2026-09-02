@@ -1,4 +1,4 @@
-import type { CustomSiteRule } from '../../types/rule';
+import type { CustomSiteRule, CustomRuleStatus } from '../../types/rule';
 
 const RULES_STORAGE_KEY = 'openjobfill_custom_rules';
 const CURRENT_RULE_VERSION = 2 as const;
@@ -108,6 +108,10 @@ export function validateCustomSiteRule(rule: CustomSiteRule, doc?: Document): st
   return null;
 }
 
+function normalizeStatus(status: unknown): CustomRuleStatus {
+  return status === 'STALE' ? 'STALE' : status === 'DISABLED' ? 'DISABLED' : 'ACTIVE';
+}
+
 export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSiteRule | null {
   if (!input || !input.id || !input.domainPattern) return null;
   const fields = Array.isArray(input.fields)
@@ -128,7 +132,7 @@ export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSite
     enabled: input.enabled !== false,
     fields: fields.map((field) => ({
       ...field,
-      status: field.status === 'STALE' ? 'STALE' : 'ACTIVE',
+      status: normalizeStatus(field.status),
       occurrenceMode: field.occurrenceMode || 'NONE',
       successCount: Number.isFinite(field.successCount) ? Math.max(0, Number(field.successCount)) : 0,
       failureCount: Number.isFinite(field.failureCount) ? Math.max(0, Number(field.failureCount)) : 0,
@@ -279,7 +283,7 @@ export const ruleStorage = {
     if (!rule) return;
     const staleIds = new Set(fieldIds); let changed = false;
     rule.fields = rule.fields.map((field) => {
-      if (!staleIds.has(field.id) || field.status === 'STALE') return field;
+      if (!staleIds.has(field.id) || field.status === 'STALE' || field.status === 'DISABLED') return field;
       changed = true;
       return { ...field, status: 'STALE' as const, failureCount: (field.failureCount || 0) + 1, lastFailureReason: 'selector_fingerprint_conflict' };
     });
@@ -294,6 +298,7 @@ export const ruleStorage = {
     const index = rule.fields.findIndex((field) => field.id === fieldId);
     if (index < 0) return;
     const field = rule.fields[index];
+    if (field.status === 'DISABLED') return;
     const successCount = field.successCount || 0;
     const failureCount = field.failureCount || 0;
     rule.fields[index] = verified
@@ -304,6 +309,22 @@ export const ruleStorage = {
           failureCount: failureCount + 1,
           lastFailureReason: (reason || 'verification_mismatch').slice(0, 120),
         };
+    await this.saveCustomRule(rule);
+  },
+
+  /** Explicit user control over one learned mapping; DISABLED entries never participate in matching. */
+  async setFieldMappingStatus(ruleId: string, fieldId: string, status: CustomRuleStatus): Promise<void> {
+    const rules = await this.getCustomRules();
+    const rule = rules.find((candidate) => candidate.id === ruleId);
+    if (!rule) throw new Error('找不到站点规则');
+    const index = rule.fields.findIndex((field) => field.id === fieldId);
+    if (index < 0) throw new Error('找不到字段映射');
+    const field = rule.fields[index];
+    rule.fields[index] = {
+      ...field,
+      status,
+      lastFailureReason: status === 'ACTIVE' ? undefined : field.lastFailureReason,
+    };
     await this.saveCustomRule(rule);
   },
 };
