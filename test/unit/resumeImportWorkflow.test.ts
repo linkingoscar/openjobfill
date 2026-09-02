@@ -34,17 +34,20 @@ describe('resume import workflow boundaries', () => {
     sendMessage.mockResolvedValue({ success: false, error: '模型不可用' });
     const fallback = await importResumeDocument(file, { enhance: true, consent: true });
     expect(fallback.resume.basics.phone).toBe('13800138000');
-    expect(fallback.notice).toContain('已保留本地解析结果');
+    expect(fallback.notice).toContain('本地候选');
     expect(fallback.notice).toContain('模型不可用');
+    expect(fallback.localCandidates.length).toBeGreaterThan(0);
   });
 
-  it('merges AI structure with local missing fields without automatically saving it', async () => {
+  it('keeps local high-confidence facts and exposes conflicting AI candidates instead of overwriting', async () => {
     const ai = importResumeText('李四', 'AI');
     ai.basics.phone = '';
     sendMessage.mockResolvedValue({ success: true, resume: ai });
     const result = await importResumeDocument(file, { enhance: true, consent: true });
-    expect(result.resume.basics.name).toBe('李四');
+    expect(result.resume.basics.name).toBe('张三');
     expect(result.resume.basics.phone).toBe('13800138000');
+    expect(result.aiCandidates.some((candidate) => candidate.path === 'basics.name' && candidate.value === '李四')).toBe(true);
+    expect(result.conflicts.some((conflict) => conflict.path === 'basics.name' && conflict.candidateValue === '李四')).toBe(true);
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'AI_PARSE_RESUME_DOCUMENT',
       payload: expect.objectContaining({ confirmedExternalProcessing: true, imageDataUrls: ['data:image/png;base64,YQ=='] }),
