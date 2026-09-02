@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { validateResumeImageFile } from '@/core/importers/resumeImagePreparation';
 import { getAISettings } from '@/core/storage/aiSettingsStorage';
+import { resumeStorage } from '@/core/storage/resumeStorage';
 import type { AISettings } from '@/types/ai';
 import type { StandardResume } from '@/types/resume';
 import { UploadCloud, FileText, Sparkles, AlertCircle, X, ArrowRight, ScanLine } from 'lucide-vue-next';
@@ -19,6 +20,8 @@ const visionConsent = ref(false);
 const visionFile = ref<File | null>(null);
 const visionPreviewUrl = ref('');
 const aiSettings = ref<AISettings | null>(null);
+const activeBaseResume = ref<StandardResume | null>(null);
+const effectiveBaseResume = computed(() => props.baseResume || activeBaseResume.value);
 const useAIEnhancement = ref(false);
 const documentConsent = ref(false);
 const importer = useResumeImport();
@@ -40,7 +43,12 @@ watch(mode, resetImport);
 const handleKeydown = (event: KeyboardEvent) => { if (event.key === 'Escape') emit('close'); };
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
-  aiSettings.value = await getAISettings();
+  const [settings, active] = await Promise.all([
+    getAISettings(),
+    props.baseResume ? Promise.resolve(props.baseResume) : resumeStorage.getActiveResume().catch(() => null),
+  ]);
+  aiSettings.value = settings;
+  activeBaseResume.value = active;
 });
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
@@ -51,7 +59,7 @@ const processFile = async (file: File) => {
   const result = await importer.importDocument(file, {
     enhance: useAIEnhancement.value,
     consent: documentConsent.value,
-    baseResume: props.baseResume,
+    baseResume: effectiveBaseResume.value,
   });
   documentConsent.value = false;
   if (result) rawText.value = result.text;
@@ -65,7 +73,7 @@ const handleDrop = async (event: DragEvent) => {
   const file = event.dataTransfer?.files?.[0];
   if (file) await processFile(file);
 };
-const handleParsePastedText = () => importer.importText(rawText.value, props.baseResume);
+const handleParsePastedText = () => importer.importText(rawText.value, effectiveBaseResume.value);
 
 const selectVisionFile = (file: File) => {
   try {
@@ -92,7 +100,7 @@ const handleVisionParse = async () => {
     importer.reportError('请先选择简历图片');
     return;
   }
-  const request = importer.importImage(visionFile.value, visionConsent.value, props.baseResume);
+  const request = importer.importImage(visionFile.value, visionConsent.value, effectiveBaseResume.value);
   visionConsent.value = false;
   await request;
 };
@@ -175,7 +183,7 @@ const handleConfirmImport = () => {
         <span class="text-xs" :class="importConflicts.length ? 'text-amber-700 font-semibold' : 'text-slate-500'">{{ importConflicts.length ? `还有 ${importConflicts.length} 个冲突未处理，暂不能写入档案` : '所有冲突已处理；保存后字段来源与确认状态会随档案持久化' }}</span>
         <div class="flex items-center gap-2">
           <button type="button" @click="emit('close')" class="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl transition focus-visible:ring-2 focus-visible:ring-blue-500">取消</button>
-          <button v-if="parsedResume" type="button" @click="handleConfirmImport" :disabled="!canConfirmImport" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-500/25 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-500"><span>{{ baseResume ? '合并到当前可信档案' : '导入可信档案' }}</span><ArrowRight class="w-3.5 h-3.5" /></button>
+          <button v-if="parsedResume" type="button" @click="handleConfirmImport" :disabled="!canConfirmImport" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-500/25 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-500"><span>{{ effectiveBaseResume ? '合并到当前可信档案' : '导入可信档案' }}</span><ArrowRight class="w-3.5 h-3.5" /></button>
         </div>
       </footer>
     </div>
