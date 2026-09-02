@@ -2,6 +2,7 @@ import type { AISettings, UnmatchedFieldDescriptor, ResumeKeyOption } from '../t
 import { callChatCompletion, callResumeDocumentCompletion, callVisionCompletion } from '../core/ai/llmProvider';
 import { buildMappingPrompt, parseMappingResponse, parseMappingSuggestions } from '../core/ai/fieldMapper';
 import { buildAnswerDraftPrompt, parseAnswerDraftResponse } from '../core/ai/answerDraftService';
+import { buildJobVariantPrompt, parseJobVariantSuggestions } from '../core/ai/jobVariantAssistant';
 import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/importers/visionResumeImporter';
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
@@ -508,6 +509,22 @@ export default defineBackground(() => {
           sendResponse({ success: true, draft });
         } catch (err: any) {
           sendResponse({ success: false, error: err?.message || 'AI 开放题草稿生成失败' });
+        }
+      })();
+      return true;
+    }
+
+    // 岗位版本 AI 只返回基于现有 facts/JD 的结构化建议。最终采用由 UI 逐项确认并写入 job variant。
+    if (message.type === 'AI_SUGGEST_JOB_VARIANT') {
+      (async () => {
+        try {
+          const { settings, context } = message.payload;
+          if (!settings.enabled) throw new Error('请先在设置中启用 AI 功能');
+          const raw = await callChatCompletion(settings, buildJobVariantPrompt(context));
+          const suggestions = parseJobVariantSuggestions(raw);
+          sendResponse({ success: true, suggestions });
+        } catch (err: any) {
+          sendResponse({ success: false, error: err?.message || 'AI 岗位版本建议生成失败' });
         }
       })();
       return true;
