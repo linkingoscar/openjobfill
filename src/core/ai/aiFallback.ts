@@ -40,6 +40,11 @@ export interface AIFallbackOutcome {
   matchedKeys: Set<string>;
 }
 
+interface MappingRequestResult {
+  suggestions: ValidatedAIMapping[];
+  rawSuggestions: AIFieldMappingSuggestion[];
+}
+
 const PERSONAL_SENSITIVE_PREFIXES = ['basics.name', 'basics.phone', 'basics.email', 'basics.idCardNumber'];
 
 export function isFillableElement(el: HTMLElement): boolean {
@@ -120,7 +125,7 @@ async function requestFieldMapping(
   options: ResumeKeyOption[],
   signal?: AbortSignal,
   runId?: string,
-): Promise<ValidatedAIMapping[] | null> {
+): Promise<MappingRequestResult | null> {
   try {
     recordRunTrace('ai-request', { fields, options }, runId);
     const request = chrome.runtime.sendMessage({
@@ -135,14 +140,15 @@ async function requestFieldMapping(
     const rawSuggestions = Array.isArray(response.mappings) && response.mappings.length
       ? response.mappings
       : legacySuggestions(response.mapping);
-    const safeSuggestions = sanitizeFieldMappingSuggestions(rawSuggestions, fields, options);
+    const suggestions = sanitizeFieldMappingSuggestions(rawSuggestions, fields, options);
     recordRunTrace('ai-response', {
       success: true,
-      mappings: safeSuggestions.map(({ fieldIndex, resumeKey, confidence, reasonCode, disposition }) => ({
+      mappings: suggestions.map(({ fieldIndex, resumeKey, confidence, reasonCode, disposition }) => ({
         fieldIndex, resumeKey, confidence, reasonCode, disposition,
       })),
+      rejectedCount: Math.max(0, rawSuggestions.length - suggestions.length),
     }, runId);
-    return safeSuggestions;
+    return { suggestions, rawSuggestions };
   } catch (err: any) {
     recordRunTrace('ai-response', { success: false, mappings: [], aborted: !!signal?.aborted }, runId);
     console.warn('[OpenJobFill] AI 映射消息异常：', err?.message || err);
@@ -161,12 +167,13 @@ export async function tryAIFallback(
   const options = buildResumeKeyOptions(resume);
   if (options.length === 0) return null;
   const fields = unmatched.map((entry) => entry.descriptor);
-  const suggestions = await requestFieldMapping(settings, fields, options);
-  if (!suggestions) return null;
+  const requestResult = await requestFieldMapping(settings, fields, options);
+  if (!requestResult) return null;
 
-  const mapping = new Map(suggestions
+  const mapping = new Map(requestResult.suggestions
     .filter((suggestion) => suggestion.disposition !== 'manual')
     .map((suggestion) => [suggestion.fieldIndex, suggestion]));
+  const rawMapping = new Map(requestResult.rawSuggestions.map((suggestion) => [suggestion.fieldIndex, suggestion]));
   const outcome: AIFallbackOutcome = {
     logs: [], filledCount: 0, skippedCount: 0, failedCount: 0,
     filledElements: new Set(), matchedKeys: new Set(),
@@ -175,8 +182,20 @@ export async function tryAIFallback(
   for (const entry of unmatched) {
     const suggestion = mapping.get(entry.descriptor.index);
     if (!suggestion) {
-      outcome.skippedCount++;
-      outcome.logs.push({ status: 'skipped', label: entry.descriptor.label || entry.descriptor.placeholder, field: '', value: '', message: 'AI 未返回可执行的可靠映射，已跳过' });
+      const rejected = rawMapping.get(entry.descriptor.index);
+      if (rejected && !isSafeMapping(entry.element, rejected.resumeKey)) {
+        outcome.failedCount++;
+        outcome.logs.push({
+          status: 'failed',
+          label: entry.descriptor.label || entry.descriptor.placeholder || rejected.resumeKey,
+          field: rejected.resumeKey,
+          value: '',
+          message: 'AI 将他人字段映射到本人信息，已被安全策略拦截',
+        });
+      } else {
+        outcome.skippedCount++;
+        outcome.logs.push({ status: 'skipped', label: entry.descriptor.label || entry.descriptor.placeholder, field: '', value: '', message: 'AI 未返回可执行的可靠映射，已跳过' });
+      }
       continue;
     }
     const { element } = entry;
@@ -200,7 +219,7 @@ export async function tryAIFallback(
         outcome.filledCount++;
         outcome.filledElements.add(element);
         outcome.matchedKeys.add(resumeKey);
-        outcome.logs.push({ status: 'success', label, field: resumeKey, value: strValue, message: `AI 匹配 ${(suggestion.confidence * 100).toFixed(0)}%` });
+        outcome.logs.push({ status: 'success', label, field: resumeKey, value: strValue, message: suggestion.reasonCode === 'legacy_mapping_response' ? 'AI 匹配' : `AI 匹配 ${(suggestion.confidence * 100).toFixed(0)}%` });
       } else {
         outcome.failedCount++;
         outcome.logs.push({ status: 'failed', label, field: resumeKey, value: strValue, message: 'AI 匹配后填充执行未确认成功' });
@@ -265,11 +284,11 @@ export async function applyAIFallbackToPlan(
   const options = buildResumeKeyOptions(resume);
   if (options.length === 0) return { appliedCount: 0 };
   const fields = candidates.map(descriptorForPlanItem);
-  const suggestions = await requestFieldMapping(settings, fields, options, signal, runId);
-  if (!suggestions) return { appliedCount: 0 };
+  const requestResult = await requestFieldMapping(settings, fields, options, signal, runId);
+  if (!requestResult) return { appliedCount: 0 };
 
   let appliedCount = 0;
-  for (const suggestion of suggestions) {
+  for (const suggestion of requestResult.suggestions) {
     throwIfAborted(signal);
     const item = candidates[suggestion.fieldIndex];
     if (!item || !isSafeMapping(item.field.element, suggestion.resumeKey)) continue;
@@ -293,7 +312,9 @@ export async function applyAIFallbackToPlan(
     item.confidence = suggestion.confidence;
     item.riskLevel = options.find((option) => option.resumeKey === suggestion.resumeKey)?.riskLevel || item.riskLevel;
     item.requiresExplicitReview = suggestion.disposition !== 'high-confidence';
-    item.reason = `AI ${Math.round(suggestion.confidence * 100)}% · ${suggestion.reasonCode}`;
+    item.reason = suggestion.reasonCode === 'legacy_mapping_response'
+      ? 'AI 匹配'
+      : `AI ${Math.round(suggestion.confidence * 100)}% · ${suggestion.reasonCode}`;
     appliedCount++;
   }
 
