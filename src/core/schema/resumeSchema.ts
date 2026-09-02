@@ -91,6 +91,7 @@ function migrateV4ToV5(payload: UnknownRecord): UnknownRecord {
   if (migrated.variantType !== 'job-variant' && migrated.variantType !== 'master') migrated.variantType = 'master';
   if (!Array.isArray(migrated.variantOverrides)) migrated.variantOverrides = [];
   if (!isRecord(migrated.variantOrdering)) migrated.variantOrdering = {};
+  if (!isRecord(migrated.variantPresentation)) migrated.variantPresentation = {};
   if (Array.isArray(migrated.qaBank)) {
     migrated.qaBank = migrated.qaBank.map((raw) => {
       if (!isRecord(raw)) return raw;
@@ -270,6 +271,7 @@ function parseArray(payload: UnknownRecord, key: string, now: number, issues: st
 const FIELD_META_SOURCES = new Set(['manual', 'local-parser', 'ai-parser', 'json-import', 'derived', 'site-learned']);
 const EVIDENCE_TYPES = new Set(['text-range', 'page-region', 'manual', 'derived', 'site-input']);
 const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+const PROFILE_LINK_PATHS = new Set(['basics.githubUrl', 'basics.linkedinUrl', 'basics.blogUrl', 'basics.portfolioUrl']);
 
 function isSafeFieldPath(path: string): boolean {
   const parts = path.split('.').filter(Boolean);
@@ -326,6 +328,18 @@ function parseVariantOrdering(payload: UnknownRecord): UnknownRecord {
     const raw = payload.variantOrdering[key];
     if (!Array.isArray(raw)) continue;
     result[key] = Array.from(new Set(raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)));
+  }
+  return result;
+}
+
+function parseVariantPresentation(payload: UnknownRecord): UnknownRecord {
+  if (!isRecord(payload.variantPresentation)) return {};
+  const result: UnknownRecord = {};
+  if (Array.isArray(payload.variantPresentation.highlightSkills)) {
+    result.highlightSkills = Array.from(new Set(payload.variantPresentation.highlightSkills.filter((item): item is string => typeof item === 'string' && item.trim().length > 0))).slice(0, 20);
+  }
+  if (Array.isArray(payload.variantPresentation.selectedLinkKeys)) {
+    result.selectedLinkKeys = Array.from(new Set(payload.variantPresentation.selectedLinkKeys.filter((item): item is string => typeof item === 'string' && PROFILE_LINK_PATHS.has(item))));
   }
   return result;
 }
@@ -392,6 +406,7 @@ export function parseResumePayload(input: unknown, options: ResumeParseOptions =
   resumeWithV5.variantContext = parseVariantContext(payload);
   resumeWithV5.variantOverrides = variantOverrides;
   resumeWithV5.variantOrdering = parseVariantOrdering(payload);
+  resumeWithV5.variantPresentation = parseVariantPresentation(payload);
 
   if (options.strict !== false && issues.length > 0) throw new ResumeSchemaError(`简历格式无效：${issues[0]}`, issues);
   return { resume, migratedFrom, issues };
