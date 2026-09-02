@@ -59,6 +59,45 @@ describe('trusted resume v5', () => {
     expect(resolved.projects.find((project) => project.id === 'p1')?.description).toBe('主档案新描述一');
   });
 
+  it('applies shortened descriptions to the same record after master insertion and reordering', () => {
+    const master = migrateToResumeV5(DEMO_RESUME, 1000);
+    master.projects = [
+      { id: 'p1', projectName: '一', role: '开发', startDate: '2025-01', endDate: '2025-02', description: '主描述一', responsibility: '职责一' },
+      { id: 'p2', projectName: '二', role: '开发', startDate: '2025-03', endDate: '2025-04', description: '主描述二', responsibility: '职责二' },
+    ];
+    const variant = createJobVariant(master, { role: 'Engineer' }, 2000);
+    variant.variantOrdering = { projects: ['p2', 'p1'] };
+    variant.variantTextOverrides = [{ collection: 'projects', recordId: 'p2', field: 'description', value: '岗位短版二' }];
+
+    const updatedMaster = structuredClone(master);
+    updatedMaster.projects = [
+      { id: 'p0', projectName: '新项目', role: '开发', startDate: '2024-11', endDate: '2024-12', description: '新描述', responsibility: '新职责' },
+      updatedMaster.projects[0],
+      updatedMaster.projects[1],
+    ];
+    updatedMaster.projects[2].description = '主档案更新后的描述二';
+
+    const resolved = resolveVariant(updatedMaster, variant);
+    expect(resolved.projects.find((project) => project.id === 'p2')?.description).toBe('岗位短版二');
+    expect(resolved.projects.find((project) => project.id === 'p1')?.description).toBe('主描述一');
+    expect(resolved.projects.find((project) => project.id === 'p0')?.description).toBe('新描述');
+  });
+
+  it('drops malformed stable text overrides during migration', () => {
+    const resume = migrateToResumeV5({
+      ...DEMO_RESUME,
+      schemaVersion: 5,
+      variantTextOverrides: [
+        { collection: 'projects', recordId: 'p1', field: 'description', value: '合法短版' },
+        { collection: 'experiences', recordId: 'e1', field: 'responsibility', value: '非法字段' },
+        { collection: 'projects', recordId: '', field: 'description', value: '无记录' },
+      ],
+    }, 1000);
+    expect(resume.variantTextOverrides).toEqual([
+      { collection: 'projects', recordId: 'p1', field: 'description', value: '合法短版' },
+    ]);
+  });
+
   it('job-specific link selection hides unselected links only in the resolved variant view', () => {
     const master = migrateToResumeV5(DEMO_RESUME, 1000);
     master.basics.githubUrl = 'https://github.com/example';
