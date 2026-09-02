@@ -10,15 +10,31 @@ export type FieldInputType =
   | 'custom';
 
 export interface SectionRepeaterRule {
-  /** 列表容器选择器 */
   containerSelector: string;
-  /** "添加经历" 按钮选择器 */
   addButtonSelector: string;
-  /** 单项条目选择器 */
   itemSelector: string;
-  /** 条目内字段选择器相对路径映射 */
   itemFields: Record<string, { selector: string; type?: FieldInputType; labelKeywords?: string[] }>;
 }
+
+export type FillFailureCode =
+  | 'mapping_missing'
+  | 'mapping_low_confidence'
+  | 'site_rule_stale'
+  | 'adapter_not_matched'
+  | 'adapter_not_handled'
+  | 'write_error'
+  | 'verification_mismatch'
+  | 'verification_unreadable'
+  | 'attachment_unverified'
+  | 'page_changed'
+  | 'resume_changed'
+  | 'safety_blocked'
+  | 'ai_timeout'
+  | 'ai_invalid_response'
+  | 'cancelled'
+  // Legacy aliases kept readable for existing stored history.
+  | 'missing_mapping'
+  | 'strategy_error';
 
 export interface FillLogItem {
   field: string;
@@ -26,7 +42,7 @@ export interface FillLogItem {
   value: string;
   status: 'success' | 'skipped' | 'failed';
   message?: string;
-  failureCode?: 'missing_mapping' | 'safety_blocked' | 'adapter_not_handled' | 'strategy_error' | 'verification_mismatch' | 'cancelled';
+  failureCode?: FillFailureCode;
   attempts?: Array<{
     strategy: string;
     outcome: 'success' | 'not_handled' | 'mismatch' | 'error';
