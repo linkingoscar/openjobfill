@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle } from 'lucide-vue-next';
+import { reactive } from 'vue';
+import { AlertTriangle, CheckCircle, Sparkles, Bot } from 'lucide-vue-next';
 import type { FillResult } from '@/types/adapter';
+import { requestAIAnswerDraft } from '@/core/ai/answerDraftService';
+import { extractJDFromPage } from '@/core/matcher/jdMatcher';
+import { resumeStorage } from '@/core/storage/resumeStorage';
+import { setNativeValue } from '@/core/engine/dispatcher';
 
 interface BindingOption { label: string; value: string }
 interface BindingGroup { group: string; options: BindingOption[] }
+type RemainingTask = NonNullable<FillResult['remainingTasks']>[number];
 
-defineProps<{
+const props = defineProps<{
   fillResult: FillResult | null;
   activeTaskMappingId: string | null;
   selectedMappingKey: string;
@@ -13,15 +19,110 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: 'focus-task', task: NonNullable<FillResult['remainingTasks']>[number]): void;
-  (event: 'toggle-mapping', task: NonNullable<FillResult['remainingTasks']>[number]): void;
-  (event: 'save-mapping', task: NonNullable<FillResult['remainingTasks']>[number]): void;
+  (event: 'focus-task', task: RemainingTask): void;
+  (event: 'toggle-mapping', task: RemainingTask): void;
+  (event: 'save-mapping', task: RemainingTask): void;
   (event: 'update:selectedMappingKey', value: string): void;
 }>();
+
+interface DraftState { loading: boolean; text: string; warnings: string[]; error: string }
+const drafts = reactive<Record<string, DraftState>>({});
 
 const handleSelectionChange = (event: Event) => {
   emit('update:selectedMappingKey', (event.target as HTMLSelectElement).value);
 };
+
+function canDraft(task: RemainingTask): boolean {
+  return !!task.element
+    && ['text', 'textarea', 'contenteditable'].includes(task.type)
+    && task.failureCode !== 'safety_blocked';
+}
+
+function maxCharsFor(task: RemainingTask): number | undefined {
+  const element = task.element as HTMLInputElement | HTMLTextAreaElement | undefined;
+  return element && typeof element.maxLength === 'number' && element.maxLength > 0 ? element.maxLength : undefined;
+}
+
+async function generateDraft(task: RemainingTask) {
+  if (!canDraft(task)) return;
+  const approved = window.confirm('本次 AI 草稿会发送当前开放题、当前岗位 JD，以及非敏感的项目/经历/技能事实摘要。是否继续？');
+  if (!approved) return;
+  const state = drafts[task.id] ||= { loading: false, text: '', warnings: [], error: '' };
+  state.loading = true;
+  state.error = '';
+  state.warnings = [];
+  try {
+    const resume = await resumeStorage.getActiveResume();
+    const jd = extractJDFromPage();
+    const variant = resume as typeof resume & { variantContext?: { company?: string; role?: string; jobFamily?: string } };
+    const response = await requestAIAnswerDraft({
+      resume,
+      question: task.label,
+      maxChars: maxCharsFor(task),
+      job: {
+        company: variant.variantContext?.company,
+        role: variant.variantContext?.role || jd.jobTitle,
+        jobFamily: variant.variantContext?.jobFamily,
+        jdText: jd.jdText,
+      },
+      confirmedExternalProcessing: true,
+    });
+    state.text = response.draft.text;
+    state.warnings = response.warnings;
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : 'AI 草稿生成失败';
+  } finally {
+    state.loading = false;
+  }
+}
+
+function writeConfirmedDraft(task: RemainingTask, text: string): boolean {
+  const element = task.element;
+  if (!element || !text.trim()) return false;
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return setNativeValue(element, text);
+  if (element.isContentEditable) {
+    element.focus();
+    element.textContent = text;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.blur();
+    return true;
+  }
+  return false;
+}
+
+async function applyDraft(task: RemainingTask, remember: boolean) {
+  const state = drafts[task.id];
+  if (!state?.text) return;
+  const edited = window.prompt('确认或编辑 AI 草稿。只有点击确定后才会写入当前字段：', state.text);
+  if (edited === null || !edited.trim()) return;
+  if (!writeConfirmedDraft(task, edited)) {
+    state.error = '当前控件无法可靠写入，请复制草稿后手动填写';
+    return;
+  }
+  state.text = edited;
+  if (!remember) return;
+
+  const resume = await resumeStorage.getActiveResume();
+  const now = Date.now();
+  await resumeStorage.appendResumeArrayItem(resume.id, 'qaBank', {
+    id: `qa-${now}`,
+    keyword: task.label,
+    question: task.label,
+    answer: edited,
+    scope: 'company-domain',
+    companyDomain: window.location.hostname,
+    versions: [{
+      id: `qa-answer-${now}`,
+      answer: edited,
+      createdAt: now,
+      lastUsedAt: now,
+      lastUsedUrl: `${window.location.origin}${window.location.pathname}`,
+      confirmedByUser: true,
+      source: 'ai-confirmed',
+    }],
+  });
+}
 </script>
 
 <template>
@@ -51,8 +152,20 @@ const handleSelectionChange = (event: Event) => {
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
             <span v-if="!task.element" class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-bold" :title="task.frameUrl || '位于跨域子页面'">子页面待办</span>
+            <button v-if="canDraft(task)" type="button" @click="generateDraft(task)" :disabled="drafts[task.id]?.loading" class="px-2 py-1 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold transition shadow-xs" title="逐次确认后调用已配置模型生成开放题草稿"><Sparkles class="w-3 h-3 inline" /> {{ drafts[task.id]?.loading ? '生成中' : 'AI 草稿' }}</button>
             <button v-if="task.element" type="button" @click="emit('focus-task', task)" class="px-2 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs" title="在网页中滚动并高亮定位此输入框">定位</button>
             <button v-if="task.element" type="button" @click="emit('toggle-mapping', task)" class="px-2 py-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-[11px] font-bold transition shadow-xs" title="将此未识别字段永久绑定到简历属性">记住映射</button>
+          </div>
+        </div>
+
+        <div v-if="drafts[task.id]?.text || drafts[task.id]?.error" class="rounded-lg border border-violet-200 bg-violet-50 p-2 text-[11px]">
+          <div class="font-bold text-violet-800 flex items-center gap-1"><Bot class="w-3.5 h-3.5" />AI 仅生成候选，不会自动写入</div>
+          <p v-if="drafts[task.id]?.text" class="mt-1 text-slate-700 whitespace-pre-wrap max-h-28 overflow-y-auto">{{ drafts[task.id].text }}</p>
+          <p v-if="drafts[task.id]?.warnings?.length" class="mt-1 text-amber-700">风险提示：{{ drafts[task.id].warnings.join('；') }}</p>
+          <p v-if="drafts[task.id]?.error" class="mt-1 text-rose-700">{{ drafts[task.id].error }}</p>
+          <div v-if="drafts[task.id]?.text" class="mt-2 flex gap-1.5">
+            <button type="button" @click="applyDraft(task, false)" class="px-2 py-1 rounded bg-violet-600 text-white font-bold">编辑并采用</button>
+            <button type="button" @click="applyDraft(task, true)" class="px-2 py-1 rounded bg-white border border-violet-200 text-violet-700 font-bold">采用并记入公司问答库</button>
           </div>
         </div>
 
