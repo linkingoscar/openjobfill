@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { StandardResume } from '@/types/resume';
-import { Plus, Trash2, FileText } from 'lucide-vue-next';
+import { Plus, Trash2 } from 'lucide-vue-next';
+import { resumeStorage } from '@/core/storage/resumeStorage';
 
 defineProps<{
   resumes: StandardResume[];
@@ -12,6 +13,18 @@ const emit = defineEmits<{
   (e: 'create'): void;
   (e: 'delete', id: string): void;
 }>();
+
+const handleSelect = async (resume: StandardResume) => {
+  try {
+    // getAllResumes intentionally exposes the raw persisted variant shape. The editor,
+    // however, must show the latest master inheritance plus explicit job overrides.
+    const resolved = await resumeStorage.getResumeForFill(resume.id);
+    emit('select', resolved);
+  } catch (error) {
+    console.warn('[OpenJobFill] Failed to resolve selected resume; falling back to stored snapshot:', error);
+    emit('select', resume);
+  }
+};
 </script>
 
 <template>
@@ -45,7 +58,7 @@ const emit = defineEmits<{
       >
         <button
           type="button"
-          @click="emit('select', r)"
+          @click="handleSelect(r)"
           :aria-current="currentResumeId === r.id ? 'true' : 'false'"
           :class="[
             'w-full text-left p-3 rounded-xl cursor-pointer text-xs transition border flex flex-col gap-1 focus-visible:ring-2 focus-visible:ring-blue-500',
