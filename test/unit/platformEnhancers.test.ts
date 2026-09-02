@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   alibabaEnhancer,
   dayeeEnhancer,
   getEnhancerForUrl,
+  getEnhancerMatchTrace,
   greenhouseEnhancer,
   meituanEnhancer,
   nowcoderEnhancer,
@@ -10,6 +11,10 @@ import {
 } from '@/core/adapters/enhancers';
 
 describe('Pipeline 平台增强器注册', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
   it.each([
     ['https://apply.dayee.com/resume', dayeeEnhancer.id],
     ['https://www.nowcoder.com/jobs/apply', nowcoderEnhancer.id],
@@ -29,5 +34,13 @@ describe('Pipeline 平台增强器注册', () => {
       .toBe('basics.lastName');
     expect(greenhouseEnhancer.fieldMappings?.['input[name="name"], input[aria-label*="Full name" i]'])
       .toBe('basics.name');
+  });
+
+  it('普通 application-form 不应被误判为 Greenhouse，诊断应保留完整匹配轨迹', () => {
+    document.body.innerHTML = '<form class="application-form"><input name="name"></form>';
+    expect(getEnhancerForUrl('https://jobs.example.com/apply', document)).toBeNull();
+    const trace = getEnhancerMatchTrace('https://jobs.example.com/apply', document);
+    expect(trace).toHaveLength(10);
+    expect(trace.every((candidate) => candidate.matched === false)).toBe(true);
   });
 });

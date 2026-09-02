@@ -57,7 +57,6 @@ function uniqueSelectorCandidates(el: HTMLElement): string[] {
   if (testId) add(`[data-testid="${cssEscape(testId)}"]`);
   if (name) add(`[name="${cssEscape(name)}"]`);
   add(generateOptimalSelector(el));
-  add(buildXPath(el));
   return candidates.slice(0, 6);
 }
 

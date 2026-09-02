@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ruleStorage, validateCustomSiteRule } from '@/core/storage/ruleStorage';
+import { customRuleMatchesUrl, normalizeCustomSiteRule, ruleStorage, validateCustomSiteRule } from '@/core/storage/ruleStorage';
 import type { CustomSiteRule } from '@/types/rule';
 
 const validRule: CustomSiteRule = {
@@ -45,5 +45,19 @@ describe('自定义规则校验与容错', () => {
     ]));
     await expect(ruleStorage.findMatchingRuleForUrl('https://other.example/apply'))
       .resolves.toBeNull();
+  });
+
+  it('只按 hostname/path 边界匹配，不允许查询参数伪装成目标站点', () => {
+    const rule = normalizeCustomSiteRule(validRule)!;
+    expect(customRuleMatchesUrl(rule, 'https://jobs.example.com/apply')).toBe(true);
+    expect(customRuleMatchesUrl(rule, 'https://campus.jobs.example.com/apply')).toBe(true);
+    expect(customRuleMatchesUrl(rule, 'https://evil.example/?next=https://jobs.example.com/apply')).toBe(false);
+
+    const scoped = normalizeCustomSiteRule({
+      ...validRule,
+      site: { hostname: 'jobs.example.com', pathPrefix: '/apply' },
+    })!;
+    expect(customRuleMatchesUrl(scoped, 'https://jobs.example.com/apply/123?step=2')).toBe(true);
+    expect(customRuleMatchesUrl(scoped, 'https://jobs.example.com/profile/apply')).toBe(false);
   });
 });

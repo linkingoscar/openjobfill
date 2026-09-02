@@ -12,13 +12,84 @@ import { createElementFingerprint } from './runContext';
 import { inspectFieldSafety } from './fieldSafety';
 import { buildFieldLocator } from './fieldLocator';
 
+const CONTROL_TRIGGER_SELECTORS = [
+  '.el-select', '.el-select__wrapper', '.el-autocomplete', '.el-cascader', '.el-cascader__wrapper', '.el-date-editor',
+  '.ant-select', '.ant-cascader', '.ant-cascader-picker', '.ant-picker', '.ant-calendar-picker',
+  '.semi-select', '.semi-cascader', '.semi-datepicker', '.mtd-select', '.mtd-picker', '.mtd-month-picker',
+  '.layui-form-select', '.ivu-select', '.ivu-cascader', '.aui-select', '.atsx-select', '.atsx-date-picker', '.ud-select',
+  '.phoenix-input', '.phoenix-select', '.sc-input', '.sc-select', '.hc-super-selector',
+  '.tp-select-box', '.tp-ethnic-picker', '.tp-date-picker', '.sd-input', '.sd-dropdown',
+  '.mokahr-search-dropdown', '.mokahr-region-dropdown', '.mokahr-date-dropdown', '.mokahr-simple-dropdown',
+  '.zhipin-select', '.zhipin-date-picker', '.zhipin-dialog-trigger',
+  '.lagou-calendar', '.lagou-editor', '.shixiseng-city',
+  '.job51-three-layer', '.setday', '.pop-input', '.bankcomm-select', '.Wdate',
+  '[class*="three-layer"]', '[class*="threeLayer"]', '[class*="super-selector"]', '[class*="superSelector"]',
+  '[class*="region-cascader"]', '[class*="calendar-picker"]', '[class*="ethnic-picker"]',
+  '[class*="date-picker"]', '[class*="datepicker"]', '[class*="date-range"]', '[class*="daterange"]',
+  '[class*="feishu"][class*="month"]', '[class*="thundersoft"][class*="month"]',
+  '[class*="moka"][class*="month"]', '[class*="linked-select"]', '[class*="linkage"]',
+  '[class*="phone-field"]', '[class*="mobile-field"]', '[data-openjobfill-date-group]',
+];
+const FORM_CONTROL_SELECTOR = [
+  'input', 'textarea', 'select', '[contenteditable="true"]', '[role="combobox"]', '[role="radio"]', '[role="checkbox"]',
+  ...CONTROL_TRIGGER_SELECTORS,
+].join(',');
+const FORM_ROOT_SELECTOR = [
+  'form',
+  '[role="form"]',
+  '[data-application-form]',
+  '.application-form',
+  '.apply-form',
+  '.resume-form',
+  '.ant-form',
+  '.el-form',
+  '.semi-form',
+  '.moka-application-form',
+  '[data-automation-id="applicationForm"]',
+  '[data-automation-id="jobApplication"]',
+  '[class*="application-form"]',
+  '[class*="apply-form"]',
+  '[class*="resume-form"]',
+].join(',');
+
+export interface FormRootDiagnostic {
+  documentIndex: number;
+  root: string;
+  inputCount: number;
+  sectionMatchCount: number;
+  score: number;
+  selected: boolean;
+  fallback: boolean;
+}
+
+export interface PageScanDiagnostics {
+  documentsScanned: number;
+  fallbackDocumentCount: number;
+  formRoots: FormRootDiagnostic[];
+}
+
 export class PageAnalyzer {
+  private lastDiagnostics: PageScanDiagnostics = {
+    documentsScanned: 0,
+    fallbackDocumentCount: 0,
+    formRoots: [],
+  };
+
+  getLastDiagnostics(): PageScanDiagnostics {
+    return {
+      documentsScanned: this.lastDiagnostics.documentsScanned,
+      fallbackDocumentCount: this.lastDiagnostics.fallbackDocumentCount,
+      formRoots: this.lastDiagnostics.formRoots.map((item) => ({ ...item })),
+    };
+  }
+
   /**
    * 深度扫描页面表单控件，生成结构化的 FieldDescriptor[]
    */
   analyzePage(container: Document | HTMLElement = document): FieldDescriptor[] {
     const descriptors: FieldDescriptor[] = [];
     const visitedElements = new Set<HTMLElement>();
+    this.lastDiagnostics = { documentsScanned: 0, fallbackDocumentCount: 0, formRoots: [] };
 
     // 0. 收集主容器及所有可访问的同源 iframe 页面。
     // ATS 常见「门户 iframe → 表单 iframe」两层甚至多层嵌套，不能只扫描
@@ -61,24 +132,31 @@ export class PageAnalyzer {
 
     const allCandidateElements: HTMLElement[] = [];
     const customComponentSelector = [
-      '.el-select', '.ant-select', '.semi-select', '[role="combobox"]', '[class*="select-selection"]',
-      '.el-cascader', '.ant-cascader', '.semi-cascader', '.ivu-cascader', '[class*="cascader"]',
-      '.mtd-select', '.mtd-picker', '.layui-form-select', '.ivu-select',
-      '.pop-input', '.datepicker-input', '.input-layer',
-      '.el-date-editor', '.ant-picker', '.semi-datepicker', '[class*="date-picker"]', '[class*="datepicker"]',
-      '[class*="date-range"]', '[class*="daterange"]', '[data-openjobfill-date-group]',
-      '[role="radio"]', '[role="checkbox"]', '[aria-pressed]',
+      ...CONTROL_TRIGGER_SELECTORS,
+      '[role="combobox"]', '[class*="select-selection"]', '[class*="cascader"]',
+      '.datepicker-input', '.input-layer', '[role="radio"]', '[role="checkbox"]', '[aria-pressed]',
     ].join(',');
 
-    for (const targetDoc of documentsToScan) {
+    this.lastDiagnostics.documentsScanned = documentsToScan.length;
+    for (const [documentIndex, targetDoc] of documentsToScan.entries()) {
       try {
-        const roots = getAllOpenRoots(targetDoc);
-        const nativeInputs = roots.flatMap((root) => Array.from(
-          root.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"]')
-        ));
-        const customComponents = roots.flatMap((root) =>
-          Array.from(root.querySelectorAll<HTMLElement>(customComponentSelector))
-        );
+        const availableRoots = getAllOpenRoots(targetDoc);
+        const roots = targetDoc.nodeType === 9
+          ? this.selectFormRoots(availableRoots, documentIndex)
+          : availableRoots;
+        const nativeSelector = 'input, textarea, select, [contenteditable="true"]';
+        const nativeInputs = roots.flatMap((root) => [
+          ...(root instanceof HTMLElement && root.matches(nativeSelector) ? [root] : []),
+          ...Array.from(root.querySelectorAll<HTMLElement>(nativeSelector)),
+        ]);
+        const customComponents = roots.flatMap((root) => [
+          ...(root instanceof HTMLElement && root.matches(customComponentSelector) ? [root] : []),
+          ...Array.from(root.querySelectorAll<HTMLElement>(customComponentSelector)),
+        ]).filter((component) => !component.matches([
+          '.ant-select-dropdown', '.ant-cascader-menus', '.el-select-dropdown', '.el-cascader__dropdown',
+          '.el-autocomplete-suggestion', '.ivu-select-dropdown', '.mtd-select-dropdown', '.cascader-modal',
+          '.my-cascader-modal', '.pop-panel', '.dialog-box', '[role="listbox"]',
+        ].join(',')));
 
         // 外层日期/选择组件已经代表一个逻辑字段时，移除它内部重复命中的组件根。
         const topLevelCustomComponents = customComponents.filter(
@@ -143,6 +221,111 @@ export class PageAnalyzer {
     return descriptors;
   }
 
+  private describeRoot(root: ParentNode): string {
+    if (!(root instanceof HTMLElement)) return root.nodeType === 9 ? 'document' : 'shadow-root';
+    const id = root.id ? `#${root.id.slice(0, 80)}` : '';
+    const classes = typeof root.className === 'string'
+      ? root.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).join('.')
+      : '';
+    return `${root.tagName.toLowerCase()}${id}${classes ? `.${classes}` : ''}`.slice(0, 180);
+  }
+
+  private scoreFormRoot(root: HTMLElement): Omit<FormRootDiagnostic, 'documentIndex' | 'selected' | 'fallback'> {
+    const inputCount = root.querySelectorAll(FORM_CONTROL_SELECTOR).length;
+    const structuralText = `${root.id} ${root.className} ${root.getAttribute('aria-label') || ''}`.toLowerCase();
+    const visibleText = (root.textContent || '').replace(/\s+/g, ' ').slice(0, 5000).toLowerCase();
+    const combined = `${structuralText} ${visibleText}`;
+    const sectionKeywords = [
+      /基本信息|个人信息|personal information/,
+      /教育经历|学历|education/,
+      /工作经历|实习经历|employment|work experience/,
+      /项目经历|project experience/,
+      /求职申请|职位申请|application|apply now/,
+    ];
+    const sectionMatchCount = sectionKeywords.filter((pattern) => pattern.test(combined)).length;
+    const applicationHint = /申请|应聘|简历|候选人|招聘|application|candidate|resume|career/.test(combined);
+    const unrelatedHint = /登录|注册|站内搜索|搜索职位|sign.?in|log.?in|search/.test(combined)
+      && sectionMatchCount === 0;
+    let score = root.tagName === 'FORM' ? 4 : 1;
+    score += Math.min(12, inputCount * 1.5);
+    score += sectionMatchCount * 3;
+    if (applicationHint) score += 5;
+    if (unrelatedHint) score -= 8;
+
+    try {
+      const rect = root.getBoundingClientRect();
+      const viewportArea = Math.max(1, (root.ownerDocument.defaultView?.innerWidth || 0)
+        * (root.ownerDocument.defaultView?.innerHeight || 0));
+      const ratio = Math.max(0, rect.width * rect.height) / viewportArea;
+      if (ratio >= 0.15 && ratio <= 2) score += 2;
+    } catch {
+      // Layout information is optional in test DOMs and detached documents.
+    }
+
+    return {
+      root: this.describeRoot(root),
+      inputCount,
+      sectionMatchCount,
+      score: Math.round(score * 10) / 10,
+    };
+  }
+
+  private selectFormRoots(roots: ParentNode[], documentIndex: number): ParentNode[] {
+    const candidates = new Set<HTMLElement>();
+    for (const root of roots) {
+      if (root instanceof HTMLElement && root.matches(FORM_ROOT_SELECTOR)) candidates.add(root);
+      for (const candidate of Array.from(root.querySelectorAll<HTMLElement>(FORM_ROOT_SELECTOR))) {
+        candidates.add(candidate);
+      }
+    }
+
+    const scored = [...candidates]
+      .map((element) => ({ element, ...this.scoreFormRoot(element) }))
+      .filter((candidate) => candidate.inputCount > 0)
+      .sort((a, b) => b.score - a.score);
+    const reliable = scored.filter((candidate) => candidate.score >= 8
+      && (candidate.inputCount >= 2 || candidate.sectionMatchCount > 0));
+    const selected: HTMLElement[] = [];
+    for (const candidate of reliable) {
+      if (selected.some((root) => root.contains(candidate.element))) continue;
+      selected.push(candidate.element);
+    }
+
+    for (const candidate of scored) {
+      this.lastDiagnostics.formRoots.push({
+        documentIndex,
+        root: candidate.root,
+        inputCount: candidate.inputCount,
+        sectionMatchCount: candidate.sectionMatchCount,
+        score: candidate.score,
+        selected: selected.includes(candidate.element),
+        fallback: false,
+      });
+    }
+
+    if (selected.length > 0) {
+      // 重新从已选表单根出发收集 ShadowRoot。不能只依赖 Document 扫描结果里的
+      // host.contains() 关联：部分 DOM 实现对跨树 contains 的行为不一致，且嵌套
+      // shadow tree 也需要沿着表单子树继续递归发现。
+      const associatedShadowRoots = new Set<ParentNode>();
+      for (const formRoot of selected) {
+        for (const root of getAllOpenRoots(formRoot).slice(1)) associatedShadowRoots.add(root);
+      }
+      return [...selected, ...associatedShadowRoots];
+    }
+    this.lastDiagnostics.fallbackDocumentCount++;
+    this.lastDiagnostics.formRoots.push({
+      documentIndex,
+      root: 'document',
+      inputCount: roots.reduce((total, root) => total + root.querySelectorAll(FORM_CONTROL_SELECTOR).length, 0),
+      sectionMatchCount: 0,
+      score: 0,
+      selected: true,
+      fallback: true,
+    });
+    return roots;
+  }
+
   private shouldSkipElement(el: HTMLElement): boolean {
     if (isInputElement(el)) {
       if (['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(el.type)) {
@@ -173,26 +356,41 @@ export class PageAnalyzer {
     }
     const className = typeof el.className === 'string' ? el.className.toLowerCase() : '';
     // Cascader 组件名中也常带 picker（如 ant-cascader-picker），必须先于日期判断。
-    if (/cascader/.test(className) || el.getAttribute('role') === 'cascader') {
+    if (
+      /cascader|three-layer|threelayer|linked-select|super-selector|region-dropdown|city-picker/.test(className)
+      || el.getAttribute('role') === 'cascader'
+    ) {
       return 'cascader';
     }
     if (
-      /(^|\s)(el-select|ant-select|semi-select|mtd-select|layui-form-select|ivu-select)(\s|$)/.test(className) ||
+      /(^|\s)(el-select|ant-select|semi-select|mtd-select|layui-form-select|ivu-select|aui-select|atsx-select|ud-select|phoenix-select|sc-select|tp-select-box|tp-ethnic-picker|sd-dropdown|mokahr-search-dropdown|mokahr-simple-dropdown|zhipin-select|zhipin-dialog-trigger|bankcomm-select|pop-input)(\s|$)/.test(className) ||
       el.getAttribute('role') === 'combobox'
     ) {
       return 'select';
     }
     const dateInputs = el.querySelectorAll?.('input[type="date"], input[type="month"], input') || [];
     const dateSelects = el.querySelectorAll?.('select, .el-select, .ant-select, .semi-select') || [];
+    const isDateRangeComponent = /date-range|daterange|picker-range|month-range|monthrange/.test(className)
+      || el.hasAttribute('data-openjobfill-date-group');
+    const isExplicitMonthRange = /month-range|monthrange/.test(className)
+      || /(?:feishu|thundersoft).*month/.test(className);
     const isDateComponent =
-      /date|picker/.test(className) ||
+      /(^|\s)(ant-picker|ant-calendar-picker|el-date-editor|semi-datepicker|mtd-picker|mtd-month-picker|atsx-date-picker|tp-date-picker|mokahr-date-dropdown|zhipin-date-picker|lagou-calendar|setday|wdate|date-input)(\s|$)/.test(className) ||
+      /date-picker|datepicker|calendar-picker/.test(className) ||
+      /(?:moka|feishu|thundersoft).*month/.test(className) ||
       el.hasAttribute('data-openjobfill-date-group') ||
       el.getAttribute('role') === 'dialog';
 
-    if (isDateComponent && dateInputs.length >= 2 && /range|daterange/.test(className)) {
+    if (
+      isExplicitMonthRange
+      || el.hasAttribute('data-openjobfill-date-group')
+      || isDateRangeComponent && dateInputs.length >= 2
+    ) {
       return 'date-range';
     }
-    if (isDateComponent && (dateInputs.length > 0 || dateSelects.length >= 2)) {
+    // “date-range” 也常被年月组合控件用作容器名；两个 year/month select
+    // 表示一个日期，而不是开始/结束两个日期。
+    if (isDateComponent || isDateRangeComponent && dateSelects.length >= 2) {
       return 'date';
     }
     if (el.getAttribute('role') === 'radio' || el.hasAttribute('aria-pressed')) return 'radio';
@@ -200,11 +398,15 @@ export class PageAnalyzer {
     if (isInputElement(el)) {
       if (el.type === 'radio') return 'radio';
       if (el.type === 'checkbox') return 'checkbox';
+      const dateIdentity = `${el.placeholder} ${el.name} ${el.id} ${el.getAttribute('aria-label') || ''}`;
+      const hasDateSemantic = /日期|时间|年月/i.test(dateIdentity)
+        || /(?:^|[-_\s])(date|month|year|yyyy)(?:[-_\s]|$)/i.test(dateIdentity)
+        || /birthdate|startdate|enddate|graduationdate|availabledate/i.test(dateIdentity);
       if (
         el.type === 'date' ||
         el.type === 'month' ||
         el.classList.contains('datepicker') ||
-        /日期|时间|年月|date|month|year|yyyy/i.test(`${el.placeholder} ${el.name} ${el.getAttribute('aria-label') || ''}`)
+        hasDateSemantic
       ) {
         return 'date';
       }

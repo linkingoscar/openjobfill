@@ -1,17 +1,23 @@
 import type { StandardResume } from '../../types/resume';
 import type { FillResult } from '../../types/adapter';
 import type { PipelineExecutionResult, FillPlan, RemoteFramePlan } from '../../types/pipeline';
-import { pageAnalyzer } from '../pipeline/pageAnalyzer';
+import { pageAnalyzer, type PageScanDiagnostics } from '../pipeline/pageAnalyzer';
 import { planGenerator } from '../pipeline/planGenerator';
 import { pipelineExecutor } from '../pipeline/executor';
 import { sectionEngine } from './sectionEngine';
-import { getEnhancerForUrl } from '../adapters/enhancers';
+import { getEnhancerForUrl, getEnhancerMatchTrace } from '../adapters/enhancers';
 import { ruleStorage } from '../storage/ruleStorage';
 import { resumeStorage } from '../storage/resumeStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
 import { applyAIFallbackToPlan } from '../ai/aiFallback';
 import { executeRemoteFrames } from '../frames/frameCoordinator';
-import { compactFieldSnapshot, compactPlanSnapshot, SnapshotRecorder } from '../pipeline/snapshotRecorder';
+import {
+  buildAssociationDryRunReport,
+  compactFieldSnapshot,
+  compactPlanSnapshot,
+  SnapshotRecorder,
+  type AssociationDryRunReport,
+} from '../pipeline/snapshotRecorder';
 import { createPageFingerprint, FillRunContext, throwIfAborted } from '../pipeline/runContext';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
@@ -27,6 +33,8 @@ export interface AnalyzedPlan {
   runId: string;
   pageFingerprint: string;
   remoteFrames?: RemoteFramePlan[];
+  diagnostics?: AssociationDryRunReport;
+  dryRun?: boolean;
 }
 
 /** 预览期间页面或简历发生变化时，阻止写入旧计划。 */
@@ -46,6 +54,21 @@ function isExtensionStorageAvailable(): boolean {
 function isAttachedElement(element: HTMLElement): boolean {
   if (typeof element.isConnected === 'boolean') return element.isConnected;
   return !!element.ownerDocument?.contains(element);
+}
+
+function mergePageScanDiagnostics(items: PageScanDiagnostics[]): PageScanDiagnostics {
+  let documentOffset = 0;
+  const merged: PageScanDiagnostics = { documentsScanned: 0, fallbackDocumentCount: 0, formRoots: [] };
+  for (const item of items) {
+    merged.formRoots.push(...item.formRoots.map((root) => ({
+      ...root,
+      documentIndex: root.documentIndex + documentOffset,
+    })));
+    merged.documentsScanned += item.documentsScanned;
+    merged.fallbackDocumentCount += item.fallbackDocumentCount;
+    documentOffset += item.documentsScanned;
+  }
+  return merged;
 }
 
 /**
@@ -106,7 +129,7 @@ export class FormFillerEngine {
    * 拆出此方法是为了支持「先预览、确认后再填写」的交互：
    * 调用方拿到规划后可以先展示给用户核对，再决定是否 executePlan。
    */
-  async analyze(resume: StandardResume, options: { runId?: string } = {}): Promise<AnalyzedPlan> {
+  async analyze(resume: StandardResume, options: { runId?: string; dryRun?: boolean } = {}): Promise<AnalyzedPlan> {
     // 同一 content script 同时只允许一条本地运行链，避免用户重新点击
     // 识别后旧的等待器继续占用 DOM 或在稍后恢复写入。
     if (this.activeRunId) {
@@ -127,18 +150,23 @@ export class FormFillerEngine {
     const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
     if (enhancer) {
       console.log(`[OpenJobFill Pipeline] Matched Platform Enhancer: ${enhancer.name} (${enhancer.id})`);
-      if (enhancer.onBeforePlan) {
+      if (!options.dryRun && enhancer.onBeforePlan) {
         await enhancer.onBeforePlan(resume, typeof document !== 'undefined' ? document : undefined, run.signal);
       }
     }
 
     // 2. 全局通用多经历卡片差量扩增 (SectionEngine)
-    try {
-      await sectionEngine.ensureSectionCapacity(resume, enhancer, run.signal);
-    } catch (err) {
-      if (run.signal.aborted) throw err;
-      console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
+    const sectionStartedAt = Date.now();
+    if (!options.dryRun) {
+      try {
+        await sectionEngine.ensureSectionCapacity(resume, enhancer, run.signal);
+      } catch (err) {
+        if (run.signal.aborted) throw err;
+        console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
+      }
     }
+    const sectionPreparationMs = Date.now() - sectionStartedAt;
+    const dynamicGroups = options.dryRun ? [] : sectionEngine.getLastDiagnostics();
 
     // 3. 加载用户针对当前站点的自定义规则
     const customRule = await ruleStorage.findMatchingRuleForUrl(currentUrl);
@@ -146,15 +174,20 @@ export class FormFillerEngine {
 
     // 4. 阶段一：页面全要素深度扫描 (Page Analyzer 重新扫描最新挂载的 DOM 节点)
     run.throwIfAborted();
+    const scanStartedAt = Date.now();
     const descriptors = pageAnalyzer.analyzePage(document);
+    const formRoots = pageAnalyzer.getLastDiagnostics();
+    const formScanMs = Date.now() - scanStartedAt;
     SnapshotRecorder.record('scan', {
       totalCandidateCount: descriptors.length,
       fields: compactFieldSnapshot(descriptors),
-    }, Date.now() - analysisStartedAt, run.runId);
+      formRoots,
+    }, formScanMs, run.runId);
     console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
     // 5. 阶段二：生成全局填表规划 (Fill Plan)
     run.throwIfAborted();
+    const mappingStartedAt = Date.now();
     const plan = planGenerator.generatePlan(descriptors, resume, enhancer, customFieldRules);
     console.log(
       `[OpenJobFill Pipeline] FillPlan generated: ${plan.highConfidenceCount} to fill, ${plan.needsUserCount} need user, ${plan.skipCount} skipped.`
@@ -162,18 +195,50 @@ export class FormFillerEngine {
 
     // 5.5 AI 兜底：把规则标记为 NEEDS_USER 的字段交给 LLM 批量映射并就地提升为 FILL
     //     （本地优先，未配置时静默跳过；仅发送字段标签，不发送简历内容）
-    try {
-      const { appliedCount } = await applyAIFallbackToPlan(plan, resume, run.signal);
-      if (appliedCount > 0) {
-        console.log(`[OpenJobFill Pipeline] AI fallback promoted ${appliedCount} fields to FILL.`);
+    if (!options.dryRun) {
+      try {
+        const { appliedCount } = await applyAIFallbackToPlan(plan, resume, run.signal);
+        if (appliedCount > 0) {
+          console.log(`[OpenJobFill Pipeline] AI fallback promoted ${appliedCount} fields to FILL.`);
+        }
+      } catch (err) {
+        if (run.signal.aborted) throw err;
+        console.warn('[OpenJobFill Pipeline] AI fallback warning:', err);
       }
-    } catch (err) {
-      if (run.signal.aborted) throw err;
-      console.warn('[OpenJobFill Pipeline] AI fallback warning:', err);
     }
 
+    if (customRule && plan.diagnostics?.customRules.staleMappingIds.length) {
+      try {
+        await ruleStorage.markFieldMappingsStale(customRule.id, plan.diagnostics.customRules.staleMappingIds);
+      } catch (error) {
+        console.warn('[OpenJobFill Pipeline] 无法持久化失效的自定义规则：', error);
+      }
+    }
+
+    const fieldMappingMs = Date.now() - mappingStartedAt;
+    const diagnostics = buildAssociationDryRunReport({
+      plan,
+      adapter: {
+        id: enhancer?.id,
+        name: enhancer?.name || '智能通用决策引擎 (Pipeline v2)',
+        trace: getEnhancerMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
+      },
+      formRoots,
+      dynamicGroups,
+      pageUrl: currentUrl,
+      timings: {
+        sectionPreparationMs,
+        formScanMs,
+        fieldMappingMs,
+        totalAnalysisMs: Date.now() - analysisStartedAt,
+      },
+    });
+
     run.refreshPageFingerprint(typeof document !== 'undefined' ? document : undefined);
-    SnapshotRecorder.record('plan', compactPlanSnapshot(plan), Date.now() - analysisStartedAt, run.runId);
+    SnapshotRecorder.record('plan', {
+      ...compactPlanSnapshot(plan),
+      dryRun: diagnostics,
+    }, fieldMappingMs, run.runId);
 
     completed = true;
     return {
@@ -184,6 +249,8 @@ export class FormFillerEngine {
       pageUrl: currentUrl,
       runId: run.runId,
       pageFingerprint: run.pageFingerprint,
+      diagnostics,
+      dryRun: options.dryRun,
     };
     } catch (error) {
       SnapshotRecorder.record('error', {
@@ -199,6 +266,18 @@ export class FormFillerEngine {
         if (this.activeRunId === run.runId) this.activeRunId = null;
       }
     }
+  }
+
+  /**
+   * Pure association diagnostics: no section expansion, enhancer preparation,
+   * AI request or form-value write. The redacted report is persisted for export.
+   */
+  async analyzeDryRun(resume: StandardResume, options: { runId?: string } = {}): Promise<AnalyzedPlan> {
+    const analyzed = await this.analyze(resume, { ...options, dryRun: true });
+    await SnapshotRecorder.persist(analyzed.runId);
+    this.activeRuns.delete(analyzed.runId);
+    if (this.activeRunId === analyzed.runId) this.activeRunId = null;
+    return analyzed;
   }
 
   /**
@@ -232,9 +311,21 @@ export class FormFillerEngine {
       const roots = (options.changedRoots || []).filter((root, index, all) =>
         !!root && all.indexOf(root) === index,
       );
+      const scanStartedAt = Date.now();
+      const scanDiagnostics: PageScanDiagnostics[] = [];
       const descriptors = roots.length > 0
-        ? roots.flatMap((root) => pageAnalyzer.analyzePage(root))
-        : pageAnalyzer.analyzePage(document);
+        ? roots.flatMap((root) => {
+            const fields = pageAnalyzer.analyzePage(root);
+            scanDiagnostics.push(pageAnalyzer.getLastDiagnostics());
+            return fields;
+          })
+        : (() => {
+            const fields = pageAnalyzer.analyzePage(document);
+            scanDiagnostics.push(pageAnalyzer.getLastDiagnostics());
+            return fields;
+          })();
+      const formRoots = mergePageScanDiagnostics(scanDiagnostics);
+      const formScanMs = Date.now() - scanStartedAt;
       const uniqueDescriptors = descriptors.filter((field, index, all) => {
         const key = `${field.fingerprint || field.id}|${field.label}|${field.section?.type || ''}:${field.section?.index || 0}`;
         return all.findIndex((candidate) =>
@@ -253,9 +344,11 @@ export class FormFillerEngine {
         previousRunId: previous.runId,
         totalCandidateCount: newDescriptors.length,
         fields: compactFieldSnapshot(newDescriptors),
-      }, Date.now() - analysisStartedAt, run.runId);
+        formRoots,
+      }, formScanMs, run.runId);
 
       run.throwIfAborted();
+      const mappingStartedAt = Date.now();
       const plan = planGenerator.generatePlan(newDescriptors, resume, enhancer, customFieldRules);
       try {
         await applyAIFallbackToPlan(plan, resume, run.signal);
@@ -263,12 +356,38 @@ export class FormFillerEngine {
         if (run.signal.aborted) throw err;
         console.warn('[OpenJobFill Pipeline] Incremental AI fallback warning:', err);
       }
+      if (customRule && plan.diagnostics?.customRules.staleMappingIds.length) {
+        try {
+          await ruleStorage.markFieldMappingsStale(customRule.id, plan.diagnostics.customRules.staleMappingIds);
+        } catch (error) {
+          console.warn('[OpenJobFill Pipeline] 无法持久化失效的增量自定义规则：', error);
+        }
+      }
+      const fieldMappingMs = Date.now() - mappingStartedAt;
+      const diagnostics = buildAssociationDryRunReport({
+        plan,
+        adapter: {
+          id: enhancer?.id,
+          name: enhancer?.name || '智能通用决策引擎 (增量管道)',
+          trace: getEnhancerMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
+        },
+        formRoots,
+        dynamicGroups: [],
+        pageUrl: currentUrl,
+        timings: {
+          sectionPreparationMs: 0,
+          formScanMs,
+          fieldMappingMs,
+          totalAnalysisMs: Date.now() - analysisStartedAt,
+        },
+      });
       run.refreshPageFingerprint(typeof document !== 'undefined' ? document : undefined);
       SnapshotRecorder.record('plan', {
         incremental: true,
         previousRunId: previous.runId,
         ...compactPlanSnapshot(plan),
-      }, Date.now() - analysisStartedAt, run.runId);
+        dryRun: diagnostics,
+      }, fieldMappingMs, run.runId);
       completed = true;
       return {
         plan,
@@ -279,6 +398,7 @@ export class FormFillerEngine {
         runId: run.runId,
         pageFingerprint: run.pageFingerprint,
         remoteFrames: [],
+        diagnostics,
       };
     } catch (error) {
       SnapshotRecorder.record('error', {
@@ -301,6 +421,9 @@ export class FormFillerEngine {
    * 阶段三：执行已生成的规划（写入 DOM + 写后读回验证）
    */
   async executePlan(analyzed: AnalyzedPlan): Promise<FillResult> {
+    if (analyzed.dryRun) {
+      throw new Error('纯诊断计划不能执行，请重新生成正常填写预览');
+    }
     const { plan, adapterName } = analyzed;
     const run = this.activeRuns.get(analyzed.runId) || new FillRunContext({
       runId: analyzed.runId,
@@ -315,7 +438,11 @@ export class FormFillerEngine {
       // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
       await assertAnalyzedPlanIsCurrent(analyzed);
 
-      const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan, { signal: run.signal });
+      const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan, {
+        signal: run.signal,
+        runId: run.runId,
+        pageUrl: run.pageUrl,
+      });
       run.throwIfAborted();
       const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || [], { runId: run.runId, signal: run.signal });
     const remoteDurationMs = remoteResults.reduce((max, remote) => Math.max(max, remote.durationMs), 0);

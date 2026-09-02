@@ -20,7 +20,7 @@
 | `src/engine/adapters/elementUI.ts` | `selector.ts`、`dateEngine.ts` | 现有实现更完整 |
 | `src/engine/adapters/nativeAdapters.ts` | `retryLadder.ts`、`dispatcher.ts` | 现有实现更完整 |
 | `src/engine/adapters/pairedDateAdapter.ts` | `dateEngine.ts` | 现有成对日期引擎承接 |
-| `src/engine/adapters/registry.ts` | `src/core/adapters/index.ts` | 现有注册表承接 |
+| `src/engine/adapters/registry.ts` | `src/core/adapters/enhancers.ts` | 已收敛为唯一 PlatformEnhancer 注册表；旧 SiteAdapter/customFill 影子执行层已删除 |
 | `src/engine/adapters/types.ts` | `src/types/adapter.ts`、`pipeline.ts` | 现有类型承接 |
 | `src/engine/aiService.ts` | `llmProvider.ts`、`fieldMapper.ts`、`providerPresets.ts` | 已补服务商预设、有限重试、地址归一化、OpenRouter 头 |
 | `src/engine/attachmentUploader.ts` | `src/core/engine/attachmentUploader.ts` | 已迁移并接入浮球“附件”按钮 |
@@ -67,3 +67,11 @@
 - 平台简历同步只读取当前页面可见 DOM，且点击确认后才写入本地简历。
 - AI 字段映射仍只发送字段标签；视觉识别仅在用户选择图片并逐次确认后发送完整图片。
 - 诊断快照不记录目标值，并在导出前再次递归脱敏。
+
+## 迁移后的架构收敛
+
+- 页面扫描会先对候选申请表单根节点打分；搜索、登录等同页表单不会默认混入申请表单。
+- 用户规则使用结构化 hostname/path scope，并以 selector、locator、fingerprint 三类证据恢复映射；证据冲突会标记为 `STALE`。
+- 简历输入统一经过运行时 Schema 校验和 v1→v4 顺序迁移，未知未来版本不会被伪装成当前版本。
+- 预览快照包含脱敏的表单根评分、平台匹配轨迹、动态分组结果和分阶段耗时；另提供不可执行、无 DOM 写入的 association dry run。
+- 复杂控件执行已收敛到统一 ControlAdapter Runtime：58 个参考 Adapter 名称一一登记，站点专项优先、组件库其次、Native 最后；Phoenix、HcSuperSelector、51Job Setday 和 My97 只通过受限 MAIN-world 固定动作桥执行。

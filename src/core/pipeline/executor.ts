@@ -11,7 +11,10 @@ export class PipelineExecutor {
   /**
    * 调度执行 FillPlan，执行 Write -> Read-Back -> Verify -> Retry 闭环
    */
-  async executePlan(plan: FillPlan, options: { signal?: AbortSignal } = {}): Promise<PipelineExecutionResult> {
+  async executePlan(
+    plan: FillPlan,
+    options: { signal?: AbortSignal; runId?: string; pageUrl?: string } = {},
+  ): Promise<PipelineExecutionResult> {
     const signal = options.signal;
     const startTime = Date.now();
     const logs: FillLogItem[] = [];
@@ -88,35 +91,55 @@ export class PipelineExecutor {
       }
 
       // 3. 执行填表 (FILL) 并进行读回验证 (Read-Back)
-      const strategies = retryLadder.getStrategiesForType(item.driverType);
+      const strategies = retryLadder.getStrategiesForField(field, item.driverType, {
+        runId: options.runId,
+        pageUrl: options.pageUrl,
+      });
       let isSuccess = false;
       let actualReadValue: any = null;
-      const attempts: Array<{ strategy: string; outcome: 'success' | 'mismatch' | 'error'; message?: string }> = [];
+      const attempts: Array<{
+        strategy: string;
+        outcome: 'success' | 'not_handled' | 'mismatch' | 'error';
+        message?: string;
+        adapterId?: string;
+        executionWorld?: 'ISOLATED' | 'MAIN';
+      }> = [];
 
       for (const strategy of strategies) {
         try {
           throwIfAborted(signal);
-          await strategy.execute(field, item.targetValue, signal);
+          const attemptMeta = {
+            adapterId: strategy.adapterId,
+            executionWorld: strategy.executionWorld,
+          };
+          const handled = await strategy.execute(field, item.targetValue, signal);
+          if (!handled) {
+            attempts.push({ strategy: strategy.name, outcome: 'not_handled', ...attemptMeta });
+            continue;
+          }
           
           // 等待 DOM / Vue / React 受控状态响应
           await sleep(50, signal);
           throwIfAborted(signal);
 
           // 读回验证 (Read-Back)
-          actualReadValue = await verifier.readBack(field, item.driverType);
-          const isEquivalent = verifier.isSemanticEquivalent(
+          actualReadValue = strategy.readBack
+            ? await strategy.readBack(field, item.driverType)
+            : await verifier.readBack(field, item.driverType);
+          const adapterEquivalent = strategy.isEquivalent?.(actualReadValue, item.targetValue, item.driverType);
+          const isEquivalent = adapterEquivalent ?? verifier.isSemanticEquivalent(
             actualReadValue,
             item.targetValue,
-            item.driverType
+            item.driverType,
           );
 
           if (isEquivalent) {
-            attempts.push({ strategy: strategy.name, outcome: 'success' });
+            attempts.push({ strategy: strategy.name, outcome: 'success', ...attemptMeta });
             isSuccess = true;
             verifiedCount++;
             break;
           } else {
-            attempts.push({ strategy: strategy.name, outcome: 'mismatch' });
+            attempts.push({ strategy: strategy.name, outcome: 'mismatch', ...attemptMeta });
             console.warn(
               `[OpenJobFill Pipeline] Read-back check mismatch on [${label}]: expected "${item.targetValue}", read "${actualReadValue}". Retrying with next strategy...`
             );
@@ -127,6 +150,8 @@ export class PipelineExecutor {
             strategy: strategy.name,
             outcome: 'error',
             message: err instanceof Error ? err.message.slice(0, 180) : '策略执行异常',
+            adapterId: strategy.adapterId,
+            executionWorld: strategy.executionWorld,
           });
           console.warn(`[OpenJobFill Pipeline] Strategy "${strategy.name}" threw error on [${label}]:`, err);
         }
@@ -148,13 +173,22 @@ export class PipelineExecutor {
           value: String(item.targetValue),
         });
       } else {
+        const allNotHandled = attempts.length > 0 && attempts.every((attempt) => attempt.outcome === 'not_handled');
+        const failureCode = allNotHandled
+          ? 'adapter_not_handled'
+          : attempts.some((attempt) => attempt.outcome === 'error')
+            ? 'strategy_error'
+            : 'verification_mismatch';
+        const failureMessage = allNotHandled
+          ? '当前控件没有可用的自动填写驱动'
+          : `写入验证未通过 (期望值: ${item.targetValue})`;
         failedCount++;
         remainingTasks.push({
           id: item.id,
           label,
           type: field.type,
           required: field.required,
-          reason: `写入验证未通过 (期望值: ${item.targetValue})`,
+          reason: failureMessage,
           element: field.element,
           fingerprint: field.fingerprint,
           locator: field.locator,
@@ -171,10 +205,10 @@ export class PipelineExecutor {
           label,
           field: item.semanticKey || '',
           value: String(item.targetValue),
-          message: `读回验证失败 (实际渲染: "${actualReadValue}")`,
-          failureCode: attempts.some((attempt) => attempt.outcome === 'error')
-            ? 'strategy_error'
-            : 'verification_mismatch',
+          message: allNotHandled
+            ? failureMessage
+            : `读回验证失败 (实际渲染: "${actualReadValue}")`,
+          failureCode,
           attempts,
         });
       }

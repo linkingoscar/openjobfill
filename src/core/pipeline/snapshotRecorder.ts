@@ -1,6 +1,10 @@
-import type { FieldDescriptor, FillPlan, FieldLocatorEvidence } from '../../types/pipeline';
+import type { FieldDescriptor, FillPlan, FieldLocatorEvidence, FillPlanCustomRuleDiagnostics } from '../../types/pipeline';
 import type { FillResult } from '../../types/adapter';
 import { scrubSensitiveData } from '../privacy/privacyScrubber';
+import type { PageScanDiagnostics } from './pageAnalyzer';
+import type { SectionCapacityDiagnostic } from '../engine/sectionEngine';
+import type { PlatformEnhancerMatchTrace } from '../adapters/enhancers';
+import { getMatchingControlAdapters } from '../adapters/controlAdapters';
 
 export type SnapshotStage = 'scan' | 'plan' | 'fill' | 'error';
 export type SnapshotSchemaVersion = 1 | 2;
@@ -44,6 +48,46 @@ export interface SnapshotImportResult {
   imported: number;
   sessions: FillSnapshotSession[];
   redactionApplied: true;
+}
+
+export interface AssociationDryRunReport {
+  reportType: 'OPENJOBFILL_ASSOCIATION_DRY_RUN';
+  adapter: { id: string | null; name: string; trace: PlatformEnhancerMatchTrace[] };
+  counts: {
+    scanned: number;
+    associated: number;
+    needsUser: number;
+    skipped: number;
+    staleCustomRules: number;
+  };
+  matchesBySource: Record<string, number>;
+  failuresByStage: {
+    mappingUnresolved: number;
+    safetyBlocked: number;
+    staleCustomRule: number;
+    dynamicCapacity: number;
+  };
+  customRules: FillPlanCustomRuleDiagnostics;
+  formRoots: PageScanDiagnostics;
+  dynamicGroups: SectionCapacityDiagnostic[];
+  controlAdapters: {
+    matchedFields: number;
+    genericFallbackFields: number;
+    mainWorldCandidates: number;
+    byAdapter: Record<string, number>;
+  };
+  timings: {
+    sectionPreparationMs: number;
+    formScanMs: number;
+    fieldMappingMs: number;
+    totalAnalysisMs: number;
+  };
+  safety: {
+    dynamicExpansionAttempted: boolean;
+    pageWriteAttempted: false;
+    resumeValuePersisted: false;
+    rawDomPersisted: false;
+  };
 }
 
 export const MAX_REPLAY_SNAPSHOTS = 10;
@@ -193,6 +237,7 @@ export function compactPlanSnapshot(plan: FillPlan) {
     highConfidenceCount: plan.highConfidenceCount,
     needsUserCount: plan.needsUserCount,
     skipCount: plan.skipCount,
+    diagnostics: plan.diagnostics,
     items: plan.items.map((item) => ({
       id: item.id,
       fieldId: item.field.id,
@@ -206,6 +251,74 @@ export function compactPlanSnapshot(plan: FillPlan) {
       fingerprint: item.field.fingerprint,
       locator: item.field.locator,
     })),
+  };
+}
+
+/** Build a value-free report during preview analysis; this function never writes the page. */
+export function buildAssociationDryRunReport(options: {
+  plan: FillPlan;
+  adapter: { id?: string; name: string; trace?: PlatformEnhancerMatchTrace[] };
+  formRoots: PageScanDiagnostics;
+  dynamicGroups: SectionCapacityDiagnostic[];
+  timings: AssociationDryRunReport['timings'];
+  pageUrl?: string;
+}): AssociationDryRunReport {
+  const matchesBySource = options.plan.items.reduce<Record<string, number>>((result, item) => {
+    if (item.action !== 'FILL') return result;
+    const source = item.source || 'unknown';
+    result[source] = (result[source] || 0) + 1;
+    return result;
+  }, {});
+  const customRules = options.plan.diagnostics?.customRules || {
+    matchedCount: 0,
+    staleMappingIds: [],
+    unmatchedMappingIds: [],
+    methodCounts: { selector: 0, fingerprint: 0, locator: 0 },
+  };
+  const controlAdapters = options.plan.items.reduce<AssociationDryRunReport['controlAdapters']>((result, item) => {
+    if (item.action !== 'FILL') return result;
+    const match = getMatchingControlAdapters({
+      field: item.field,
+      driverType: item.driverType,
+      pageUrl: options.pageUrl,
+    })[0];
+    if (!match) {
+      result.genericFallbackFields++;
+      return result;
+    }
+    result.matchedFields++;
+    result.byAdapter[match.adapter.id] = (result.byAdapter[match.adapter.id] || 0) + 1;
+    if ((match.adapter.world || 'ISOLATED') === 'MAIN') result.mainWorldCandidates++;
+    return result;
+  }, { matchedFields: 0, genericFallbackFields: 0, mainWorldCandidates: 0, byAdapter: {} });
+  return {
+    reportType: 'OPENJOBFILL_ASSOCIATION_DRY_RUN',
+    adapter: { id: options.adapter.id || null, name: options.adapter.name, trace: options.adapter.trace || [] },
+    counts: {
+      scanned: options.plan.totalFieldsCount,
+      associated: options.plan.items.filter((item) => item.action === 'FILL').length,
+      needsUser: options.plan.needsUserCount,
+      skipped: options.plan.skipCount,
+      staleCustomRules: customRules.staleMappingIds.length,
+    },
+    matchesBySource,
+    failuresByStage: {
+      mappingUnresolved: options.plan.needsUserCount,
+      safetyBlocked: options.plan.items.filter((item) => item.field.safety?.blocked).length,
+      staleCustomRule: customRules.staleMappingIds.length,
+      dynamicCapacity: options.dynamicGroups.filter((group) => group.status === 'failed').length,
+    },
+    customRules,
+    formRoots: options.formRoots,
+    dynamicGroups: options.dynamicGroups,
+    controlAdapters,
+    timings: options.timings,
+    safety: {
+      dynamicExpansionAttempted: options.dynamicGroups.some((group) => group.desiredCount > group.initialCount),
+      pageWriteAttempted: false,
+      resumeValuePersisted: false,
+      rawDomPersisted: false,
+    },
   };
 }
 

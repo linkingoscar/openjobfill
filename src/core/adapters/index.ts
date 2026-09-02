@@ -1,41 +1,16 @@
-import type { SiteAdapter } from '../../types/adapter';
-import { mokaAdapter } from './moka';
-import { beisenAdapter } from './beisen';
-import { feishuAdapter } from './feishu';
-import { dayeeAdapter } from './dayee';
-import { nowcoderAdapter } from './nowcoder';
-import { tencentAdapter } from './tencent';
-import { alibabaAdapter } from './alibaba';
-import { meituanAdapter } from './meituan';
-import { workdayAdapter } from './workday';
-import { greenhouseAdapter } from './greenhouse';
-import { genericAdapter } from './generic';
-
 /**
- * 完整适配器注册列表 (按优先级降序排序)
+ * 平台差异统一从这个入口暴露。旧版 SiteAdapter/customFill 已退出运行时，
+ * 避免“注册表显示已适配、实际填写却走另一套 Pipeline”的双系统漂移。
  */
-export const ALL_ADAPTERS: SiteAdapter[] = [
-  mokaAdapter,
-  beisenAdapter,
-  feishuAdapter,
-  dayeeAdapter,
-  nowcoderAdapter,
-  tencentAdapter,
-  alibabaAdapter,
-  meituanAdapter,
-  workdayAdapter,
-  greenhouseAdapter,
-  genericAdapter,
-].sort((a, b) => b.priority - a.priority);
+export {
+  ALL_PLATFORM_ENHANCERS,
+  getEnhancerMatchTrace,
+  getEnhancerForUrl,
+} from './enhancers';
 
-/**
- * 根据当前网页 URL 获取最佳匹配的 Adapter
- */
-export function getAdapterForUrl(url: string = window.location.href): SiteAdapter {
-  for (const adapter of ALL_ADAPTERS) {
-    if (adapter.matches(url)) {
-      return adapter;
-    }
-  }
-  return genericAdapter;
-}
+export {
+  CONTROL_ADAPTER_IDS,
+  getControlAdapterCatalog,
+  getControlAdapterMatchTrace,
+  getMatchingControlAdapters,
+} from './controlAdapters';

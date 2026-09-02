@@ -5,57 +5,71 @@ import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../uti
 import { prepareEditableSections } from './expansionHelper';
 import { throwIfAborted } from '../pipeline/runContext';
 
+export interface SectionCapacityDiagnostic {
+  groupKey: 'education' | 'experience' | 'project' | 'family';
+  desiredCount: number;
+  initialCount: number;
+  finalCount: number;
+  createdCount: number;
+  status: 'satisfied' | 'expanded' | 'failed';
+  failureCode?: 'CAPACITY_NOT_REACHED';
+}
+
 export class SectionEngine {
+  private lastDiagnostics: SectionCapacityDiagnostic[] = [];
+
+  getLastDiagnostics(): SectionCapacityDiagnostic[] {
+    return this.lastDiagnostics.map((item) => ({ ...item }));
+  }
+
   /**
    * 自动探测页面现有卡片行数，并按需差量点击 "+添加经历" 按钮 (Required - Existing)
    */
   async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null, signal?: AbortSignal): Promise<boolean> {
     throwIfAborted(signal);
+    this.lastDiagnostics = [];
     let anyExpanded = false;
     if (await prepareEditableSections(signal) > 0) anyExpanded = true;
 
-    // 1. 教育经历卡片
-    if (resume.educations && resume.educations.length > 1) {
-      const existingCount = this.countExistingSectionCards(['教育', '学历', 'education'], enhancer, 'education');
-      const needed = resume.educations.length;
-      if (needed > existingCount) {
-        const delta = needed - existingCount;
-        const expanded = await this.expandSection('education', ['教育', '学历', 'education'], needed, delta, enhancer, signal);
-        if (expanded) anyExpanded = true;
-      }
-    }
+    const groups: Array<{
+      key: SectionCapacityDiagnostic['groupKey'];
+      keywords: string[];
+      desiredCount: number;
+    }> = [
+      { key: 'education', keywords: ['教育', '学历', 'education'], desiredCount: resume.educations?.length || 0 },
+      { key: 'experience', keywords: ['工作', '实习', 'experience', 'employment'], desiredCount: resume.experiences?.length || 0 },
+      { key: 'project', keywords: ['项目', 'project'], desiredCount: resume.projects?.length || 0 },
+      { key: 'family', keywords: ['家庭', 'family'], desiredCount: resume.familyMembers?.length || 0 },
+    ];
 
-    // 2. 工作与实习经历卡片
-    if (resume.experiences && resume.experiences.length > 1) {
-      const existingCount = this.countExistingSectionCards(['工作', '实习', 'experience', 'employment'], enhancer, 'experience');
-      const needed = resume.experiences.length;
-      if (needed > existingCount) {
-        const delta = needed - existingCount;
-        const expanded = await this.expandSection('experience', ['工作', '实习', 'experience'], needed, delta, enhancer, signal);
+    for (const group of groups) {
+      if (group.desiredCount === 0) continue;
+      const initialCount = this.countExistingSectionCards(group.keywords, enhancer, group.key);
+      let expanded = false;
+      if (group.desiredCount > 1 && group.desiredCount > initialCount) {
+        expanded = await this.expandSection(
+          group.key,
+          group.keywords,
+          group.desiredCount,
+          group.desiredCount - initialCount,
+          enhancer,
+          signal,
+        );
         if (expanded) anyExpanded = true;
       }
-    }
-
-    // 3. 项目经历卡片
-    if (resume.projects && resume.projects.length > 1) {
-      const existingCount = this.countExistingSectionCards(['项目', 'project'], enhancer, 'project');
-      const needed = resume.projects.length;
-      if (needed > existingCount) {
-        const delta = needed - existingCount;
-        const expanded = await this.expandSection('project', ['项目', 'project'], needed, delta, enhancer, signal);
-        if (expanded) anyExpanded = true;
-      }
-    }
-
-    // 4. 家庭成员卡片
-    if (resume.familyMembers && resume.familyMembers.length > 1) {
-      const existingCount = this.countExistingSectionCards(['家庭', 'family'], enhancer, 'family');
-      const needed = resume.familyMembers.length;
-      if (needed > existingCount) {
-        const delta = needed - existingCount;
-        const expanded = await this.expandSection('family', ['家庭', 'family'], needed, delta, enhancer, signal);
-        if (expanded) anyExpanded = true;
-      }
+      const finalCount = expanded
+        ? this.countExistingSectionCards(group.keywords, enhancer, group.key)
+        : initialCount;
+      const reached = finalCount >= group.desiredCount;
+      this.lastDiagnostics.push({
+        groupKey: group.key,
+        desiredCount: group.desiredCount,
+        initialCount,
+        finalCount,
+        createdCount: Math.max(0, finalCount - initialCount),
+        status: reached ? (finalCount > initialCount ? 'expanded' : 'satisfied') : 'failed',
+        failureCode: reached ? undefined : 'CAPACITY_NOT_REACHED',
+      });
     }
 
     if (anyExpanded) {

@@ -37,7 +37,8 @@ export class DateEngine {
   private visibleCalendarItems(popup: HTMLElement): HTMLElement[] {
     return Array.from(popup.querySelectorAll<HTMLElement>(
       '.ant-picker-cell, .el-year-table td, .el-month-table td, .semi-datepicker-year, ' +
-      '.semi-datepicker-month, [role="gridcell"], [data-year], [data-month]'
+      '.semi-datepicker-month, .mtd-calendar-cell, .atsx-calendar-cell, .tp-calendar-cell, ' +
+      '.WdayTable td, [role="gridcell"], [data-year], [data-month]'
     )).filter((item) => isElementVisible(item) && item.getAttribute('aria-disabled') !== 'true');
   }
 
@@ -58,7 +59,7 @@ export class DateEngine {
   private calendarHeaderText(popup: HTMLElement): string {
     const headers = Array.from(popup.querySelectorAll<HTMLElement>(
       '.ant-picker-header, .el-date-picker__header, .semi-datepicker-header, ' +
-      '[class*="picker-header"], [class*="calendar-header"]'
+      '.mtd-calendar-header, .WdateDiv .MTitle, [class*="picker-header"], [class*="calendar-header"]'
     )).filter(isElementVisible);
     const text = headers.length > 0
       ? headers.map((header) => header.textContent || '').join('')
@@ -142,7 +143,8 @@ export class DateEngine {
     const isoMonth = `${y}-${m}`;
     const popupSelectors = [
       '.ant-picker-dropdown', '.el-picker-panel', '.semi-datepicker', '[class*="picker-panel"]',
-      '[class*="calendar-panel"]', '[role="dialog"]', '[role="grid"]',
+      '.mtd-picker-panel', '.atsx-date-panel', '.tp-date-panel', '.zhipin-date-panel',
+      '.lagou-calendar', '.WdateDiv', '#dpHolder', '[class*="calendar-panel"]', '[role="dialog"]', '[role="grid"]',
     ].join(',');
 
     let roots: ParentNode[] = [];
@@ -173,7 +175,8 @@ export class DateEngine {
         const headerText = this.calendarHeaderText(popup);
         if (semantic.day && headerText.includes(y) && (headerText.includes(`${semantic.month}月`) || headerText.includes(m))) {
           const cells = Array.from(popup.querySelectorAll<HTMLElement>(
-            '.ant-picker-cell, .el-date-table td, .semi-datepicker-day, [role="gridcell"]'
+            '.ant-picker-cell, .el-date-table td, .semi-datepicker-day, .mtd-calendar-cell, ' +
+            '.atsx-calendar-cell, .tp-calendar-cell, .WdayTable td, [role="gridcell"]'
           )).filter((cell) => isElementVisible(cell) && cell.getAttribute('aria-disabled') !== 'true');
           const dayCell = cells.find((cell) => (cell.textContent || '').trim() === String(semantic.day));
           if (dayCell) {

@@ -26,6 +26,14 @@ const OPTION_SELECTORS = [
   '.ivu-cascader-menu-item',
   '.moka-select-item',
   '.moka-option',
+  '.mokahr-dropdown-option',
+  '.phoenix-select-option',
+  '.sc-select-option',
+  '.atsx-select-option',
+  '.aui-select-option',
+  '.ud-select-option',
+  '.sd-dropdown-item',
+  '.tp-select-option',
   '.cascader-modal li',
   '.my-cascader-modal li',
   '.e_layer li',
@@ -158,7 +166,7 @@ async function trySelectCustomOptionOnce(
   // 2. 检查是否有内部原生 select
   const internalSelect = triggerEl.querySelector('select');
   if (internalSelect) {
-    return trySelectCustomOptionOnce(internalSelect, targetText, fuzzy);
+    return trySelectCustomOptionOnce(internalSelect, targetText, fuzzy, signal);
   }
 
   // 3. 如果包含内部输入框（可搜索下拉框），尝试输入搜索文本以加速定位
@@ -228,7 +236,7 @@ async function trySelectCustomOptionOnce(
   // 7. 如果找到匹配项，模拟点击
   if (bestMatch) {
     simulateClick(bestMatch);
-    await sleep(120);
+    await sleep(120, signal);
     confirmKnownLegacyPopup(bestMatch);
     return true;
   }
@@ -305,6 +313,11 @@ export async function selectCascaderOptions(
     '.semi-cascader-item',
     '.ivu-cascader-menu-item',
     '.mtd-cascader-menu-item',
+    '.mokahr-region-option',
+    '.phoenix-cascader-item',
+    '.sc-cascader-item',
+    '.hc-super-selector-item',
+    '.tp-cascader-item',
     '.layui-form-select dl dd',
     '.cascader-modal li',
     '.my-cascader-modal li',
@@ -324,11 +337,13 @@ export async function selectCascaderOptions(
     const candidates: HTMLElement[] = [];
     const ownerDocument = triggerEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
     if (!ownerDocument) return false;
-    for (const selector of cascaderItemSelectors) {
-      const found = Array.from(ownerDocument.querySelectorAll<HTMLElement>(selector));
-      for (const el of found) {
-        if (isElementVisible(el)) {
-          candidates.push(el);
+    for (const root of getAllOpenRoots(ownerDocument)) {
+      for (const selector of cascaderItemSelectors) {
+        const found = Array.from(root.querySelectorAll<HTMLElement>(selector));
+        for (const el of found) {
+          if (isElementVisible(el) && !candidates.includes(el)) {
+            candidates.push(el);
+          }
         }
       }
     }

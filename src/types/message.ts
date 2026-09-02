@@ -25,6 +25,19 @@ export type ExtensionMessage =
   | { type: 'FRAME_ANALYZE'; payload: { analysisId: string; resumeId?: string; runId?: string } }
   | { type: 'FRAME_EXECUTE'; payload: { analysisId: string } }
   | { type: 'FRAME_CANCEL_ANALYSIS'; payload: { analysisId: string } }
+  | { type: 'AUTHORIZE_MAIN_WORLD_CONTROL'; payload: { runId: string; requestId: string } }
+  | {
+      type: 'EXECUTE_MAIN_WORLD_CONTROL';
+      payload: {
+        runId: string;
+        requestId: string;
+        token: string;
+        adapterId: string;
+        action: 'TYPE' | 'SELECT_TEXT' | 'SELECT_PATH';
+        selectors: string[];
+        value: string | string[];
+      };
+    }
   | { type: 'AI_MAP_FIELDS'; payload: { settings: AISettings; fields: UnmatchedFieldDescriptor[]; options: ResumeKeyOption[] } }
   | { type: 'AI_PARSE_RESUME_IMAGE'; payload: { settings: AISettings; imageDataUrl: string; fileName: string; confirmedExternalProcessing: true } }
   | { type: 'AI_PARSE_RESUME_DOCUMENT'; payload: { settings: AISettings; imageDataUrls: string[]; documentText: string; fileName: string; confirmedExternalProcessing: true } }
@@ -45,6 +58,26 @@ function isString(value: unknown): value is string {
 function isNonEmptyString(value: unknown): value is string {
   return isString(value) && value.trim().length > 0;
 }
+
+function isBoundedString(value: unknown, maxLength: number): value is string {
+  return isNonEmptyString(value) && value.length <= maxLength;
+}
+
+function isMainWorldValue(value: unknown): value is string | string[] {
+  return (isString(value) && value.length <= 2_000)
+    || (Array.isArray(value)
+      && value.length > 0
+      && value.length <= 6
+      && value.every((item) => isString(item) && item.length > 0 && item.length <= 240));
+}
+
+const MAIN_WORLD_CONTROL_ADAPTER_IDS = new Set([
+  'PhoenixInput',
+  'HcSuperSelector',
+  'PhoenixSelect',
+  'Job51SetdayDate',
+  'My97Date',
+]);
 
 function isFrameTargets(value: unknown): value is FrameTarget[] {
   return Array.isArray(value) && value.every((target) =>
@@ -95,6 +128,23 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
     case 'FRAME_EXECUTE':
     case 'FRAME_CANCEL_ANALYSIS':
       return isRecord(payload) && isNonEmptyString(payload.analysisId);
+    case 'AUTHORIZE_MAIN_WORLD_CONTROL':
+      return isRecord(payload)
+        && isBoundedString(payload.runId, 200)
+        && isBoundedString(payload.requestId, 260);
+    case 'EXECUTE_MAIN_WORLD_CONTROL':
+      return isRecord(payload)
+        && isBoundedString(payload.runId, 200)
+        && isBoundedString(payload.requestId, 260)
+        && isBoundedString(payload.token, 200)
+        && isBoundedString(payload.adapterId, 80)
+        && MAIN_WORLD_CONTROL_ADAPTER_IDS.has(payload.adapterId)
+        && ['TYPE', 'SELECT_TEXT', 'SELECT_PATH'].includes(String(payload.action))
+        && Array.isArray(payload.selectors)
+        && payload.selectors.length > 0
+        && payload.selectors.length <= 8
+        && payload.selectors.every((selector) => isBoundedString(selector, 512))
+        && isMainWorldValue(payload.value);
     case 'AI_MAP_FIELDS':
       return isRecord(payload)
         && isRecord(payload.settings)

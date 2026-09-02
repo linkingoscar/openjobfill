@@ -1,5 +1,6 @@
 import type { StandardResume } from '../../types/resume';
 import { EMPTY_RESUME, DEMO_RESUME, DEFAULT_RESUME } from './defaultData';
+import { parseResumePayload } from '../schema/resumeSchema';
 
 const STORAGE_KEY_RESUMES = 'openjobfill_resumes';
 export const RESUME_STORAGE_INDEX_KEY = 'openjobfill_resume_ids';
@@ -43,54 +44,16 @@ function createDefaultResumeList(): StandardResume[] {
   return [normalizeResume(DEFAULT_RESUME)];
 }
 
-export function normalizeResume(data: Partial<StandardResume> | null | undefined): StandardResume {
-  const base = JSON.parse(JSON.stringify(EMPTY_RESUME)) as StandardResume;
-  if (!data || typeof data !== 'object') return base;
-
-  return {
-    ...base,
-    ...data,
-    id: data.id || ('resume-' + Date.now()),
-    title: data.title || '我的求职档案',
-    isDefault: Boolean(data.isDefault),
-    schemaVersion: 4,
-    createdAt: Number(data.createdAt) || Date.now(),
-    updatedAt: Number(data.updatedAt) || Date.now(),
-    basics: {
-      ...base.basics,
-      ...(data.basics || {}),
-      currentLocation: {
-        ...(base.basics.currentLocation || {}),
-        ...(data.basics?.currentLocation || {}),
-      },
-      nativePlace: {
-        ...(base.basics.nativePlace || {}),
-        ...(data.basics?.nativePlace || {}),
-      },
-      birthPlace: {
-        ...(base.basics.birthPlace || {}),
-        ...(data.basics?.birthPlace || {}),
-      },
-      hukouLocation: {
-        ...(base.basics.hukouLocation || {}),
-        ...(data.basics?.hukouLocation || {}),
-      },
-    },
-    educations: Array.isArray(data.educations) ? data.educations : [],
-    experiences: Array.isArray(data.experiences) ? data.experiences : [],
-    projects: Array.isArray(data.projects) ? data.projects : [],
-    languages: Array.isArray(data.languages) ? data.languages : [],
-    skills: Array.isArray(data.skills) ? data.skills : [],
-    certificates: Array.isArray(data.certificates) ? data.certificates : [],
-    familyMembers: Array.isArray(data.familyMembers) ? data.familyMembers : [],
-    awards: Array.isArray(data.awards) ? data.awards : [],
-    academicAchievements: Array.isArray(data.academicAchievements) ? data.academicAchievements : [],
-    campusExperiences: Array.isArray(data.campusExperiences) ? data.campusExperiences : [],
-    qaBank: Array.isArray(data.qaBank) ? data.qaBank.map(item => ({
-      ...item,
-      scope: item.scope || (item.domain ? 'domain' : 'global'),
-    })) : [],
-  };
+export function normalizeResume(
+  data: Partial<StandardResume> | null | undefined,
+  options: { strict?: boolean; regenerateMetadata?: boolean; fallbackTitle?: string } = {},
+): StandardResume {
+  const source = data && typeof data === 'object' ? data : EMPTY_RESUME;
+  const result = parseResumePayload(source, options);
+  if (options.strict === false && result.issues.length > 0) {
+    console.warn('[OpenJobFill] 已修复损坏的本地简历字段：', result.issues);
+  }
+  return result.resume;
 }
 
 class ResumeStorage {
@@ -108,10 +71,13 @@ class ResumeStorage {
       try {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(normalizeResume);
+          return parsed.map((resume) => normalizeResume(resume, { strict: false }));
         }
       } catch (e) {
         console.error('Failed to parse resumes from localStorage', e);
+        // Keep the original bytes recoverable. A downgrade or corrupt payload must
+        // not be overwritten with defaults merely because the current reader rejects it.
+        return createDefaultResumeList();
       }
     }
     const defaults = createDefaultResumeList();
@@ -185,7 +151,7 @@ class ResumeStorage {
 
   private async migrateLegacyResumes(legacy: unknown): Promise<StandardResume[] | null> {
     if (!Array.isArray(legacy) || legacy.length === 0) return null;
-    const resumes = legacy.map((resume) => normalizeResume(resume));
+    const resumes = legacy.map((resume) => normalizeResume(resume, { strict: false }));
     await this.writeResumeEntries(resumes);
     return resumes;
   }
@@ -205,7 +171,7 @@ class ResumeStorage {
         const resumes = index
           .map((id) => entries[getResumeEntryKey(id)])
           .filter((resume): resume is Partial<StandardResume> => !!resume && typeof resume === 'object')
-          .map(normalizeResume);
+          .map((resume) => normalizeResume(resume, { strict: false }));
         if (resumes.length > 0) return resumes;
       }
 
@@ -288,7 +254,7 @@ class ResumeStorage {
 
   /** Background 专用：所有窗口/页面的写入最终在此串行化入口执行。 */
   async saveResumeDirect(resume: StandardResume): Promise<void> {
-    const cleanResume = normalizeResume(resume);
+    const cleanResume = normalizeResume(resume, { strict: true });
     if (this.isExtensionEnv()) {
       const index = await this.getExtensionResumeIndex();
       const stored = await this.getExtensionValues([getResumeEntryKey(cleanResume.id)]);
@@ -351,7 +317,7 @@ class ResumeStorage {
     }
     const current = (await this.getAllResumes()).find((resume) => resume.id === id);
     if (!current) throw new Error(`找不到要更新的简历：${id}`);
-    const next = normalizeResume(current);
+    const next = normalizeResume(current, { strict: true });
     for (const [path, value] of Object.entries(updates)) {
       const parts = parseResumePath(path);
       let target: Record<string, unknown> = next as unknown as Record<string, unknown>;
@@ -415,7 +381,8 @@ class ResumeStorage {
       });
       return;
     }
-    const sanitized = (resumes && resumes.length > 0 ? resumes : [DEFAULT_RESUME]).map(normalizeResume);
+    const sanitized = (resumes && resumes.length > 0 ? resumes : [DEFAULT_RESUME])
+      .map((resume) => normalizeResume(resume, { strict: true }));
     if (this.isExtensionEnv()) {
       const previousIds = await this.getExtensionResumeIndex();
       await this.writeResumeEntries(sanitized, previousIds);
@@ -462,13 +429,10 @@ class ResumeStorage {
    */
   async importResumeFromJson(jsonString: string): Promise<StandardResume> {
     const parsed = JSON.parse(jsonString) as Partial<StandardResume>;
-    const newResume = normalizeResume({
-      ...parsed,
-      id: 'resume-' + Date.now(),
-      title: parsed.title || `导入的简历 (${new Date().toLocaleDateString()})`,
-      isDefault: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    const newResume = normalizeResume(parsed, {
+      strict: true,
+      regenerateMetadata: true,
+      fallbackTitle: `导入的简历 (${new Date().toLocaleDateString()})`,
     });
 
     await this.saveResume(newResume);

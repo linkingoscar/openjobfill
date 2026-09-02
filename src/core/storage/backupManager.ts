@@ -1,4 +1,5 @@
-import { normalizeResume, resumeStorage } from './resumeStorage';
+import { resumeStorage } from './resumeStorage';
+import { parseResumePayload } from '../schema/resumeSchema';
 import { normalizeCustomSiteRule, ruleStorage, validateCustomSiteRule } from './ruleStorage';
 import { trackerStorage } from './trackerStorage';
 import { getCustomDomains, saveCustomDomains } from '../whitelist';
@@ -76,125 +77,14 @@ function validateArrayItems(
   value.forEach(validator);
 }
 
-function validateKnownFieldTypes(
-  value: UnknownRecord,
-  stringFields: readonly string[],
-  numberFields: readonly string[],
-  booleanFields: readonly string[],
-  context: string,
-): void {
-  for (const field of stringFields) {
-    if (field in value && value[field] !== undefined && typeof value[field] !== 'string') {
-      throw new Error(`${context}.${field} 必须是字符串`);
-    }
-  }
-  for (const field of numberFields) {
-    if (field in value && value[field] !== undefined
-      && (typeof value[field] !== 'number' || !Number.isFinite(value[field]))) {
-      throw new Error(`${context}.${field} 必须是有限数字`);
-    }
-  }
-  for (const field of booleanFields) {
-    if (field in value && value[field] !== undefined && typeof value[field] !== 'boolean') {
-      throw new Error(`${context}.${field} 必须是布尔值`);
-    }
-  }
-}
-
-function validateLocation(value: unknown, context: string): void {
-  if (value === undefined) return;
-  if (!isRecord(value)) throw new Error(`${context} 必须是对象`);
-  validateKnownFieldTypes(value, ['province', 'city', 'district', 'detail'], [], [], context);
-}
-
-const RESUME_ARRAY_STRING_FIELDS: Record<string, readonly string[]> = {
-  educations: ['id', 'schoolName', 'degree', 'degreeEn', 'major', 'majorCategory', 'college', 'startDate', 'endDate', 'gpa', 'ranking', 'courses', 'awards'],
-  experiences: ['id', 'company', 'department', 'title', 'jobType', 'city', 'startDate', 'endDate', 'description', 'achievements', 'techStack', 'witnessName', 'witnessPhone'],
-  projects: ['id', 'projectName', 'role', 'startDate', 'endDate', 'projectUrl', 'description', 'responsibility', 'techStack', 'achievements'],
-  languages: ['id', 'language', 'proficiency', 'certificateName', 'score'],
-  skills: ['id', 'name', 'level'],
-  certificates: ['id', 'name', 'issueDate', 'authority'],
-  familyMembers: ['id', 'relation', 'name', 'company', 'jobTitle', 'phone', 'politicalStatus', 'hukouLocation'],
-  awards: ['id', 'name', 'issueDate', 'level', 'grade', 'role', 'description'],
-  academicAchievements: ['id', 'title', 'venue', 'authorOrder', 'url', 'date', 'abstract'],
-  campusExperiences: ['id', 'organization', 'title', 'startDate', 'endDate', 'description', 'responsibility'],
-  qaBank: ['id', 'keyword', 'answer', 'scope', 'domain'],
-};
-
-const RESUME_ARRAY_BOOLEAN_FIELDS: Record<string, readonly string[]> = {
-  educations: ['isFullTime', 'isHighest', 'is985_211'],
-  experiences: ['isCurrent'],
-};
-
-function validateResumeBasics(value: UnknownRecord): void {
-  validateKnownFieldTypes(
-    value,
-    [
-      'name', 'firstName', 'lastName', 'middleName', 'preferredName', 'gender', 'birthDate',
-      'phone', 'email', 'avatarUrl', 'idCardType', 'idCardNumber', 'politicalStatus',
-      'ethnicity', 'maritalStatus', 'height', 'weight', 'healthStatus', 'country', 'state',
-      'postalCode', 'addressLine1', 'addressLine2', 'workAuthorization', 'veteranStatus',
-      'disabilityStatus', 'jobStatus', 'expectedRole', 'expectedCity', 'availableTime',
-      'githubUrl', 'linkedinUrl', 'blogUrl', 'portfolioUrl', 'selfEvaluation', 'hobbies',
-      'driverLicense', 'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation',
-    ],
-    ['age', 'workingYears', 'expectedSalaryMin', 'expectedSalaryMax'],
-    ['visaSponsorship', 'acceptOvertime', 'acceptBusinessTrip', 'adjustable', 'cityFlexible', 'hasRelatives', 'hasPunishment'],
-    '简历 basics',
-  );
-  validateLocation(value.nativePlace, '简历 basics.nativePlace');
-  validateLocation(value.birthPlace, '简历 basics.birthPlace');
-  validateLocation(value.currentLocation, '简历 basics.currentLocation');
-  validateLocation(value.hukouLocation, '简历 basics.hukouLocation');
-}
-
-function validateResumeArrayItem(value: unknown, field: string, index: number): void {
-  if (!isRecord(value)) throw new Error(`第 ${index + 1} 份简历的 ${field}[${index}] 必须是对象`);
-  const context = `简历 ${field}[${index}]`;
-  validateKnownFieldTypes(
-    value,
-    RESUME_ARRAY_STRING_FIELDS[field] || [],
-    [],
-    RESUME_ARRAY_BOOLEAN_FIELDS[field] || [],
-    context,
-  );
-}
-
 function normalizeBackupResume(value: unknown, index: number): StandardResume {
   if (!isRecord(value)) throw new Error(`第 ${index + 1} 份简历不是对象`);
-  asNonEmptyString(value.id, `第 ${index + 1} 份简历的 id`);
-  if ('title' in value && typeof value.title !== 'string') {
-    throw new Error(`第 ${index + 1} 份简历的 title 必须是字符串`);
+  try {
+    return parseResumePayload(value, { strict: true }).resume;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`第 ${index + 1} 份简历无效：${message}`);
   }
-  validateKnownFieldTypes(value, ['id', 'title'], ['createdAt', 'updatedAt', 'schemaVersion'], ['isDefault'], `第 ${index + 1} 份简历`);
-  if (!isRecord(value.basics)) {
-    throw new Error(`第 ${index + 1} 份简历缺少有效的 basics 对象`);
-  }
-  validateResumeBasics(value.basics);
-
-  const arrayFields = [
-    'educations', 'experiences', 'projects', 'languages', 'skills',
-    'certificates', 'familyMembers', 'awards', 'academicAchievements',
-    'campusExperiences', 'qaBank',
-  ] as const;
-  for (const field of arrayFields) {
-    if (field in value && !Array.isArray(value[field])) {
-      throw new Error(`第 ${index + 1} 份简历的 ${field} 必须是数组`);
-    }
-    if (Array.isArray(value[field])) {
-      value[field].forEach((item, itemIndex) => {
-        if (!isRecord(item)) {
-          throw new Error(`第 ${index + 1} 份简历的 ${field}[${itemIndex}] 必须是对象`);
-        }
-        if ('id' in item && typeof item.id !== 'string') {
-          throw new Error(`第 ${index + 1} 份简历的 ${field}[${itemIndex}].id 必须是字符串`);
-        }
-        validateResumeArrayItem(item, field, itemIndex);
-      });
-    }
-  }
-
-  return normalizeResume(value as Partial<StandardResume>);
 }
 
 function normalizeBackupResumes(value: unknown): StandardResume[] {

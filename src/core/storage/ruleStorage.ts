@@ -1,12 +1,63 @@
 import type { CustomSiteRule } from '../../types/rule';
 
 const RULES_STORAGE_KEY = 'openjobfill_custom_rules';
+const CURRENT_RULE_VERSION = 2 as const;
 
 type LegacyCustomSiteRule = Partial<CustomSiteRule> & {
   selector?: string;
   resumeKey?: string;
   description?: string;
 };
+
+function normalizeHostname(value: unknown): string {
+  return String(value || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+}
+
+function normalizePathPrefix(value: unknown): string | undefined {
+  const path = String(value || '').trim();
+  if (!path) return undefined;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return normalized.length > 1 ? normalized.replace(/\/+$/, '') : '/';
+}
+
+function isLiteralHostname(value: string): boolean {
+  const hostname = value.replace(/^\*\./, '');
+  if (hostname === 'localhost') return true;
+  if (hostname.length === 0 || hostname.length > 253) return false;
+  return hostname.split('.').every((label) =>
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+  );
+}
+
+function hostnameMatches(actual: string, expected: string): boolean {
+  const normalizedActual = normalizeHostname(actual);
+  const normalizedExpected = normalizeHostname(expected.replace(/^\*\./, ''));
+  return normalizedActual === normalizedExpected || normalizedActual.endsWith(`.${normalizedExpected}`);
+}
+
+export function customRuleMatchesUrl(rule: CustomSiteRule, rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+
+  if (rule.site?.hostname) {
+    if (!hostnameMatches(url.hostname, rule.site.hostname)) return false;
+    const prefix = normalizePathPrefix(rule.site.pathPrefix);
+    return !prefix || prefix === '/' || url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
+  }
+
+  const pattern = rule.domainPattern.trim();
+  if (isLiteralHostname(pattern)) return hostnameMatches(url.hostname, pattern);
+  try {
+    // Legacy regex rules remain supported, but never receive query strings or hashes.
+    return new RegExp(pattern, 'i').test(`${url.hostname}${url.pathname}`);
+  } catch {
+    return false;
+  }
+}
 
 const DEFAULT_PRESET_RULES: CustomSiteRule[] = [
   {
@@ -78,6 +129,15 @@ export function validateCustomSiteRule(rule: CustomSiteRule, doc?: Document): st
   if (!rule?.id || !rule.name?.trim()) return '规则名称不能为空';
   if (!rule.domainPattern?.trim()) return '域名匹配模式不能为空';
 
+  if (rule.site) {
+    if (!normalizeHostname(rule.site.hostname) || !isLiteralHostname(rule.site.hostname)) {
+      return `站点 hostname 无效：${rule.site.hostname}`;
+    }
+    if (rule.site.pathPrefix && /[?#]/.test(rule.site.pathPrefix)) {
+      return '站点路径范围不能包含查询参数或 hash';
+    }
+  }
+
   try {
     new RegExp(rule.domainPattern, 'i');
   } catch {
@@ -123,10 +183,23 @@ export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSite
 
   return {
     id: input.id,
+    version: CURRENT_RULE_VERSION,
     name: input.name?.trim() || `${input.domainPattern} 自定义规则`,
     domainPattern: input.domainPattern,
+    site: input.site?.hostname
+      ? {
+          hostname: normalizeHostname(input.site.hostname),
+          pathPrefix: normalizePathPrefix(input.site.pathPrefix),
+        }
+      : isLiteralHostname(input.domainPattern)
+        ? { hostname: normalizeHostname(input.domainPattern.replace(/^\*\./, '')) }
+        : undefined,
     enabled: input.enabled !== false,
-    fields,
+    fields: fields.map((field) => ({
+      ...field,
+      status: field.status === 'STALE' ? 'STALE' : 'ACTIVE',
+      occurrenceMode: field.occurrenceMode || 'NONE',
+    })),
     updatedAt: input.updatedAt,
   };
 }
@@ -143,8 +216,11 @@ export const ruleStorage = {
             }
             const rules = res[RULES_STORAGE_KEY] as LegacyCustomSiteRule[] | undefined;
             if (!rules || rules.length === 0) {
-              this.saveRules(DEFAULT_PRESET_RULES);
-              resolve(DEFAULT_PRESET_RULES);
+              const defaults = DEFAULT_PRESET_RULES
+                .map(normalizeCustomSiteRule)
+                .filter((rule): rule is CustomSiteRule => !!rule);
+              void this.saveRules(defaults);
+              resolve(defaults);
             } else {
               resolve(rules.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule));
             }
@@ -168,8 +244,11 @@ export const ruleStorage = {
         }
       } catch {}
     }
-    localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(DEFAULT_PRESET_RULES));
-    return DEFAULT_PRESET_RULES;
+    const defaults = DEFAULT_PRESET_RULES
+      .map(normalizeCustomSiteRule)
+      .filter((rule): rule is CustomSiteRule => !!rule);
+    localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(defaults));
+    return defaults;
   },
 
   async saveRules(rules: CustomSiteRule[]): Promise<void> {
@@ -256,13 +335,7 @@ export const ruleStorage = {
     const rules = await this.getCustomRules();
     for (const rule of rules) {
       if (!rule.enabled) continue;
-      try {
-        if (url.includes(rule.domainPattern) || new RegExp(rule.domainPattern, 'i').test(url)) {
-          return rule;
-        }
-      } catch {
-        console.warn(`[OpenJobFill] 已跳过无效的自定义规则域名模式：${rule.name}`);
-      }
+      if (customRuleMatchesUrl(rule, url)) return rule;
     }
     return null;
   },
@@ -289,24 +362,30 @@ export const ruleStorage = {
       rule = {
         id: 'rule-' + Date.now(),
         name: `${hostname} 专属自定义规则`,
+        version: CURRENT_RULE_VERSION,
         domainPattern: hostname,
+        site: { hostname: normalizeHostname(hostname) },
         enabled: true,
         fields: [],
         updatedAt: new Date().toISOString(),
       };
     }
 
-    // 检查字段是否已存在 (仅按 selector 查重，允许不同选择器绑定相同字段)
+    // 选择器变化后，优先复活同一语义字段的 STALE 映射，避免越学越多重复规则。
     const existingFieldIdx = rule.fields.findIndex(
       (f) => f.selector === selector
+        || (f.resumeKey === resumeKey && f.status === 'STALE')
+        || (!!evidence?.fingerprint && f.fingerprint === evidence.fingerprint)
     );
     const newField = {
-      id: 'f-' + Date.now(),
+      id: existingFieldIdx >= 0 ? rule.fields[existingFieldIdx].id : 'f-' + Date.now(),
       selector,
       resumeKey,
       description,
       fingerprint: evidence?.fingerprint,
       locator: evidence?.locator,
+      status: 'ACTIVE' as const,
+      occurrenceMode: 'NONE' as const,
     };
 
     if (existingFieldIdx >= 0) {
@@ -317,5 +396,21 @@ export const ruleStorage = {
 
     await this.saveCustomRule(rule);
     return rule;
+  },
+
+  /** Only explicit evidence conflicts are persisted as stale; absence on a multi-step page is not. */
+  async markFieldMappingsStale(ruleId: string, fieldIds: string[]): Promise<void> {
+    if (fieldIds.length === 0) return;
+    const rules = await this.getCustomRules();
+    const rule = rules.find((candidate) => candidate.id === ruleId);
+    if (!rule) return;
+    const staleIds = new Set(fieldIds);
+    let changed = false;
+    rule.fields = rule.fields.map((field) => {
+      if (!staleIds.has(field.id) || field.status === 'STALE') return field;
+      changed = true;
+      return { ...field, status: 'STALE' as const };
+    });
+    if (changed) await this.saveCustomRule(rule);
   },
 };

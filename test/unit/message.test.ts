@@ -29,6 +29,22 @@ describe('Extension message protocol', () => {
         confirmedExternalProcessing: true,
       },
     })).toBe(true);
+    expect(isExtensionMessage({
+      type: 'AUTHORIZE_MAIN_WORLD_CONTROL',
+      payload: { runId: 'run-1', requestId: 'request-1' },
+    })).toBe(true);
+    expect(isExtensionMessage({
+      type: 'EXECUTE_MAIN_WORLD_CONTROL',
+      payload: {
+        runId: 'run-1',
+        requestId: 'request-1',
+        token: 'one-time-token',
+        adapterId: 'PhoenixSelect',
+        action: 'SELECT_PATH',
+        selectors: ['#region'],
+        value: ['广东省', '深圳市'],
+      },
+    })).toBe(true);
   });
 
   it('rejects malformed or unknown payloads before they reach handlers', () => {
@@ -43,6 +59,27 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_DOCUMENT',
       payload: { settings: {}, imageDataUrls: [], documentText: '', fileName: 'resume.docx', confirmedExternalProcessing: true },
+    })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'EXECUTE_MAIN_WORLD_CONTROL',
+      payload: {
+        runId: 'run-1', requestId: 'request-1', token: 'token', adapterId: 'PhoenixSelect',
+        action: 'EVAL', selectors: ['#region'], value: '深圳市',
+      },
+    })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'EXECUTE_MAIN_WORLD_CONTROL',
+      payload: {
+        runId: 'run-1', requestId: 'request-1', token: 'token', adapterId: 'PhoenixSelect',
+        action: 'SELECT_TEXT', selectors: [], value: '深圳市',
+      },
+    })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'EXECUTE_MAIN_WORLD_CONTROL',
+      payload: {
+        runId: 'run-1', requestId: 'request-1', token: 'token', adapterId: 'ArbitraryScript',
+        action: 'TYPE', selectors: ['#target'], value: 'text',
+      },
     })).toBe(false);
   });
 });

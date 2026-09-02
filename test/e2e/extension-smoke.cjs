@@ -51,6 +51,20 @@ async function openOptions(context, extensionId) {
   return options;
 }
 
+async function waitForStoredFill(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await page.evaluate(async () => {
+      const stored = await chrome.storage.local.get('openjobfill_replay_snapshots');
+      return stored.openjobfill_replay_snapshots?.some((session) =>
+        session.records?.some((record) => record.stage === 'fill')) === true;
+    });
+    if (found) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('等待填表执行快照超时');
+}
+
 async function main() {
   if (!fs.existsSync(path.join(extensionPath, 'manifest.json'))) {
     throw new Error('缺少 .output/chrome-mv3，请先运行 pnpm build');
@@ -118,6 +132,11 @@ async function main() {
     );
     await options.getByText('已自动保存').waitFor({ timeout: 10000 });
     await options.reload();
+    await options.waitForFunction(
+      (expected) => document.querySelector('#basics-name')?.value === expected,
+      'Smoke Persistence Candidate',
+      { timeout: 10000 },
+    );
     assert.equal(await options.locator('#basics-name').inputValue(), 'Smoke Persistence Candidate');
     await options.close();
     // chrome.storage.local 的回调已完成，但 Chromium 将扩展存储刷到持久化
@@ -138,6 +157,11 @@ async function main() {
     await reopenedPage.goto(`${url}/test/sandbox.html`, { waitUntil: 'domcontentloaded' });
     const reopenedExtensionId = await waitForExtensionId(context);
     const reopenedOptions = await openOptions(context, reopenedExtensionId);
+    await reopenedOptions.waitForFunction(
+      (expected) => document.querySelector('#basics-name')?.value === expected,
+      'Smoke Persistence Candidate',
+      { timeout: 10000 },
+    );
     assert.equal(await reopenedOptions.locator('#basics-name').inputValue(), 'Smoke Persistence Candidate');
 
     // 生产扩展真实链路：探测招聘表单 → 打开预览 → 确认填写 → 读回页面控件。
@@ -166,8 +190,23 @@ async function main() {
       await reopenedPage.locator('input[name="candidateName"]').inputValue(),
       'Smoke Persistence Candidate',
     );
+    await waitForStoredFill(reopenedOptions);
+    const fillFields = await reopenedOptions.evaluate(async () => {
+      const stored = await chrome.storage.local.get('openjobfill_replay_snapshots');
+      return (stored.openjobfill_replay_snapshots || []).flatMap((session) =>
+        (session.records || []).filter((record) => record.stage === 'fill').flatMap((record) =>
+          record.payload?.fields || []));
+    });
+    const adapterAttempts = fillFields.flatMap((field) => field.attempts || []);
+    assert.ok(
+      adapterAttempts.some((attempt) =>
+        attempt.adapterId === 'PhoenixInput'
+        && attempt.executionWorld === 'MAIN'
+        && attempt.outcome === 'success'),
+      'PhoenixInput 应通过受限 MAIN-world Adapter 完成，而不是静默降级',
+    );
 
-    console.log('extension smoke passed: shadow UI sizing + reload + browser restart persistence + preview fill');
+    console.log('extension smoke passed: shadow UI sizing + persistence + MAIN-world PhoenixInput + preview fill');
   } finally {
     await context?.close().catch(() => {});
     await new Promise((resolve) => server.close(resolve));

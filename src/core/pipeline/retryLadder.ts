@@ -6,13 +6,49 @@ import { locationResolver } from '../resolvers/locationResolver';
 import { dateEngine } from '../resolvers/dateEngine';
 import { getElementWindow, isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 import { throwIfAborted } from './runContext';
+import {
+  executeControlAdapter,
+  getMatchingControlAdapters,
+  isControlAdapterValueEquivalent,
+  readBackControlAdapter,
+  type ControlAdapterId,
+  type ControlExecutionWorld,
+} from '../adapters/controlAdapters';
 
 export interface ExecutionStrategy {
   name: string;
   execute(field: FieldDescriptor, value: any, signal?: AbortSignal): Promise<boolean> | boolean;
+  adapterId?: ControlAdapterId;
+  executionWorld?: ControlExecutionWorld;
+  readBack?(field: FieldDescriptor, driverType: DriverType): Promise<unknown> | unknown;
+  isEquivalent?(actual: unknown, expected: unknown, driverType: DriverType): boolean | undefined;
 }
 
 export class RetryLadder {
+  getStrategiesForField(
+    field: FieldDescriptor,
+    driverType: DriverType,
+    options: { pageUrl?: string; runId?: string } = {},
+  ): ExecutionStrategy[] {
+    const adapterStrategies = getMatchingControlAdapters({ field, driverType, pageUrl: options.pageUrl })
+      .map((match): ExecutionStrategy => ({
+        name: `ControlAdapter:${match.adapter.id}`,
+        adapterId: match.adapter.id,
+        executionWorld: match.adapter.world || 'ISOLATED',
+        execute: (currentField, value, signal) => executeControlAdapter(match, {
+          field: currentField,
+          driverType,
+          value,
+          signal,
+          runId: options.runId,
+          pageUrl: options.pageUrl,
+        }),
+        readBack: () => readBackControlAdapter(match),
+        isEquivalent: (actual, expected) => isControlAdapterValueEquivalent(match, actual, expected),
+      }));
+    return [...adapterStrategies, ...this.getStrategiesForType(driverType)];
+  }
+
   /**
    * 获取指定控件类型的重试执行策略阶梯
    */

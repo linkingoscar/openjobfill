@@ -1,5 +1,6 @@
 import { parseResumeFromText } from '../parser/resumeParser';
 import type { StandardResume } from '../../types/resume';
+import { parseResumePayload } from '../schema/resumeSchema';
 
 type JsonObject = Record<string, any>;
 
@@ -55,18 +56,12 @@ export function importJsonResume(input: string | JsonObject, fallbackTitle = 'JS
     || raw.id
     || raw.educations.some((item: any) => 'schoolName' in (item || {}))
   )) {
-    return {
-      ...base,
-      ...raw,
-      id: `resume-${now}`,
-      title: String(raw.title || fallbackTitle),
-      isDefault: false,
-      createdAt: now,
-      updatedAt: now,
-      schemaVersion: 4,
-      basics: { ...base.basics, ...(raw.basics || {}) },
-      qaBank: Array.isArray(raw.qaBank) ? raw.qaBank : [],
-    } as StandardResume;
+    return parseResumePayload(raw, {
+      strict: true,
+      regenerateMetadata: true,
+      fallbackTitle,
+      now,
+    }).resume;
   }
 
   if (!looksLikeJsonResume(raw)) {
@@ -170,7 +165,7 @@ export function importJsonResume(input: string | JsonObject, fallbackTitle = 'JS
     description: String(item?.summary || ''),
   }));
 
-  return base;
+  return parseResumePayload(base, { strict: true }).resume;
 }
 
 /** JSON 优先、普通 Markdown/纯文本回退的统一文本导入入口。 */

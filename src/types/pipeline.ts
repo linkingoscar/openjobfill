@@ -1,6 +1,7 @@
 import type { StandardResume, CustomQABankItem } from './resume';
 import type { FillLogItem } from './adapter';
 import type { FieldSafetyInfo } from '../core/pipeline/fieldSafety';
+import type { CustomRuleMatchMethod } from './rule';
 
 export type FieldType =
   | 'text'
@@ -92,6 +93,14 @@ export interface FillPlan {
   needsUserCount: number;
   skipCount: number;
   totalFieldsCount: number;
+  diagnostics?: { customRules: FillPlanCustomRuleDiagnostics };
+}
+
+export interface FillPlanCustomRuleDiagnostics {
+  matchedCount: number;
+  staleMappingIds: string[];
+  unmatchedMappingIds: string[];
+  methodCounts: Record<CustomRuleMatchMethod, number>;
 }
 
 /** 可跨扩展消息边界传输的子 frame 预览项（不包含 DOM 引用）。 */

@@ -39,7 +39,7 @@ import DrawerReviewTab from './DrawerReviewTab.vue';
 import DrawerClipboardTab from './DrawerClipboardTab.vue';
 import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
 import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
-import { getAdapterForUrl } from '@/core/adapters';
+import { getEnhancerForUrl } from '@/core/adapters';
 import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
 import { startElementPicking } from '@/core/engine/elementPicker';
@@ -296,8 +296,8 @@ const handleSwitchResume = async (e: Event) => {
 
 onMounted(async () => {
   loadFloatingPosition();
-  const adapter = getAdapterForUrl(window.location.href);
-  currentAdapterName.value = adapter.name;
+  const enhancer = getEnhancerForUrl(window.location.href, document);
+  currentAdapterName.value = enhancer?.name || '智能通用决策引擎 (Pipeline v2)';
   await Promise.all([loadActiveResume(), loadFillHistory()]);
   detectApplicationSuccessDraft();
   window.addEventListener('keydown', handleKeydown);
@@ -329,8 +329,7 @@ const handleQuickFill = async () => {
     const analyzed = await formFillerEngine.analyze(activeResume);
     analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id, { runId: analyzed.runId });
     setPreviewPlan(analyzed);
-    // 展示实际参与规划的引擎名称。旧版这里只显示注册表 adapter，
-    // Greenhouse/Lever 等页面容易误以为会走专属 customFill，实际当前统一走 Pipeline。
+    // 展示实际参与规划的平台增强器；所有站点都通过同一 Pipeline 执行。
     currentAdapterName.value = analyzed.remoteFrames.length > 0
       ? `${analyzed.adapterName} + ${analyzed.remoteFrames.length} 个跨域子页面`
       : analyzed.adapterName;

@@ -9,6 +9,145 @@ import { isExtensionMessage, type ExtensionMessage } from '../types/message';
 let resumeWriteQueue: Promise<void> = Promise.resolve();
 const runtimeInjectedTabs = new Set<number>();
 const RUNTIME_SCRIPT_FILE = 'content-runtime.js';
+const mainWorldAuthorizations = new Map<string, {
+  tabId: number;
+  frameId: number;
+  runId: string;
+  requestId: string;
+  expiresAt: number;
+}>();
+
+type MainWorldPayload = {
+  action: 'TYPE' | 'SELECT_TEXT' | 'SELECT_PATH';
+  selectors: string[];
+  value: string | string[];
+};
+
+/** Fixed, self-contained MAIN-world driver. Never accepts source code or arbitrary event names. */
+async function runMainWorldControlAction(payload: MainWorldPayload): Promise<{ success: boolean; reason?: string }> {
+  const findTarget = (): HTMLElement | null => {
+    for (const selector of payload.selectors) {
+      try {
+        const candidate = document.querySelector<HTMLElement>(selector);
+        if (candidate) return candidate;
+      } catch {}
+    }
+    return null;
+  };
+  const visible = (element: HTMLElement): boolean => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && style.opacity !== '0'
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const normalize = (value: string): string => value.toLowerCase().replace(/[\s:：*\-_/（）()\[\]【】]/g, '');
+  const dispatchClick = (element: HTMLElement): void => {
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    element.click();
+  };
+  const setText = (element: HTMLElement, value: string): boolean => {
+    const writable = element.matches('input, textarea, [contenteditable="true"]')
+      ? element
+      : element.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+    if (!writable) return false;
+    if (writable instanceof HTMLInputElement && ['password', 'file', 'hidden'].includes(writable.type)) return false;
+    writable.focus();
+    if (writable instanceof HTMLInputElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) return false;
+      setter.call(writable, value);
+      const tracker = (writable as HTMLInputElement & { _valueTracker?: { setValue(value: string): void } })._valueTracker;
+      tracker?.setValue('');
+    } else if (writable instanceof HTMLTextAreaElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (!setter) return false;
+      setter.call(writable, value);
+    } else {
+      writable.textContent = value;
+    }
+    try {
+      writable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+    } catch {
+      writable.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    writable.dispatchEvent(new Event('change', { bubbles: true }));
+    writable.blur();
+    return true;
+  };
+  const target = findTarget();
+  if (!target) return { success: false, reason: 'target_not_found' };
+  const optionSelector = [
+    '[role="option"]', '[role="menuitem"]', '[role="treeitem"]',
+    '.ant-select-item-option', '.ant-cascader-menu-item', '.el-select-dropdown__item', '.el-cascader-node',
+    '.semi-select-option', '.mtd-select-item', '.ivu-select-item', '.ivu-cascader-menu-item',
+    '.layui-form-select dd', '.moka-select-item', '.moka-option', '.phoenix-select-option',
+    '.sc-select-option', '.pop-panel td', '.dialog-box li', '[class*="option-item"]', '[class*="cascader-item"]',
+  ].join(',');
+  const popupId = target?.getAttribute('aria-controls')
+    || target?.getAttribute('aria-owns')
+    || target?.querySelector<HTMLElement>('[aria-controls], [aria-owns]')?.getAttribute('aria-controls')
+    || target?.querySelector<HTMLElement>('[aria-controls], [aria-owns]')?.getAttribute('aria-owns')
+    || '';
+  const waitForOption = async (wanted: string): Promise<HTMLElement | null> => {
+    const expected = normalize(wanted);
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const optionRoot = popupId ? document.getElementById(popupId) : document;
+      const candidates = optionRoot
+        ? Array.from(optionRoot.querySelectorAll<HTMLElement>(optionSelector)).filter(visible)
+        : [];
+      const exact = candidates.find((candidate) => normalize(candidate.textContent || '') === expected);
+      const fuzzy = candidates.find((candidate) => {
+        const actual = normalize(candidate.textContent || '');
+        return !!actual && (actual.includes(expected) || expected.includes(actual));
+      });
+      if (exact || fuzzy) return exact || fuzzy || null;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return null;
+  };
+
+  if (payload.action === 'TYPE') {
+    if (Array.isArray(payload.value)) return { success: false, reason: 'invalid_value' };
+    return { success: setText(target, payload.value) };
+  }
+
+  const values = Array.isArray(payload.value) ? payload.value : [payload.value];
+  if (values.length === 0) return { success: false, reason: 'invalid_value' };
+  const searchInput = target.matches('input:not([readonly])')
+    ? target
+    : target.querySelector<HTMLElement>('input:not([readonly])');
+  dispatchClick(searchInput || target);
+  if (payload.action === 'SELECT_TEXT' && searchInput) setText(searchInput, values[0]);
+
+  for (const value of values) {
+    const option = await waitForOption(value);
+    if (!option) return { success: false, reason: 'option_not_found' };
+    dispatchClick(option);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  return { success: true };
+}
+
+function issueMainWorldToken(tabId: number, frameId: number, runId: string, requestId: string): string {
+  const token = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const now = Date.now();
+  for (const [key, authorization] of mainWorldAuthorizations) {
+    if (authorization.expiresAt <= now) mainWorldAuthorizations.delete(key);
+  }
+  while (mainWorldAuthorizations.size >= 200) {
+    const oldest = mainWorldAuthorizations.keys().next().value as string | undefined;
+    if (!oldest) break;
+    mainWorldAuthorizations.delete(oldest);
+  }
+  mainWorldAuthorizations.set(token, { tabId, frameId, runId, requestId, expiresAt: now + 15_000 });
+  return token;
+}
 
 function enqueueResumeWrite(operation: () => Promise<void>): Promise<void> {
   const next = resumeWriteQueue.catch(() => undefined).then(operation);
@@ -42,7 +181,12 @@ async function ensureContentRuntime(tabId: number): Promise<void> {
 export default defineBackground(() => {
   console.log('[OpenJobFill] Background service worker initialized.');
 
-  chrome.tabs.onRemoved?.addListener((tabId) => runtimeInjectedTabs.delete(tabId));
+  chrome.tabs.onRemoved?.addListener((tabId) => {
+    runtimeInjectedTabs.delete(tabId);
+    for (const [token, authorization] of mainWorldAuthorizations) {
+      if (authorization.tabId === tabId) mainWorldAuthorizations.delete(token);
+    }
+  });
   // 完整导航会销毁页面上下文，即使标签页 ID 不变也必须允许下一页重新注入。
   chrome.webNavigation?.onCommitted?.addListener((details) => {
     const hadRuntime = runtimeInjectedTabs.delete(details.tabId);
@@ -103,6 +247,54 @@ export default defineBackground(() => {
       })().catch((error) => {
         console.error('[OpenJobFill] Content runtime forward failed:', error);
         sendResponse({ success: false, error: error instanceof Error ? error.message : '页面运行时注入失败' });
+      });
+      return true;
+    }
+
+    if (message.type === 'AUTHORIZE_MAIN_WORLD_CONTROL') {
+      const tabId = sender.tab?.id;
+      const frameId = sender.frameId ?? 0;
+      if (tabId === undefined || sender.id !== chrome.runtime.id) {
+        sendResponse({ success: false, error: 'MAIN world 请求来源无效' });
+        return;
+      }
+      const token = issueMainWorldToken(tabId, frameId, message.payload.runId, message.payload.requestId);
+      sendResponse({ success: true, token });
+      return;
+    }
+
+    if (message.type === 'EXECUTE_MAIN_WORLD_CONTROL') {
+      const tabId = sender.tab?.id;
+      const frameId = sender.frameId ?? 0;
+      const authorization = mainWorldAuthorizations.get(message.payload.token);
+      mainWorldAuthorizations.delete(message.payload.token);
+      if (
+        tabId === undefined
+        || sender.id !== chrome.runtime.id
+        || !authorization
+        || authorization.expiresAt <= Date.now()
+        || authorization.tabId !== tabId
+        || authorization.frameId !== frameId
+        || authorization.runId !== message.payload.runId
+        || authorization.requestId !== message.payload.requestId
+      ) {
+        sendResponse({ success: false, error: 'MAIN world 一次性授权无效或已过期' });
+        return;
+      }
+      chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        world: 'MAIN',
+        func: runMainWorldControlAction,
+        args: [{
+          action: message.payload.action,
+          selectors: message.payload.selectors,
+          value: message.payload.value,
+        }],
+      }).then((results) => {
+        const result = results[0]?.result as { success?: boolean; reason?: string } | undefined;
+        sendResponse({ success: result?.success === true, error: result?.reason });
+      }).catch((error) => {
+        sendResponse({ success: false, error: error instanceof Error ? error.message : 'MAIN world 执行失败' });
       });
       return true;
     }

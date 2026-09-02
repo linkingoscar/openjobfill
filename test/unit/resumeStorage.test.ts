@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resumeStorage } from '@/core/storage/resumeStorage';
+import type { StandardResume } from '@/types/resume';
 
 const RESUMES_KEY = 'openjobfill_resumes';
 const RESUME_INDEX_KEY = 'openjobfill_resume_ids';
@@ -159,6 +160,26 @@ describe('ResumeStorage 首装初始化', () => {
     expect(resumes).toHaveLength(1);
     expect(resumes[0].id).toBe('resume-default');
     expect(JSON.parse(localStorage.getItem(RESUMES_KEY) || '[]')).toHaveLength(1);
+  });
+
+  it('遇到未来版本时不得覆盖原始本地数据', async () => {
+    vi.stubGlobal('chrome', undefined);
+    const futurePayload = JSON.stringify([{ id: 'future', schemaVersion: 99, basics: { name: '未来用户' } }]);
+    localStorage.setItem(RESUMES_KEY, futurePayload);
+
+    const resumes = await resumeStorage.getAllResumes();
+
+    expect(resumes[0].id).toBe('resume-default');
+    expect(localStorage.getItem(RESUMES_KEY)).toBe(futurePayload);
+  });
+
+  it('保存入口应拒绝损坏的嵌套字段类型', async () => {
+    vi.stubGlobal('chrome', undefined);
+    const [defaultResume] = await resumeStorage.getAllResumes();
+    await expect(resumeStorage.saveResume({
+      ...defaultResume,
+      educations: ['broken'] as unknown as StandardResume['educations'],
+    })).rejects.toThrow(/educations\[0\] 必须是对象/);
   });
 
   it('公开下载的 JSON 模板应始终可以被当前版本直接导入', async () => {

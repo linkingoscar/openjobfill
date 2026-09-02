@@ -106,6 +106,7 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
 
       const nameField = descriptors.find((d) => d.name === 'candidateName');
       expect(nameField).toBeDefined();
+      expect(nameField?.type).toBe('text');
       expect(nameField?.required).toBe(true);
       expect(nameField?.label).toContain('姓名');
       expect(nameField?.fingerprint).toMatch(/^field-/);
@@ -116,6 +117,49 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(selectField).toBeDefined();
       expect(selectField?.options).toContain('本科');
       expect(selectField?.options).toContain('硕士');
+    });
+
+    it('应优先扫描申请表单根节点，排除同页搜索和登录表单', () => {
+      document.body.innerHTML = `
+        <header>
+          <form id="job-search"><label>搜索职位</label><input name="keyword"></form>
+          <form id="login"><label>登录账号</label><input name="account"><input type="password"></form>
+        </header>
+        <main>
+          <form id="application" class="application-form">
+            <h2>职位申请</h2>
+            <label>姓名</label><input name="name">
+            <label>手机</label><input name="phone">
+            <label>邮箱</label><input name="email">
+          </form>
+        </main>`;
+
+      const fields = pageAnalyzer.analyzePage(document);
+      expect(fields.map((field) => field.name)).toEqual(['name', 'phone', 'email']);
+      const diagnostics = pageAnalyzer.getLastDiagnostics();
+      expect(diagnostics.fallbackDocumentCount).toBe(0);
+      expect(diagnostics.formRoots.find((root) => root.root.includes('#application'))?.selected).toBe(true);
+      expect(diagnostics.formRoots.find((root) => root.root.includes('#job-search'))?.selected).toBe(false);
+    });
+
+    it('选择申请表单根节点后仍应扫描其内部宿主的开放 Shadow DOM', () => {
+      document.body.innerHTML = `
+        <form id="site-search"><input name="keyword"></form>
+        <form id="application" class="application-form">
+          <h2>职位申请</h2>
+          <label>姓名</label><input name="name">
+          <div id="contact-widget"></div>
+        </form>`;
+
+      const host = document.querySelector<HTMLElement>('#contact-widget')!;
+      const shadowRoot = host.attachShadow({ mode: 'open' });
+      shadowRoot.innerHTML = `
+        <label for="shadow-phone">联系电话</label>
+        <input id="shadow-phone" name="phone" type="tel">`;
+
+      const fields = pageAnalyzer.analyzePage(document);
+      expect(fields.map((field) => field.name)).toEqual(['name', 'phone']);
+      expect(fields.some((field) => field.element === shadowRoot.querySelector('#shadow-phone'))).toBe(true);
     });
   });
 
@@ -378,6 +422,42 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
 
       await expect(pipelineExecutor.executePlan(plan, { signal: controller.signal }))
         .rejects.toThrow('填写已取消');
+      expect(document.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('');
+    });
+
+    it('纯诊断模式不得扩展区块、调用填写或生成可执行计划', async () => {
+      document.body.innerHTML = `
+        <form class="application-form">
+          <h2>职位申请</h2>
+          <label>姓名</label><input name="name">
+          <button type="button">添加工作经历</button>
+        </form>`;
+      let expansionClicks = 0;
+      document.querySelector('button')?.addEventListener('click', () => expansionClicks++);
+      const resume = structuredClone(MOCK_RESUME);
+      resume.experiences.push({
+        ...resume.experiences[0],
+        id: 'exp-2',
+        company: '第二家公司',
+      });
+
+      const analyzed = await formFillerEngine.analyzeDryRun(resume);
+
+      expect(expansionClicks).toBe(0);
+      expect(analyzed.diagnostics?.reportType).toBe('OPENJOBFILL_ASSOCIATION_DRY_RUN');
+      expect(analyzed.diagnostics?.safety).toEqual({
+        dynamicExpansionAttempted: false,
+        pageWriteAttempted: false,
+        resumeValuePersisted: false,
+        rawDomPersisted: false,
+      });
+      expect(analyzed.diagnostics?.formRoots.formRoots.some((root) => root.selected)).toBe(true);
+      expect(analyzed.diagnostics?.controlAdapters).toMatchObject({
+        matchedFields: 0,
+        genericFallbackFields: 1,
+        mainWorldCandidates: 0,
+      });
+      await expect(formFillerEngine.executePlan(analyzed)).rejects.toThrow('纯诊断计划不能执行');
       expect(document.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('');
     });
 

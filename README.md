@@ -89,6 +89,8 @@
 
 - 悬浮面板可由用户主动选择本地 PDF / Word 文件，并优先注入带“简历 / Resume / CV”语义的上传区，避开头像和证件照控件；
 - 每次规划与执行会生成紧凑诊断快照，递归清洗手机号、邮箱、身份证、银行卡和密钥，且不记录待填写的简历值。
+- 诊断包同时记录表单根评分、平台增强器匹配轨迹、规则证据命中方式、动态经历数量和分阶段耗时；开发排障可运行不可执行的 association dry run，全程不扩展区块、不请求 AI、不写入字段值。
+- 复杂控件运行时登记 58 个站点/组件 Adapter，按专项、组件库、通用与 Native 顺序执行；Phoenix、My97 等通过一次性授权的受限 MAIN-world 桥接，详见 [`docs/complex-control-adapter-matrix.md`](docs/complex-control-adapter-matrix.md)。
 
 ---
 

@@ -275,7 +275,7 @@ export const greenhouseEnhancer: PlatformEnhancer = {
     return (
       url.includes('greenhouse.io') ||
       url.includes('lever.co') ||
-      !!root?.querySelector('#application_form, .application-form, #lever-form')
+      !!root?.querySelector('#application_form input#first_name, #application_form input#last_name, #lever-form')
     );
   },
   fieldMappings: {
@@ -302,7 +302,26 @@ export const ALL_PLATFORM_ENHANCERS: PlatformEnhancer[] = [
   greenhouseEnhancer,
 ];
 
+export interface PlatformEnhancerMatchTrace {
+  id: string;
+  name: string;
+  priority: number;
+  matched: boolean;
+}
+
+export function getEnhancerMatchTrace(url: string, doc?: Document): PlatformEnhancerMatchTrace[] {
+  return ALL_PLATFORM_ENHANCERS.map((enhancer) => {
+    let matched = false;
+    try {
+      matched = enhancer.matches(url, doc);
+    } catch {
+      // A site-specific detector must never stop the generic pipeline.
+    }
+    return { id: enhancer.id, name: enhancer.name, priority: enhancer.priority, matched };
+  }).sort((a, b) => b.priority - a.priority);
+}
+
 export function getEnhancerForUrl(url: string, doc?: Document): PlatformEnhancer | null {
-  const matched = ALL_PLATFORM_ENHANCERS.filter((e) => e.matches(url, doc)).sort((a, b) => b.priority - a.priority);
-  return matched.length > 0 ? matched[0] : null;
+  const matchedId = getEnhancerMatchTrace(url, doc).find((candidate) => candidate.matched)?.id;
+  return matchedId ? ALL_PLATFORM_ENHANCERS.find((enhancer) => enhancer.id === matchedId) || null : null;
 }

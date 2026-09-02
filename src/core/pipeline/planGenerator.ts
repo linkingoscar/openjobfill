@@ -7,6 +7,8 @@ import { isInputElement } from '../../utils/dom';
 import { inferLocationPath, inferMajorHierarchy } from '../resolvers/profileNormalizer';
 import { deriveLanguageSummary } from '../derivation/profileDeriver';
 import { inspectFieldSafety } from './fieldSafety';
+import type { CustomFieldMapping } from '../../types/rule';
+import { resolveCustomRuleMappings } from './customRuleMatcher';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -42,7 +44,7 @@ export class PlanGenerator {
     fields: FieldDescriptor[],
     resume: StandardResume,
     enhancer?: PlatformEnhancer | null,
-    customRules?: { selector: string; resumeKey: string; description?: string }[]
+    customRules?: CustomFieldMapping[]
   ): FillPlan {
     const items: FillPlanItem[] = [];
     const matchedSemanticKeys = new Set<string>();
@@ -50,6 +52,7 @@ export class PlanGenerator {
     let highConfidenceCount = 0;
     let needsUserCount = 0;
     let skipCount = 0;
+    const customRuleResolution = resolveCustomRuleMappings(fields, customRules);
 
     for (const field of fields) {
       // 0. 调用 PlatformEnhancer.enhanceField Hook 进行字段增强
@@ -133,19 +136,8 @@ export class PlanGenerator {
       }
 
       // 2. 优先检查用户自定义网站规则 (User Rules)
-      let customMatch: { resumeKey: string; description?: string } | null = null;
-      if (customRules && customRules.length > 0) {
-        for (const cr of customRules) {
-          try {
-            if (cr.selector && field.element.matches && field.element.matches(cr.selector)) {
-              customMatch = cr;
-              break;
-            }
-          } catch {
-            // 存量或手工导入的坏选择器只跳过该映射，不能阻断整页自动填写。
-          }
-        }
-      }
+      const resolvedCustomMatch = customRuleResolution.matches.get(field.id);
+      const customMatch = resolvedCustomMatch?.mapping || null;
 
       if (customMatch) {
         const val = getValueByPath(resume, customMatch.resumeKey);
@@ -158,7 +150,7 @@ export class PlanGenerator {
             confidence: 1.0,
             action: 'FILL',
             source: 'user_rule',
-            reason: `命中用户自定义规则: ${customMatch.description || customMatch.resumeKey}`,
+            reason: `命中用户自定义规则（${resolvedCustomMatch?.method || 'selector'}）: ${customMatch.description || customMatch.resumeKey}`,
             driverType: this.resolveDriverType(field),
           });
           highConfidenceCount++;
@@ -272,6 +264,14 @@ export class PlanGenerator {
       needsUserCount,
       skipCount,
       totalFieldsCount: fields.length,
+      diagnostics: {
+        customRules: {
+          matchedCount: customRuleResolution.matches.size,
+          staleMappingIds: customRuleResolution.staleMappingIds,
+          unmatchedMappingIds: customRuleResolution.unmatchedMappingIds,
+          methodCounts: customRuleResolution.methodCounts,
+        },
+      },
     };
   }
 

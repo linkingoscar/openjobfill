@@ -36,7 +36,10 @@
     <div class="form-row">
       <div class="form-item">
         <label class="form-label">真实姓名 *</label>
-        <input type="text" name="candidateName" placeholder="请输入姓名" required />
+        <!-- PhoenixInput fixture：浏览器冒烟会通过受限 MAIN-world 桥填写此字段。 -->
+        <div class="phoenix-input">
+          <input type="text" name="candidateName" placeholder="请输入姓名" required />
+        </div>
       </div>
       <div class="form-item">
         <label class="form-label">性别 *</label>
@@ -247,4 +250,3 @@
 
 </body>
 </html>
-
