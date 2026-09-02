@@ -65,6 +65,12 @@ export interface FillLogItem {
   value: string;
   status: 'success' | 'skipped' | 'failed';
   message?: string;
+  failureCode?: 'missing_mapping' | 'safety_blocked' | 'strategy_error' | 'verification_mismatch' | 'cancelled';
+  attempts?: Array<{
+    strategy: string;
+    outcome: 'success' | 'mismatch' | 'error';
+    message?: string;
+  }>;
 }
 
 import type { FillPlan, RemainingTaskItem } from './pipeline';

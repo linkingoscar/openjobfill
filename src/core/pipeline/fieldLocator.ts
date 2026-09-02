@@ -93,3 +93,55 @@ export function buildFieldLocator(
   };
 }
 
+function querySelectorSafely(root: Document | HTMLElement, selector: string): HTMLElement | null {
+  if (!selector || selector.startsWith('/')) return null;
+  try {
+    return root.querySelector<HTMLElement>(selector);
+  } catch {
+    return null;
+  }
+}
+
+function matchesLocatorShape(element: HTMLElement, evidence: FieldLocatorEvidence): boolean {
+  if (evidence.tagName && element.tagName.toLowerCase() !== evidence.tagName.toLowerCase()) return false;
+  if (evidence.inputType && isInputElement(element) && element.type !== evidence.inputType) return false;
+  if (evidence.name && element.getAttribute('name') !== evidence.name) return false;
+  if (evidence.id && element.id !== evidence.id) return false;
+  if (evidence.automationId && element.getAttribute('data-automation-id') !== evidence.automationId) return false;
+  if (evidence.testId && element.getAttribute('data-testid') !== evidence.testId) return false;
+  return true;
+}
+
+/**
+ * 按定位证据重新找到控件。先使用稳定属性，再尝试 XPath/生成选择器，
+ * 最后用标签、name/id 等结构形状过滤候选，供 SPA 重渲染和离线回放复用。
+ */
+export function locateFieldByEvidence(
+  root: Document | HTMLElement,
+  evidence: FieldLocatorEvidence,
+): HTMLElement | null {
+  const selectors = [
+    evidence.id ? `#${cssEscape(evidence.id)}` : '',
+    evidence.automationId ? `[data-automation-id="${cssEscape(evidence.automationId)}"]` : '',
+    evidence.testId ? `[data-testid="${cssEscape(evidence.testId)}"]` : '',
+    evidence.name ? `[name="${cssEscape(evidence.name)}"]` : '',
+    ...(evidence.selectors || []),
+  ];
+  for (const selector of selectors) {
+    const candidate = querySelectorSafely(root, selector);
+    if (candidate && matchesLocatorShape(candidate, evidence)) return candidate;
+  }
+
+  if (evidence.xpath) {
+    try {
+      const ownerDocument = root instanceof Document ? root : root.ownerDocument;
+      const result = ownerDocument?.evaluate(evidence.xpath, root instanceof Document ? root : root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (result instanceof HTMLElement && matchesLocatorShape(result, evidence)) return result;
+    } catch {
+      // A stale XPath is expected after a framework rerender; continue with a shape scan.
+    }
+  }
+
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>('input, textarea, select, [contenteditable="true"], [role="combobox"]'));
+  return candidates.find((candidate) => matchesLocatorShape(candidate, evidence)) || null;
+}

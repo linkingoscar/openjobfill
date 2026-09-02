@@ -2,6 +2,7 @@ import { ref, type Ref } from 'vue';
 import { fillHistoryStorage, MAX_FILL_HISTORY_RECORDS } from '@/core/storage/fillHistoryStorage';
 import type { FillHistoryRecord } from '@/types/fillHistory';
 import type { FillResult } from '@/types/adapter';
+import { SnapshotRecorder } from '@/core/pipeline/snapshotRecorder';
 
 /** 填表历史的读取、脱敏导出和异常记录边界。 */
 export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName: Ref<string>) {
@@ -88,6 +89,48 @@ export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName
     showHistoryToast(`已导出 ${fillHistoryRecords.value.length} 次脱敏诊断记录`);
   };
 
+  const handleExportReplayPackage = async () => {
+    try {
+      const packageJSON = await SnapshotRecorder.exportProblemPackage();
+      const parsed = JSON.parse(packageJSON) as { sessions?: unknown[] };
+      if (!parsed.sessions?.length) {
+        showHistoryToast('暂无可导出的运行快照');
+        return;
+      }
+      const blob = new Blob([packageJSON], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `openjobfill-replay-package-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      showHistoryToast(`已导出 ${parsed.sessions.length} 次运行的脱敏问题包`);
+    } catch (error) {
+      console.error('[OpenJobFill] 导出回放问题包失败:', error);
+      showHistoryToast('导出回放问题包失败');
+    }
+  };
+
+  const handleImportReplayPackage = () => {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json';
+    picker.addEventListener('change', async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      try {
+        const result = await SnapshotRecorder.importProblemPackage(await file.text());
+        showHistoryToast(`已导入 ${result.imported} 次运行快照（已重新脱敏）`);
+      } catch (error) {
+        console.error('[OpenJobFill] 导入回放问题包失败:', error);
+        showHistoryToast(error instanceof Error ? error.message : '导入回放问题包失败');
+      }
+    }, { once: true });
+    picker.click();
+  };
+
   const handleClearFillHistory = async () => {
     if (fillHistoryRecords.value.length === 0) return;
     if (!window.confirm(`确认清空最近 ${fillHistoryRecords.value.length} 次填表历史？此操作无法撤销。`)) return;
@@ -106,6 +149,8 @@ export function useFillHistory(copyToastMessage: Ref<string>, currentAdapterName
     formatHistoryTime,
     handleCopyDiagnosticHistory,
     handleExportDiagnosticHistory,
+    handleExportReplayPackage,
+    handleImportReplayPackage,
     handleClearFillHistory,
   };
 }

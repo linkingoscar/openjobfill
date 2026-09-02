@@ -150,7 +150,7 @@ export class FormFillerEngine {
     SnapshotRecorder.record('scan', {
       totalCandidateCount: descriptors.length,
       fields: compactFieldSnapshot(descriptors),
-    }, Date.now() - analysisStartedAt);
+    }, Date.now() - analysisStartedAt, run.runId);
     console.log(`[OpenJobFill Pipeline] PageAnalyzer discovered ${descriptors.length} candidate form fields.`);
 
     // 5. 阶段二：生成全局填表规划 (Fill Plan)
@@ -173,7 +173,7 @@ export class FormFillerEngine {
     }
 
     run.refreshPageFingerprint(typeof document !== 'undefined' ? document : undefined);
-    SnapshotRecorder.record('plan', compactPlanSnapshot(plan), Date.now() - analysisStartedAt);
+    SnapshotRecorder.record('plan', compactPlanSnapshot(plan), Date.now() - analysisStartedAt, run.runId);
 
     completed = true;
     return {
@@ -185,6 +185,13 @@ export class FormFillerEngine {
       runId: run.runId,
       pageFingerprint: run.pageFingerprint,
     };
+    } catch (error) {
+      SnapshotRecorder.record('error', {
+        phase: 'analysis',
+        message: error instanceof Error ? error.message : String(error),
+      }, Date.now() - analysisStartedAt, run.runId);
+      await SnapshotRecorder.persist(run.runId);
+      throw error;
     } finally {
       if (!completed) {
         run.abort('分析已取消');
@@ -241,7 +248,7 @@ export class FormFillerEngine {
         previousRunId: previous.runId,
         totalCandidateCount: newDescriptors.length,
         fields: compactFieldSnapshot(newDescriptors),
-      }, Date.now() - analysisStartedAt);
+      }, Date.now() - analysisStartedAt, run.runId);
 
       run.throwIfAborted();
       const plan = planGenerator.generatePlan(newDescriptors, resume, enhancer, customFieldRules);
@@ -256,7 +263,7 @@ export class FormFillerEngine {
         incremental: true,
         previousRunId: previous.runId,
         ...compactPlanSnapshot(plan),
-      }, Date.now() - analysisStartedAt);
+      }, Date.now() - analysisStartedAt, run.runId);
       completed = true;
       return {
         plan,
@@ -268,6 +275,14 @@ export class FormFillerEngine {
         pageFingerprint: run.pageFingerprint,
         remoteFrames: [],
       };
+    } catch (error) {
+      SnapshotRecorder.record('error', {
+        phase: 'analysis',
+        incremental: true,
+        message: error instanceof Error ? error.message : String(error),
+      }, Date.now() - analysisStartedAt, run.runId);
+      await SnapshotRecorder.persist(run.runId);
+      throw error;
     } finally {
       if (!completed) {
         run.abort('增量分析已取消');
@@ -288,6 +303,7 @@ export class FormFillerEngine {
     });
     this.activeRuns.set(analyzed.runId, run);
     this.activeRunId = analyzed.runId;
+    const executionStartedAt = Date.now();
 
     try {
       run.throwIfAborted();
@@ -336,9 +352,13 @@ export class FormFillerEngine {
         label: log.label,
         field: log.field,
         message: log.message,
+        failureCode: log.failureCode,
+        attempts: log.attempts,
+        fingerprint: plan.items.find((item) => item.semanticKey === log.field)?.field.fingerprint,
+        locator: plan.items.find((item) => item.semanticKey === log.field)?.field.locator,
       })),
-    }, executionResult.durationMs);
-    await SnapshotRecorder.finish(executionResult, plan.totalFieldsCount);
+    }, executionResult.durationMs, run.runId);
+    await SnapshotRecorder.finish(executionResult, plan.totalFieldsCount, run.runId);
 
     return {
       success: executionResult.filledCount > 0,
@@ -352,6 +372,13 @@ export class FormFillerEngine {
       remainingTasks: executionResult.remainingTasks,
       plan: executionResult.plan,
     };
+    } catch (error) {
+      SnapshotRecorder.record('error', {
+        phase: 'execution',
+        message: error instanceof Error ? error.message : String(error),
+      }, Date.now() - executionStartedAt, analyzed.runId);
+      await SnapshotRecorder.persist(analyzed.runId);
+      throw error;
     } finally {
       this.activeRuns.delete(analyzed.runId);
       if (this.activeRunId === analyzed.runId) this.activeRunId = null;

@@ -239,6 +239,8 @@ const {
   formatHistoryTime,
   handleCopyDiagnosticHistory,
   handleExportDiagnosticHistory,
+  handleExportReplayPackage,
+  handleImportReplayPackage,
   handleClearFillHistory,
 } = useFillHistory(copyToastMessage, currentAdapterName);
 
@@ -1038,6 +1040,8 @@ defineExpose({
               :format-time="formatHistoryTime"
               @copy="handleCopyDiagnosticHistory"
               @export="handleExportDiagnosticHistory"
+              @replay-export="handleExportReplayPackage"
+              @replay-import="handleImportReplayPackage"
               @clear="handleClearFillHistory"
             />
           </div>

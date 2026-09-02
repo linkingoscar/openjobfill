@@ -38,6 +38,7 @@ export class PipelineExecutor {
           field: item.semanticKey || '',
           value: '',
           message: safety.reason || '安全策略禁止自动填写',
+          failureCode: 'safety_blocked',
         });
         continue;
       }
@@ -81,6 +82,7 @@ export class PipelineExecutor {
           field: item.semanticKey || '',
           value: '',
           message: item.reason || '需人工填入',
+          failureCode: 'missing_mapping',
         });
         continue;
       }
@@ -89,6 +91,7 @@ export class PipelineExecutor {
       const strategies = retryLadder.getStrategiesForType(item.driverType);
       let isSuccess = false;
       let actualReadValue: any = null;
+      const attempts: Array<{ strategy: string; outcome: 'success' | 'mismatch' | 'error'; message?: string }> = [];
 
       for (const strategy of strategies) {
         try {
@@ -108,16 +111,23 @@ export class PipelineExecutor {
           );
 
           if (isEquivalent) {
+            attempts.push({ strategy: strategy.name, outcome: 'success' });
             isSuccess = true;
             verifiedCount++;
             break;
           } else {
+            attempts.push({ strategy: strategy.name, outcome: 'mismatch' });
             console.warn(
               `[OpenJobFill Pipeline] Read-back check mismatch on [${label}]: expected "${item.targetValue}", read "${actualReadValue}". Retrying with next strategy...`
             );
           }
         } catch (err) {
           if (signal?.aborted || isFillRunAbortedError(err)) throw err;
+          attempts.push({
+            strategy: strategy.name,
+            outcome: 'error',
+            message: err instanceof Error ? err.message.slice(0, 180) : '策略执行异常',
+          });
           console.warn(`[OpenJobFill Pipeline] Strategy "${strategy.name}" threw error on [${label}]:`, err);
         }
       }
@@ -129,6 +139,7 @@ export class PipelineExecutor {
           label,
           field: item.semanticKey || '',
           value: String(item.targetValue),
+          attempts,
         });
 
         decorateElement(field.element, {
@@ -161,6 +172,8 @@ export class PipelineExecutor {
           field: item.semanticKey || '',
           value: String(item.targetValue),
           message: `读回验证失败 (实际渲染: "${actualReadValue}")`,
+          failureCode: 'verification_mismatch',
+          attempts,
         });
       }
     }
