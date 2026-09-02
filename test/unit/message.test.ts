@@ -13,7 +13,12 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({ type: 'TRACKER_STORAGE_UPDATE_STATUS', payload: { id: 'app-1', status: 'unknown' } })).toBe(false);
   });
 
-  it('accepts the storage and cross-frame messages used by current callers', () => {
+  it('accepts active-tab, storage and cross-frame messages used by current callers', () => {
+    expect(isExtensionMessage({
+      type: 'TRIGGER_ACTIVE_TAB_FILL',
+      payload: { resumeId: 'resume-1' },
+    })).toBe(true);
+    expect(isExtensionMessage({ type: 'TRIGGER_ACTIVE_TAB_FILL' })).toBe(true);
     expect(isExtensionMessage({
       type: 'RESUME_STORAGE_UPDATE_FIELDS',
       payload: { id: 'resume-1', updates: { 'basics.name': '候选人' } },
@@ -77,6 +82,7 @@ describe('Extension message protocol', () => {
   });
 
   it('rejects malformed or unknown payloads before they reach handlers', () => {
+    expect(isExtensionMessage({ type: 'TRIGGER_ACTIVE_TAB_FILL', payload: { resumeId: 123 } })).toBe(false);
     expect(isExtensionMessage({ type: 'RESUME_STORAGE_UPDATE_FIELDS', payload: { id: 'resume-1', updates: [] } })).toBe(false);
     expect(isExtensionMessage({ type: 'FRAME_EXECUTE', payload: { analysisId: '' } })).toBe(false);
     expect(isExtensionMessage({ type: 'EXECUTE_CROSS_ORIGIN_FRAMES', payload: { targets: [{ frameId: '3', analysisId: 'x' }] } })).toBe(false);
