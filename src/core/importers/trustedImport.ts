@@ -1,8 +1,13 @@
 import type { StandardResume } from '../../types/resume';
 import type { ImportConflict, ParsedCandidate, ResumeV5 } from '../../types/trustedResume';
+import { EMPTY_RESUME } from '../storage/defaultData';
 import { mergeParsedCandidates, migrateToResumeV5 } from '../schema/trustedResume';
 
-const META_KEYS = new Set(['id', 'title', 'isDefault', 'createdAt', 'updatedAt', 'schemaVersion', 'fieldMeta', 'variantType', 'variantContext', 'variantOverrides', 'parentResumeId']);
+const META_KEYS = new Set([
+  'id', 'title', 'isDefault', 'createdAt', 'updatedAt', 'schemaVersion', 'fieldMeta',
+  'variantType', 'variantContext', 'variantOverrides', 'variantOrdering', 'variantPresentation',
+  'variantTextOverrides', 'parentResumeId',
+]);
 
 function usable(value: unknown): boolean {
   return value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0);
@@ -77,22 +82,34 @@ export interface TrustedImportReview {
 export function buildTrustedImportReview(input: {
   localResume?: StandardResume | null;
   aiResume?: StandardResume | null;
+  /** Native PRD v2 AI candidates. Preferred over synthesizing candidates from aiResume. */
+  aiCandidates?: ParsedCandidate[];
   baseResume?: StandardResume | null;
   documentText?: string;
   fileName?: string;
   now?: number;
 }): TrustedImportReview {
   const now = input.now ?? Date.now();
-  const seed = input.baseResume || input.localResume || input.aiResume;
+  const hasDirectAI = Array.isArray(input.aiCandidates) && input.aiCandidates.length > 0;
+  const seed = input.baseResume || input.localResume || input.aiResume || (hasDirectAI ? {
+    ...structuredClone(EMPTY_RESUME),
+    id: `resume-${now}`,
+    title: (input.fileName || 'AI 导入简历').replace(/\.[^/.]+$/, ''),
+    isDefault: false,
+    createdAt: now,
+    updatedAt: now,
+  } : null);
   if (!seed) throw new Error('没有可用于审核的简历候选');
 
   let resume = migrateToResumeV5(input.baseResume || seed, now);
   const localCandidates = input.localResume
     ? resumeToParsedCandidates(input.localResume, { source: 'local', documentText: input.documentText, fileName: input.fileName })
     : [];
-  const aiCandidates = input.aiResume
-    ? resumeToParsedCandidates(input.aiResume, { source: 'ai', documentText: input.documentText, fileName: input.fileName })
-    : [];
+  const aiCandidates = hasDirectAI
+    ? input.aiCandidates!.map((candidate) => ({ ...candidate, evidence: [...(candidate.evidence || [])] }))
+    : input.aiResume
+      ? resumeToParsedCandidates(input.aiResume, { source: 'ai', documentText: input.documentText, fileName: input.fileName })
+      : [];
   const conflicts: ImportConflict[] = [];
   const acceptedPaths: string[] = [];
 
