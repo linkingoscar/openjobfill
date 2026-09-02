@@ -23,6 +23,41 @@ describe('trusted resume v5', () => {
     expect(result.conflicts[0].reason).toBe('locked');
   });
 
+  it('does not downgrade locked metadata when AI corroborates the same value', () => {
+    let resume = migrateToResumeV5(DEMO_RESUME, 1000);
+    resume = confirmField(resume, 'basics.name', { lock: true, now: 1100 });
+    const result = mergeParsedCandidates(resume, [{
+      path: 'basics.name', value: DEMO_RESUME.basics.name, confidence: 0.96,
+      evidence: [{ type: 'text-range', text: DEMO_RESUME.basics.name }], parserRule: 'ai-document-v2',
+    }], 'ai-parser', 1200);
+    expect(result.conflicts).toEqual([]);
+    expect(result.resume.fieldMeta['basics.name']).toMatchObject({ source: 'manual', confirmed: true, locked: true });
+  });
+
+  it('requires explicit review for AI candidates without evidence', () => {
+    const resume = migrateToResumeV5(DEMO_RESUME, 1000);
+    resume.basics.expectedRole = '';
+    const result = mergeParsedCandidates(resume, [{
+      path: 'basics.expectedRole', value: '前端工程师', confidence: 0.98,
+      evidence: [], parserRule: 'ai-document-v2',
+    }], 'ai-parser', 1200);
+    expect(result.resume.basics.expectedRole).toBe('');
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].reason).toBe('no-evidence');
+  });
+
+  it('requires explicit review for low-confidence AI candidates even with evidence', () => {
+    const resume = migrateToResumeV5(DEMO_RESUME, 1000);
+    resume.basics.expectedRole = '';
+    const result = mergeParsedCandidates(resume, [{
+      path: 'basics.expectedRole', value: '前端工程师', confidence: 0.62,
+      evidence: [{ type: 'text-range', text: '求职意向：前端工程师' }], parserRule: 'ai-document-v2',
+    }], 'ai-parser', 1200);
+    expect(result.resume.basics.expectedRole).toBe('');
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].reason).toBe('low-confidence');
+  });
+
   it('inherits master changes for non-overridden variant fields', () => {
     const master = migrateToResumeV5(DEMO_RESUME, 1000);
     const variant = createJobVariant(master, { company: 'Example', role: 'Engineer' }, 2000);
