@@ -37,6 +37,14 @@ describe('Extension message protocol', () => {
       },
     })).toBe(true);
     expect(isExtensionMessage({
+      type: 'AI_SUGGEST_JOB_VARIANT',
+      payload: {
+        settings: { enabled: true },
+        context: { role: '前端工程师', jdText: '需要 TypeScript', facts: { 'skills.0.name': 'TypeScript' } },
+        confirmedExternalProcessing: true,
+      },
+    })).toBe(true);
+    expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
       payload: { settings: { enabled: true }, imageDataUrl: 'data:image/jpeg;base64,YQ==', fileName: 'resume.jpg', confirmedExternalProcessing: true },
     })).toBe(true);
@@ -76,6 +84,10 @@ describe('Extension message protocol', () => {
     expect(isExtensionMessage({
       type: 'AI_DRAFT_ANSWER',
       payload: { settings: { enabled: true }, question: '为什么选择我们？', context: { facts: {} }, confirmedExternalProcessing: false },
+    })).toBe(false);
+    expect(isExtensionMessage({
+      type: 'AI_SUGGEST_JOB_VARIANT',
+      payload: { settings: { enabled: true }, context: { facts: {} }, confirmedExternalProcessing: false },
     })).toBe(false);
     expect(isExtensionMessage({
       type: 'AI_PARSE_RESUME_IMAGE',
