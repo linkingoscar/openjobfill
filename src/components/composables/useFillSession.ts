@@ -7,6 +7,7 @@ import { recordPersonalLearningFeedback } from '@/core/storage/personalLearningF
 import { runPreSubmitConsistencyChecks } from '@/core/ai/preSubmitConsistency';
 import type { StandardResume } from '@/types/resume';
 import type { FillResult } from '@/types/adapter';
+import type { FillPlan } from '@/types/pipeline';
 
 interface FillSessionOptions {
   loadResume: () => Promise<StandardResume>;
@@ -15,7 +16,7 @@ interface FillSessionOptions {
   persistError: (phase: 'analysis' | 'execution', error: unknown) => Promise<void>;
 }
 
-/** Owns the entire analysis → preview → execution lifecycle. UI receives read-only views. */
+/** Owns the entire analysis → preview → execution lifecycle. UI receives controlled preview mutation helpers. */
 export function useFillSession(options: FillSessionOptions) {
   const phase = ref<'idle' | 'analyzing' | 'executing'>('idle');
   const preview = shallowRef<AnalyzedPlan | null>(null);
@@ -48,6 +49,61 @@ export function useFillSession(options: FillSessionOptions) {
   ]);
 
   const previewWorkflowItems = computed(() => preview.value?.sectionPreparation?.actions || []);
+
+  function recomputePlanCounters(plan: FillPlan): void {
+    let highConfidenceCount = 0;
+    let reviewRequiredCount = 0;
+    let optionalUnmatchedCount = 0;
+    let needsUserCount = 0;
+    let blockedCount = 0;
+    let skipCount = 0;
+    for (const item of plan.items) {
+      if (item.action === 'FILL') {
+        highConfidenceCount += 1;
+        if (item.decision === 'FILL_REVIEW_REQUIRED') reviewRequiredCount += 1;
+      } else if (item.action === 'NEEDS_USER') {
+        needsUserCount += 1;
+      } else {
+        skipCount += 1;
+        if (item.decision === 'OPTIONAL_UNMATCHED') optionalUnmatchedCount += 1;
+        if (item.decision === 'BLOCKED') blockedCount += 1;
+      }
+    }
+    plan.highConfidenceCount = highConfidenceCount;
+    plan.reviewRequiredCount = reviewRequiredCount;
+    plan.optionalUnmatchedCount = optionalUnmatchedCount;
+    plan.needsUserCount = needsUserCount;
+    plan.blockedCount = blockedCount;
+    plan.skipCount = skipCount;
+  }
+
+  function updatePreviewItemValue(itemId: string, targetValue: unknown): boolean {
+    if (!preview.value || phase.value !== 'idle') return false;
+    const item = preview.value.plan.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.action !== 'FILL') return false;
+    const primitive = typeof targetValue === 'string' || typeof targetValue === 'number' || typeof targetValue === 'boolean';
+    if (!primitive) return false;
+    if (typeof targetValue === 'string' && targetValue.length > 20_000) return false;
+    item.targetValue = targetValue;
+    item.confidence = 1;
+    item.reason = '用户在本次填写预览中临时修改；仅影响本次执行，不回写主档案';
+    // Keep risk/decision unchanged: editing a Critical/High field must not remove its review treatment.
+    preview.value = { ...preview.value, plan: { ...preview.value.plan, items: [...preview.value.plan.items] } };
+    return true;
+  }
+
+  function skipPreviewItem(itemId: string): boolean {
+    if (!preview.value || phase.value !== 'idle') return false;
+    const item = preview.value.plan.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.action !== 'FILL') return false;
+    item.action = 'SKIP';
+    item.decision = 'SKIP';
+    item.requiresExplicitReview = false;
+    item.reason = '用户在本次预览中取消填写';
+    recomputePlanCounters(preview.value.plan);
+    preview.value = { ...preview.value, plan: { ...preview.value.plan, items: [...preview.value.plan.items] } };
+    return true;
+  }
 
   async function release(plan: AnalyzedPlan | null, reason: string) {
     if (plan?.runId) formFillerEngine.cancelRun(plan.runId, reason);
@@ -197,6 +253,8 @@ export function useFillSession(options: FillSessionOptions) {
     stepNotification: computed(() => notification.value),
     previewFillItems, previewNeedsUserItems, previewWorkflowItems,
     analyze: () => analyze(), confirmFill, cancel, notifyStepChange,
+    updatePreviewItemValue,
+    skipPreviewItem,
     analyzeChangedPage: () => analyze(!!lastPlan.value && window.location.href === lastPlan.value.pageUrl && changedRoots.length > 0),
     invalidateResume: async () => {
       lastPlan.value = null;
