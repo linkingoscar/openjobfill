@@ -71,7 +71,7 @@ export function buildMappingPrompt(fields: UnmatchedFieldDescriptor[], options: 
 约束：
 1. 只能返回上方出现过的 fieldIndex 和 resumeKey；没有可靠匹配的字段不要返回。
 2. confidence 必须为 0~1；拿不准必须降低 confidence，不要为了覆盖率硬猜。
-3. 紧急联系人、家属、父母、配偶、推荐人、证明人等他人字段绝不能映射到 basics.name / basics.phone / basics.email / basics.idCardNumber。
+3. 紧急联系人、家属、父母、配偶、推荐人、证明人、emergency、reference 等他人字段只能映射到 familyMembers.* 或明确的 basics.emergencyContact*。这类字段绝不能映射到 basics.name / basics.phone / basics.email / basics.idCardNumber。
 4. Critical/High 字段必须依据明确标签、模块和相邻字段，普通包含关系不够。
 5. 重复教育/工作/项目必须结合 sectionIndex；日期字段必须结合相邻字段判断开始/结束。
 6. 只输出 JSON，不要 markdown 或解释。`;
