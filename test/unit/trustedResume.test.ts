@@ -68,6 +68,21 @@ describe('trusted resume v5', () => {
     expect(resolved.basics.phone).toBe('13900000000');
   });
 
+  it('inherits later master trust metadata unless the variant explicitly changes it', () => {
+    let master = migrateToResumeV5(DEMO_RESUME, 1000);
+    master = confirmField(master, 'basics.phone', { lock: false, now: 1500 });
+    const variant = createJobVariant(master, { company: 'Example', role: 'Engineer' }, 2000);
+    expect(variant.fieldMeta).toEqual({});
+
+    master = confirmField(master, 'basics.phone', { lock: true, now: 3000 });
+    const resolved = resolveVariant(master, variant);
+    expect(resolved.fieldMeta['basics.phone']).toMatchObject({ confirmed: true, locked: true, updatedAt: 3000 });
+
+    variant.fieldMeta['basics.phone'] = { ...resolved.fieldMeta['basics.phone'], locked: false, updatedAt: 4000 };
+    const overridden = resolveVariant(master, variant);
+    expect(overridden.fieldMeta['basics.phone']).toMatchObject({ locked: false, updatedAt: 4000 });
+  });
+
   it('preserves explicit job-variant overrides', () => {
     const master = migrateToResumeV5(DEMO_RESUME, 1000);
     const variant = createJobVariant(master, { company: 'Example', role: 'Engineer' }, 2000);
