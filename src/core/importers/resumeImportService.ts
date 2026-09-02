@@ -34,6 +34,17 @@ async function enabledSettings() {
   return settings;
 }
 
+function aiWarnings(resume: StandardResume | null | undefined): string[] {
+  const warnings = (resume as (StandardResume & { aiParseWarnings?: unknown }) | null | undefined)?.aiParseWarnings;
+  return Array.isArray(warnings)
+    ? warnings.filter((item): item is string => typeof item === 'string' && !!item.trim()).slice(0, 20)
+    : [];
+}
+
+function withWarnings(notice: string, warnings: string[]): string {
+  return warnings.length ? `${notice} 模型警告：${warnings.join('；')}` : notice;
+}
+
 function reviewOutcome(input: {
   localResume?: StandardResume | null;
   aiResume?: StandardResume | null;
@@ -84,17 +95,21 @@ export async function importResumeDocument(
       },
     });
     checkCancelled(signal);
-    if (!response?.success || !response.resume) throw new Error(response?.error || 'AI 没有返回可校验的简历候选');
+    if (!response?.success || !response.resume) throw new Error(response?.error || 'AI 没有返回可校验的字段候选');
     const aiResume = response.resume as StandardResume;
+    const warningList = aiWarnings(aiResume);
     return reviewOutcome({
       localResume,
       aiResume,
       baseResume: options.baseResume,
       text,
       fileName: file.name,
-      notice: isPdf
-        ? `AI 已生成字段候选并结合本地文本/PDF 页面图补强（最多前 ${Math.min(4, imageDataUrls.length)} 页）；冲突不会自动覆盖。`
-        : 'AI 已生成字段候选并结合 Word/文本本地结果补强；冲突不会自动覆盖。',
+      notice: withWarnings(
+        isPdf
+          ? `AI v2 已返回字段候选、置信度与证据，并结合本地文本/PDF 页面图补强（最多前 ${Math.min(4, imageDataUrls.length)} 页）；冲突不会自动覆盖。`
+          : 'AI v2 已返回字段候选、置信度与证据，并结合 Word/文本本地结果补强；冲突不会自动覆盖。',
+        warningList,
+      ),
     });
   } catch (error) {
     checkCancelled(signal);
@@ -126,13 +141,17 @@ export async function importResumeImage(
     payload: { settings, imageDataUrl, fileName: file.name, confirmedExternalProcessing: true },
   });
   checkCancelled(signal);
-  if (!response?.success || !response.resume) throw new Error(response?.error || '视觉模型没有返回可校验的简历候选');
+  if (!response?.success || !response.resume) throw new Error(response?.error || '视觉模型没有返回可校验的字段候选');
+  const aiResume = response.resume as StandardResume;
   return reviewOutcome({
-    aiResume: response.resume as StandardResume,
+    aiResume,
     baseResume,
     text: '',
     fileName: file.name,
-    notice: '扫描/图片简历由 AI 生成字段候选；无证据或低置信项必须在导入审核中确认。',
+    notice: withWarnings(
+      '扫描/图片简历由 AI v2 生成字段候选、置信度与证据；无证据或低置信项必须在导入审核中显式确认。',
+      aiWarnings(aiResume),
+    ),
   });
 }
 
