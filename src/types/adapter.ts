@@ -52,6 +52,14 @@ export interface FillLogItem {
   }>;
 }
 
+export interface FillConsistencyIssue {
+  severity: 'BLOCKER' | 'WARNING' | 'INFO';
+  code: string;
+  message: string;
+  resumeKey?: string;
+  pageLabel?: string;
+}
+
 import type { FillPlan, RemainingTaskItem } from './pipeline';
 
 export interface FillResult {
@@ -64,4 +72,6 @@ export interface FillResult {
   durationMs: number;
   remainingTasks?: RemainingTaskItem[];
   plan?: FillPlan;
+  /** Read-only advisory output. The extension still never submits or advances the application. */
+  consistencyIssues?: FillConsistencyIssue[];
 }
