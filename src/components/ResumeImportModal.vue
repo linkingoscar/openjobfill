@@ -197,12 +197,15 @@ const handleConfirmImport = () => {
         <ResumeImportPreview
           v-if="parsedResume"
           :parsed-resume="parsedResume"
+          :base-resume="effectiveBaseResume"
           :local-candidates="localCandidates"
           :ai-candidates="aiCandidates"
           :conflicts="importConflicts"
           :accepted-paths="acceptedPaths"
           @reset="resetImport"
           @resolve-conflict="importer.resolveConflict"
+          @lock-field="importer.lockField"
+          @update-field="importer.updateField"
         />
       </div>
 
