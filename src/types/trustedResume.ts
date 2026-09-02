@@ -52,18 +52,28 @@ export interface ResumeVariantPresentation {
   selectedLinkKeys?: string[];
 }
 
+export interface ResumeVariantTextOverride {
+  collection: 'projects' | 'experiences';
+  /** Stable source-record identity; never an array index. */
+  recordId: string;
+  field: 'description' | 'responsibility' | 'achievements';
+  value: string;
+}
+
 export interface ResumeV5 extends StandardResume {
   schemaVersion: 5;
   fieldMeta: Record<string, FieldMeta>;
   parentResumeId?: string;
   variantType?: 'master' | 'job-variant';
   variantContext?: ResumeVariantContext;
-  /** Job variants persist only content fields that intentionally override the parent. */
+  /** Job variants persist only scalar/content fields that intentionally override the parent. */
   variantOverrides?: string[];
   /** Reordering is sidecar metadata rather than a full-array override. */
   variantOrdering?: ResumeVariantOrdering;
   /** Presentation choices do not alter master facts. */
   variantPresentation?: ResumeVariantPresentation;
+  /** Per-record short copy is keyed by stable item ID so master reordering cannot retarget it. */
+  variantTextOverrides?: ResumeVariantTextOverride[];
 }
 
 export interface ParsedCandidate<T = unknown> {
