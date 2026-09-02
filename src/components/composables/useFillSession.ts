@@ -28,16 +28,23 @@ export function useFillSession(options: FillSessionOptions) {
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   const isCurrent = (ticket: number) => !disposed && ticket === revision;
 
-  const remoteItems = (action: 'FILL' | 'NEEDS_USER') =>
+  const remoteItems = (action: 'FILL' | 'NEEDS_USER' | 'SKIP') =>
     (preview.value?.remoteFrames || []).flatMap((frame) => frame.items
       .filter((item) => item.action === action)
       .map((item) => ({ ...item, id: `frame-${frame.frameId}-${item.id}`, field: { label: `${item.label}（子页面）` } })));
+
   const previewFillItems = computed(() => [
-    ...(preview.value?.plan.items.filter((item) => item.action === 'FILL') || []), ...remoteItems('FILL'),
+    ...(preview.value?.plan.items.filter((item) => item.action === 'FILL') || []),
+    ...remoteItems('FILL'),
   ]);
+
   const previewNeedsUserItems = computed(() => [
-    ...(preview.value?.plan.items.filter((item) => item.action === 'NEEDS_USER') || []), ...remoteItems('NEEDS_USER'),
+    ...(preview.value?.plan.items.filter((item) =>
+      item.action === 'NEEDS_USER' || item.decision === 'OPTIONAL_UNMATCHED' || item.decision === 'BLOCKED') || []),
+    ...remoteItems('NEEDS_USER'),
+    ...remoteItems('SKIP').filter((item) => item.decision === 'OPTIONAL_UNMATCHED' || item.decision === 'BLOCKED'),
   ]);
+
   const previewWorkflowItems = computed(() => preview.value?.sectionPreparation?.actions || []);
 
   async function release(plan: AnalyzedPlan | null, reason: string) {
@@ -75,17 +82,13 @@ export function useFillSession(options: FillSessionOptions) {
       const resume = await options.loadResume();
       if (!isCurrent(ticket)) return { fillCount: 0, needsUserCount: 0 };
       analyzed = previous
-        ? await formFillerEngine.analyzeIncremental(resume, previous, {
-          changedRoots: changedRoots.map((node) => node.parentElement || node),
-        })
+        ? await formFillerEngine.analyzeIncremental(resume, previous, { changedRoots: changedRoots.map((node) => node.parentElement || node) })
         : await formFillerEngine.analyze(resume);
       if (!isCurrent(ticket)) {
         await release(analyzed, '过期分析结果');
         return { fillCount: 0, needsUserCount: 0 };
       }
-      if (!previous) {
-        analyzed.remoteFrames = await analyzeRemoteFrames(resume.id, { runId: analyzed.runId });
-      }
+      if (!previous) analyzed.remoteFrames = await analyzeRemoteFrames(resume.id, { runId: analyzed.runId });
       if (!isCurrent(ticket)) {
         await release(analyzed, '过期子页面分析结果');
         return { fillCount: 0, needsUserCount: 0 };
@@ -109,8 +112,7 @@ export function useFillSession(options: FillSessionOptions) {
   }
 
   async function confirmFill() {
-    if (disposed || phase.value !== 'idle' || !preview.value
-      || (!previewFillItems.value.length && !previewWorkflowItems.value.length)) return;
+    if (disposed || phase.value !== 'idle' || !preview.value || (!previewFillItems.value.length && !previewWorkflowItems.value.length)) return;
     const ticket = ++revision;
     const plan = preview.value;
     const previous = basePlan.value;
@@ -145,10 +147,7 @@ export function useFillSession(options: FillSessionOptions) {
     void cancel('页面步骤已变化');
     changedRoots = nodes;
     const incremental = !!lastPlan.value && url === lastPlan.value.pageUrl && nodes.length > 0;
-    notification.value = {
-      show: true,
-      text: incremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页',
-    };
+    notification.value = { show: true, text: incremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页' };
     clearTimeout(notificationTimer);
     notificationTimer = setTimeout(() => { notification.value = { ...notification.value, show: false }; }, 8000);
   }
