@@ -1,5 +1,5 @@
 import type { StandardResume } from '../../types/resume';
-import type { FieldMeta, FieldMetaSource, ImportConflict, ImportMergeResult, ParsedCandidate, ResumeV5 } from '../../types/trustedResume';
+import type { FieldMeta, FieldMetaSource, ImportConflict, ImportMergeResult, ParsedCandidate, ResumeV5, ResumeVariantOrdering } from '../../types/trustedResume';
 import { parseResumePayload } from './resumeSchema';
 
 function clone<T>(value: T): T {
@@ -35,6 +35,31 @@ export function setResumeValue(resume: StandardResume, path: string, value: unkn
   });
 }
 
+function normalizeOrdering(raw: unknown): ResumeVariantOrdering {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const sanitize = (value: unknown) => Array.isArray(value)
+    ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)))
+    : undefined;
+  return {
+    projects: sanitize(record.projects),
+    experiences: sanitize(record.experiences),
+  };
+}
+
+function applyIdOrdering<T extends { id: string }>(items: T[], order?: string[]): T[] {
+  if (!order?.length) return items;
+  const rank = new Map(order.map((id, index) => [id, index]));
+  return [...items].sort((a, b) => {
+    const aRank = rank.get(a.id);
+    const bRank = rank.get(b.id);
+    if (aRank === undefined && bRank === undefined) return 0;
+    if (aRank === undefined) return 1;
+    if (bRank === undefined) return -1;
+    return aRank - bRank;
+  });
+}
+
 export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
   const parsed = parseResumePayload(input, { strict: false, now }).resume;
   const raw = input && typeof input === 'object' ? input as Record<string, unknown> : {};
@@ -65,6 +90,7 @@ export function migrateToResumeV5(input: unknown, now = Date.now()): ResumeV5 {
       if (typeof item !== 'string') return false;
       try { partsFor(item); return true; } catch { return false; }
     }) : [],
+    variantOrdering: normalizeOrdering(raw.variantOrdering),
   };
 }
 
@@ -142,13 +168,42 @@ export function resolveImportConflict(
 }
 
 export function createJobVariant(master: ResumeV5, context: ResumeV5['variantContext'], now = Date.now()): ResumeV5 {
-  return { ...clone(master), id: `resume-${now}`, title: [context?.company, context?.role].filter(Boolean).join(' - ') || `${master.title} - 岗位版本`, isDefault: false, createdAt: now, updatedAt: now, schemaVersion: 5, parentResumeId: master.id, variantType: 'job-variant', variantContext: clone(context || {}), variantOverrides: [] };
+  return {
+    ...clone(master),
+    id: `resume-${now}`,
+    title: [context?.company, context?.role].filter(Boolean).join(' - ') || `${master.title} - 岗位版本`,
+    isDefault: false,
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: 5,
+    parentResumeId: master.id,
+    variantType: 'job-variant',
+    variantContext: clone(context || {}),
+    variantOverrides: [],
+    variantOrdering: {},
+  };
 }
 
 export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
   if (variant.variantType !== 'job-variant' || variant.parentResumeId !== master.id) return clone(variant);
   const resolved = clone(master);
-  Object.assign(resolved, { id: variant.id, title: variant.title, isDefault: variant.isDefault, createdAt: variant.createdAt, updatedAt: Math.max(master.updatedAt, variant.updatedAt), schemaVersion: 5, parentResumeId: master.id, variantType: 'job-variant', variantContext: clone(variant.variantContext || {}), variantOverrides: clone(variant.variantOverrides || []), fieldMeta: { ...clone(master.fieldMeta), ...clone(variant.fieldMeta) } });
+  const ordering = normalizeOrdering(variant.variantOrdering);
+  Object.assign(resolved, {
+    id: variant.id,
+    title: variant.title,
+    isDefault: variant.isDefault,
+    createdAt: variant.createdAt,
+    updatedAt: Math.max(master.updatedAt, variant.updatedAt),
+    schemaVersion: 5,
+    parentResumeId: master.id,
+    variantType: 'job-variant',
+    variantContext: clone(variant.variantContext || {}),
+    variantOverrides: clone(variant.variantOverrides || []),
+    variantOrdering: clone(ordering),
+    fieldMeta: { ...clone(master.fieldMeta), ...clone(variant.fieldMeta) },
+  });
   for (const path of variant.variantOverrides || []) setResumeValue(resolved, path, clone(getResumeValue(variant, path)));
+  resolved.projects = applyIdOrdering(resolved.projects, ordering.projects);
+  resolved.experiences = applyIdOrdering(resolved.experiences, ordering.experiences);
   return resolved;
 }
