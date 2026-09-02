@@ -8,6 +8,9 @@
   "fieldMeta": {},
   "variantType": "master",
   "variantOverrides": [],
+  "variantOrdering": {},
+  "variantPresentation": {},
+  "variantTextOverrides": [],
   "basics": {
     "name": "张三",
     "firstName": "三",
@@ -53,5 +56,18 @@
   "awards": [{ "id": "award-1", "name": "研究生一等学业奖学金", "issueDate": "2025-07", "level": "校级", "grade": "一等奖", "description": "根据学年综合评定结果获得。" }],
   "academicAchievements": [{ "id": "academic-1", "title": "示例论文或学术成果标题", "venue": "示例学术会议", "authorOrder": "第二作者", "url": "", "date": "2025-08", "abstract": "填写论文摘要或成果简介。" }],
   "campusExperiences": [{ "id": "campus-1", "organization": "示例大学研究生会", "title": "学术部部长", "startDate": "2024-10", "endDate": "至今", "description": "参与校级学术活动组织与执行。", "responsibility": "负责成员分工、材料审核和现场协调。" }],
-  "qaBank": [{ "id": "qa-1", "keyword": "自我评价", "answer": "填写可复用于网申问答的完整回答。", "scope": "global" }]
+  "qaBank": [{
+    "id": "qa-1",
+    "keyword": "自我评价",
+    "question": "自我评价",
+    "answer": "填写可复用于网申问答的完整回答。",
+    "scope": "global",
+    "versions": [{
+      "id": "qa-version-1",
+      "answer": "填写可复用于网申问答的完整回答。",
+      "createdAt": 0,
+      "confirmedByUser": true,
+      "source": "manual"
+    }]
+  }]
 }
