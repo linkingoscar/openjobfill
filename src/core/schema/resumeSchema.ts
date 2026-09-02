@@ -92,6 +92,7 @@ function migrateV4ToV5(payload: UnknownRecord): UnknownRecord {
   if (!Array.isArray(migrated.variantOverrides)) migrated.variantOverrides = [];
   if (!isRecord(migrated.variantOrdering)) migrated.variantOrdering = {};
   if (!isRecord(migrated.variantPresentation)) migrated.variantPresentation = {};
+  if (!Array.isArray(migrated.variantTextOverrides)) migrated.variantTextOverrides = [];
   if (Array.isArray(migrated.qaBank)) {
     migrated.qaBank = migrated.qaBank.map((raw) => {
       if (!isRecord(raw)) return raw;
@@ -272,6 +273,7 @@ const FIELD_META_SOURCES = new Set(['manual', 'local-parser', 'ai-parser', 'json
 const EVIDENCE_TYPES = new Set(['text-range', 'page-region', 'manual', 'derived', 'site-input']);
 const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 const PROFILE_LINK_PATHS = new Set(['basics.githubUrl', 'basics.linkedinUrl', 'basics.blogUrl', 'basics.portfolioUrl']);
+const VARIANT_TEXT_FIELDS = new Set(['description', 'responsibility', 'achievements']);
 
 function isSafeFieldPath(path: string): boolean {
   const parts = path.split('.').filter(Boolean);
@@ -344,6 +346,27 @@ function parseVariantPresentation(payload: UnknownRecord): UnknownRecord {
   return result;
 }
 
+function parseVariantTextOverrides(payload: UnknownRecord): UnknownRecord[] {
+  if (!Array.isArray(payload.variantTextOverrides)) return [];
+  const byKey = new Map<string, UnknownRecord>();
+  for (const raw of payload.variantTextOverrides) {
+    if (!isRecord(raw)) continue;
+    const collection = raw.collection;
+    const recordId = typeof raw.recordId === 'string' ? raw.recordId.trim() : '';
+    const field = raw.field;
+    const value = typeof raw.value === 'string' ? raw.value.trim() : '';
+    if ((collection !== 'projects' && collection !== 'experiences') || !recordId || !VARIANT_TEXT_FIELDS.has(String(field)) || !value) continue;
+    if (collection === 'experiences' && field === 'responsibility') continue;
+    byKey.set(`${collection}:${recordId}:${field}`, {
+      collection,
+      recordId: recordId.slice(0, 240),
+      field,
+      value: value.slice(0, 5000),
+    });
+  }
+  return [...byKey.values()];
+}
+
 export function parseResumePayload(input: unknown, options: ResumeParseOptions = {}): ResumeParseResult {
   const { payload, migratedFrom } = migrateResumePayload(input);
   const now = options.now ?? Date.now();
@@ -407,6 +430,7 @@ export function parseResumePayload(input: unknown, options: ResumeParseOptions =
   resumeWithV5.variantOverrides = variantOverrides;
   resumeWithV5.variantOrdering = parseVariantOrdering(payload);
   resumeWithV5.variantPresentation = parseVariantPresentation(payload);
+  resumeWithV5.variantTextOverrides = parseVariantTextOverrides(payload);
 
   if (options.strict !== false && issues.length > 0) throw new ResumeSchemaError(`简历格式无效：${issues[0]}`, issues);
   return { resume, migratedFrom, issues };
