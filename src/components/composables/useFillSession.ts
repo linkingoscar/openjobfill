@@ -4,6 +4,7 @@ import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoor
 import { isFillRunAbortedError } from '@/core/pipeline/runContext';
 import { mergeAnalyzedPlans } from '@/core/pipeline/mergeAnalyzedPlans';
 import { recordPersonalLearningFeedback } from '@/core/storage/personalLearningFeedback';
+import { runPreSubmitConsistencyChecks } from '@/core/ai/preSubmitConsistency';
 import type { StandardResume } from '@/types/resume';
 import type { FillResult } from '@/types/adapter';
 
@@ -112,6 +113,25 @@ export function useFillSession(options: FillSessionOptions) {
     }
   }
 
+  async function addConsistencyIssues(filled: FillResult): Promise<void> {
+    if (!filled.plan) return;
+    const resume = await options.loadResume();
+    const variant = resume as StandardResume & { variantContext?: { company?: string; role?: string } };
+    filled.consistencyIssues = runPreSubmitConsistencyChecks({
+      resume,
+      currentCompany: variant.variantContext?.company,
+      currentRole: variant.variantContext?.role,
+      pageFields: filled.plan.items
+        .filter((item) => item.action === 'FILL')
+        .map((item) => ({
+          semanticKey: item.semanticKey,
+          label: item.field.label,
+          value: item.actualValue ?? item.targetValue,
+          verificationStatus: item.verificationStatus || 'UNREADABLE',
+        })),
+    });
+  }
+
   async function confirmFill() {
     if (disposed || phase.value !== 'idle' || !preview.value || (!previewFillItems.value.length && !previewWorkflowItems.value.length)) return;
     const ticket = ++revision;
@@ -122,6 +142,11 @@ export function useFillSession(options: FillSessionOptions) {
     try {
       const filled = await formFillerEngine.executePlan(plan);
       if (!isCurrent(ticket)) return;
+      try {
+        await addConsistencyIssues(filled);
+      } catch (consistencyError) {
+        console.warn('[OpenJobFill] Consistency check was not completed:', consistencyError);
+      }
       const executed = { ...plan, plan: filled.plan || plan.plan };
       lastPlan.value = previous ? mergeAnalyzedPlans(previous, executed) : executed;
       result.value = filled;
