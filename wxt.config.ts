@@ -19,7 +19,7 @@ export default defineConfig({
     // Built-in recruitment/ATS origins can run the lightweight detector automatically.
     // Unknown sites and custom AI endpoints are requested only after an explicit user gesture.
     host_permissions: BUILTIN_RECRUITMENT_MATCHES,
-    optional_host_permissions: ['http://*/*', 'https://*/*'],
+    optional_host_permissions: ['*://*/*'],
     action: {
       default_icon: {
         '16': 'icon-16.png',
