@@ -7,6 +7,8 @@ import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/impo
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
 import { trackerStorage, TRACKER_STORAGE_MESSAGE_TYPES } from '../core/storage/trackerStorage';
+import { getCustomDomains } from '../core/whitelist';
+import { customDomainPermissionPattern, normalizeCustomDomain } from '../core/recruitmentPermissions';
 import { isExtensionMessage, type ExtensionMessage } from '../types/message';
 
 let resumeWriteQueue: Promise<void> = Promise.resolve();
@@ -181,6 +183,37 @@ async function ensureContentRuntime(tabId: number): Promise<void> {
   runtimeInjectedTabs.add(tabId);
 }
 
+async function hasOriginPermission(pattern: string): Promise<boolean> {
+  return await chrome.permissions.contains({ origins: [pattern] });
+}
+
+async function maybeInjectCustomDomainRuntime(tabId: number, url: string): Promise<void> {
+  let hostname = '';
+  try { hostname = new URL(url).hostname.toLowerCase(); } catch { return; }
+  if (!hostname) return;
+  const customDomains = await getCustomDomains();
+  const match = customDomains
+    .map(normalizeCustomDomain)
+    .find((domain) => domain && (hostname === domain || hostname.endsWith(`.${domain}`)));
+  if (!match) return;
+  const pattern = customDomainPermissionPattern(match);
+  if (!pattern || !(await hasOriginPermission(pattern))) return;
+  await ensureContentRuntime(tabId);
+}
+
+async function triggerActiveTabFill(resumeId?: string): Promise<Record<string, unknown>> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return { success: false, error: '未找到当前标签页' };
+  await ensureContentRuntime(tab.id);
+  const response = await sendMessageToFrame(tab.id, 0, {
+    type: 'RUNTIME_TRIGGER_AUTO_FILL',
+    payload: resumeId ? { resumeId } : undefined,
+  });
+  return response && typeof response === 'object'
+    ? response as Record<string, unknown>
+    : { success: false, error: '页面运行时没有响应' };
+}
+
 export default defineBackground(() => {
   console.log('[OpenJobFill] Background service worker initialized.');
 
@@ -193,7 +226,15 @@ export default defineBackground(() => {
   // 完整导航会销毁页面上下文，即使标签页 ID 不变也必须允许下一页重新注入。
   chrome.webNavigation?.onCommitted?.addListener((details) => {
     const hadRuntime = runtimeInjectedTabs.delete(details.tabId);
-    if (hadRuntime && details.frameId !== 0) {
+    if (details.frameId === 0) {
+      // Built-in sites still use the static lightweight detector. Explicitly whitelisted
+      // custom sites may auto-mount only after the user granted that origin permission.
+      void maybeInjectCustomDomainRuntime(details.tabId, details.url).catch((error) => {
+        console.warn('[OpenJobFill] Custom-domain runtime injection skipped:', error);
+      });
+      return;
+    }
+    if (hadRuntime) {
       // 子 frame 自己导航时顶层页面仍在，探测器不会重新触发；主动补注入
       // 让下一次跨域 frame 分析不会命中一个已经被导航销毁的上下文。
       void ensureContentRuntime(details.tabId).catch((error) => {
@@ -202,13 +243,14 @@ export default defineBackground(() => {
     }
   });
 
-  // 监听插件图标点击或快捷键
+  // 监听快捷键。activeTab 在用户快捷键手势下提供临时当前页权限，
+  // 因此未知站点不需要永久 all-sites host permission 也能手动填表。
   chrome.commands?.onCommand?.addListener(async (command) => {
-    if (command === 'trigger_autofill') {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab && tab.id) {
-        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_AUTO_FILL' });
-      }
+    if (command !== 'trigger_autofill') return;
+    try {
+      await triggerActiveTabFill();
+    } catch (error) {
+      console.warn('[OpenJobFill] Shortcut active-tab fill failed:', error);
     }
   });
 
@@ -217,6 +259,17 @@ export default defineBackground(() => {
     if (!isExtensionMessage(message)) {
       sendResponse({ success: false, error: '扩展消息格式无效' });
       return;
+    }
+
+    if (message.type === 'TRIGGER_ACTIVE_TAB_FILL') {
+      if (sender.id !== chrome.runtime.id) {
+        sendResponse({ success: false, error: '当前页填表请求来源无效' });
+        return;
+      }
+      triggerActiveTabFill(message.payload?.resumeId)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ success: false, error: error instanceof Error ? error.message : '当前页面运行时注入失败' }));
+      return true;
     }
 
     if (message.type === 'RECRUITMENT_PAGE_DETECTED') {
