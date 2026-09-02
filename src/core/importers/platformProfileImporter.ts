@@ -1,4 +1,18 @@
-import type { EducationExperience, ResumeBasics, WorkExperience } from '../../types/resume';
+import type { EducationExperience, ResumeBasics, StandardResume, WorkExperience } from '../../types/resume';
+
+/** Merge visible platform data without letting blank basics erase existing information. */
+export function mergePlatformProfile(active: StandardResume, extracted: PlatformProfileImport): StandardResume {
+  const basics = Object.fromEntries(Object.entries(extracted.basics).filter(([, value]) =>
+    value !== undefined && value !== null && (typeof value !== 'string' || value.trim() !== ''),
+  ));
+  return {
+    ...active,
+    basics: { ...active.basics, ...basics },
+    educations: [...active.educations, ...extracted.educations.filter((incoming) => !active.educations.some((item) => item.schoolName === incoming.schoolName && item.degree === incoming.degree))],
+    experiences: [...active.experiences, ...extracted.experiences.filter((incoming) => !active.experiences.some((item) => item.company === incoming.company && item.title === incoming.title && item.startDate === incoming.startDate))],
+    updatedAt: Date.now(),
+  };
+}
 
 export interface PlatformProfileImport {
   platform: 'boss' | 'zhaopin';

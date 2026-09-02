@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
+import { canImportPlatformProfile, extractPlatformProfile, mergePlatformProfile } from '@/core/importers/platformProfileImporter';
+import { importResumeText } from '@/core/importers/jsonResumeImporter';
 
 describe('platformProfileImporter', () => {
   it('从 BOSS 个人简历可见 DOM 提取基本信息与经历', () => {
@@ -17,5 +18,14 @@ describe('platformProfileImporter', () => {
   it('仅在支持的平台显示同步入口', () => {
     expect(canImportPlatformProfile('https://www.zhaopin.com/resume')).toBe(true);
     expect(canImportPlatformProfile('https://example.com')).toBe(false);
+  });
+  it('merging does not erase nonempty basics or duplicate existing experiences', () => {
+    const active = importResumeText('张三\n13800138000', '本地');
+    const education = { id: 'edu', schoolName: '大学', degree: '本科' as const, major: '软件工程', startDate: '2020-09', endDate: '2024-06' };
+    active.educations = [education];
+    const merged = mergePlatformProfile(active, { platform: 'boss', basics: { phone: '', name: '李四' }, educations: [education], experiences: [] });
+    expect(merged.basics).toMatchObject({ name: '李四', phone: '13800138000' });
+    expect(merged.educations).toHaveLength(1);
+    expect(active.basics.name).toBe('张三');
   });
 });

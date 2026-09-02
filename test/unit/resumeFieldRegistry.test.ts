@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildResumeClipboardItems, getResumeFieldDefinition, RESUME_FIELD_REGISTRY } from '@/core/schema/resumeFieldRegistry';
+import { buildResumeBindingGroups, buildResumeClipboardItems, getResumeFieldDefinition, RESUME_FIELD_REGISTRY } from '@/core/schema/resumeFieldRegistry';
 import { buildResumeKeyOptions } from '@/core/ai/fieldMapper';
 import { scrubSensitiveData } from '@/core/privacy/privacyScrubber';
 import type { StandardResume } from '@/types/resume';
@@ -27,5 +27,14 @@ describe('resume metadata center', () => {
     expect(safe.resume.educations[0].schoolName).toBe('[REDACTED]');
     expect(safe.field.name).toBe('candidateName');
     expect(safe.targetValue).toBe('[REDACTED]');
+  });
+  it('manual bindings include real repeated records and empty editable fields, never synthetic or private QA paths', () => {
+    const groups = buildResumeBindingGroups(resume);
+    const options = groups.flatMap((group) => group.options);
+    expect(options).toContainEqual({ label: '就读学校(2)', value: 'educations.1.schoolName' });
+    expect(options.map((option) => option.value)).toEqual(expect.arrayContaining(['basics.phone', 'educations.1.major', 'basics.visaSponsorship']));
+    expect(options.some((option) => /^(qaBank|experiences|educations\.2)\./.test(option.value))).toBe(false);
+    expect(options.some((option) => option.value === 'basics.avatarUrl')).toBe(false);
+    expect(JSON.stringify(groups)).not.toContain('domain-only answer');
   });
 });

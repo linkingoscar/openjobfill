@@ -1,281 +1,100 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { extractTextFromFile, renderPdfPagesForVision } from '@/core/parser/textExtractor';
-import { importResumeText } from '@/core/importers/jsonResumeImporter';
-import { mergeResumeImports } from '@/core/importers/visionResumeImporter';
-import { prepareResumeImage, validateResumeImageFile } from '@/core/importers/resumeImagePreparation';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { validateResumeImageFile } from '@/core/importers/resumeImagePreparation';
 import { getAISettings } from '@/core/storage/aiSettingsStorage';
 import type { AISettings } from '@/types/ai';
 import type { StandardResume } from '@/types/resume';
-import { 
-  UploadCloud, 
-  FileText, 
-  Sparkles, 
-  CheckCircle2, 
-  AlertCircle, 
-  X, 
-  ArrowRight,
-  User,
-  GraduationCap,
-  Briefcase,
-  FolderGit2,
-  Trophy,
-  Activity,
-  AlertTriangle,
-  HelpCircle,
-  ScanLine,
-} from 'lucide-vue-next';
+import { UploadCloud, FileText, Sparkles, AlertCircle, X, ArrowRight, ScanLine } from 'lucide-vue-next';
+import { useResumeImport } from './composables/useResumeImport';
+import ResumeImportPreview from './ResumeImportPreview.vue';
 
 const emit = defineEmits<{
-  (e: 'close'): void;
-  (e: 'import', resume: StandardResume): void;
+  (event: 'close'): void;
+  (event: 'import', resume: StandardResume): void;
 }>();
-
 const mode = ref<'upload' | 'paste' | 'vision'>('upload');
-const isParsing = ref(false);
 const rawText = ref('');
-const fileName = ref('');
-const parsedResume = ref<StandardResume | null>(null);
-const errorMessage = ref('');
 const visionConsent = ref(false);
 const visionFile = ref<File | null>(null);
 const visionPreviewUrl = ref('');
 const aiSettings = ref<AISettings | null>(null);
 const useAIEnhancement = ref(false);
 const documentConsent = ref(false);
-const enhancementNotice = ref('');
-
+const importer = useResumeImport();
+const { isParsing, parsedResume, errorMessage, enhancementNotice } = importer;
 const aiConfigLabel = computed(() => {
   const settings = aiSettings.value;
-  if (!settings?.enabled) return 'AI 尚未启用';
-  return `${settings.provider === 'ollama' ? 'Ollama' : '云端 API'} · ${settings.model || '未配置模型'}`;
+  return settings?.enabled ? `${settings.provider === 'ollama' ? 'Ollama' : '云端 API'} · ${settings.model || '未配置模型'}` : 'AI 尚未启用';
 });
 
-const healthReport = computed(() => {
-  if (!parsedResume.value) return null;
-  const r = parsedResume.value;
-  
-  let identifiedCount = 0;
-  if (r.basics.name) identifiedCount++;
-  if (r.basics.phone) identifiedCount++;
-  if (r.basics.email) identifiedCount++;
-  if (r.basics.gender) identifiedCount++;
-  if (r.basics.birthDate) identifiedCount++;
-  if (r.basics.politicalStatus) identifiedCount++;
-  if (r.basics.expectedRole) identifiedCount++;
-  if (r.basics.currentLocation?.city) identifiedCount++;
-  if (r.basics.nativePlace?.city) identifiedCount++;
-  if (r.basics.birthPlace?.city) identifiedCount++;
-  if (r.basics.hobbies) identifiedCount++;
-  if (r.basics.selfEvaluation) identifiedCount++;
-  identifiedCount += (r.educations?.length || 0) * 3;
-  identifiedCount += (r.experiences?.length || 0) * 3;
-  identifiedCount += (r.projects?.length || 0) * 2;
-  identifiedCount += (r.skills?.length || 0);
-  identifiedCount += (r.languages?.length || 0) * 2;
-  identifiedCount += (r.certificates?.length || 0);
-  identifiedCount += (r.familyMembers?.length || 0) * 3;
-  identifiedCount += (r.awards?.length || 0) * 2;
-  identifiedCount += (r.academicAchievements?.length || 0) * 2;
-  identifiedCount += (r.campusExperiences?.length || 0) * 2;
-
-  const missingItems: string[] = [];
-  if (!r.basics.gender) missingItems.push('性别');
-  if (!r.basics.nativePlace?.city && !r.basics.nativePlace?.province) missingItems.push('籍贯 / 生源地');
-  if (!r.basics.hukouLocation?.city && !r.basics.hukouLocation?.province) missingItems.push('户口所在地');
-  if (!r.basics.availableTime) missingItems.push('到岗时间');
-  if (!r.basics.maritalStatus) missingItems.push('婚姻状况');
-  if (!r.basics.height) missingItems.push('身高');
-  if (!r.basics.expectedSalaryMin) missingItems.push('期望薪资');
-  if ((!r.certificates || r.certificates.length === 0) && (!r.languages || r.languages.length === 0)) missingItems.push('CET-4/6 英语成绩或证书');
-  if (!r.basics.idCardNumber) missingItems.push('身份证号');
-
-  const warnings: string[] = [];
-  r.educations?.forEach((edu, i) => {
-    if (!edu.endDate) warnings.push(`第 ${i + 1} 段教育缺少毕业年月`);
-    if (!edu.major) warnings.push(`第 ${i + 1} 段教育缺少专业`);
-  });
-  r.experiences?.forEach((exp, i) => {
-    if (!exp.startDate || !exp.endDate) warnings.push(`第 ${i + 1} 段经历起止时间不完整`);
-  });
-
-  return {
-    identifiedCount,
-    missingItems,
-    warnings,
-  };
-});
-
-const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    emit('close');
-  }
+const resetImport = () => {
+  importer.reset();
+  documentConsent.value = false;
+  visionConsent.value = false;
 };
-
+watch(mode, resetImport);
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') emit('close');
+};
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
   aiSettings.value = await getAISettings();
 });
-
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
   if (visionPreviewUrl.value) URL.revokeObjectURL(visionPreviewUrl.value);
 });
 
-const handleFileUpload = async (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  if (!input.files || input.files.length === 0) return;
-  const file = input.files[0];
-  await processFile(file);
+const processFile = async (file: File) => {
+  const result = await importer.importDocument(file, {
+    enhance: useAIEnhancement.value,
+    consent: documentConsent.value,
+  });
+  documentConsent.value = false;
+  if (result) rawText.value = result.text;
 };
-
+const handleFileUpload = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (file) await processFile(file);
+};
 const handleDrop = async (event: DragEvent) => {
   event.preventDefault();
-  if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
-    if (useAIEnhancement.value && !documentConsent.value) {
-      errorMessage.value = '请先确认 AI 补强的数据发送方式';
-      return;
-    }
-    const file = event.dataTransfer.files[0];
-    await processFile(file);
-  }
+  const file = event.dataTransfer?.files?.[0];
+  if (file) await processFile(file);
 };
-
-const processFile = async (file: File) => {
-  isParsing.value = true;
-  errorMessage.value = '';
-  fileName.value = file.name;
-  parsedResume.value = null;
-  enhancementNotice.value = '';
-
-  let localResume: StandardResume | null = null;
-  let text = '';
-  try {
-    text = await extractTextFromFile(file);
-    rawText.value = text;
-    if (text?.trim()) {
-      const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
-      localResume = importResumeText(text, cleanTitle);
-    } else if (!useAIEnhancement.value) {
-      throw new Error('未能在文件中提取到有效文本，请确认该 PDF 不是纯图片扫描件');
-    }
-
-    if (useAIEnhancement.value) {
-      if (!documentConsent.value) throw new Error('请先确认 AI 补强的数据发送方式');
-      const settings = await getAISettings();
-      aiSettings.value = settings;
-      if (!settings.enabled) throw new Error('请先在“设置 → AI 智能兜底”中启用并配置模型');
-      const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
-      const imageDataUrls = isPdf ? await renderPdfPagesForVision(file, 4) : [];
-      const response = await chrome.runtime.sendMessage({
-        type: 'AI_PARSE_RESUME_DOCUMENT',
-        payload: {
-          settings,
-          imageDataUrls,
-          documentText: text.slice(0, 60_000),
-          fileName: file.name,
-          confirmedExternalProcessing: true,
-        },
-      });
-      if (!response?.success || !response.resume) throw new Error(response?.error || 'AI 没有返回简历数据');
-      const aiResume = response.resume as StandardResume;
-      parsedResume.value = localResume ? mergeResumeImports(localResume, aiResume) : aiResume;
-      enhancementNotice.value = isPdf
-        ? `AI 已结合本地文本和 PDF 页面图补强（最多前 ${Math.min(4, imageDataUrls.length)} 页）`
-        : 'AI 已结合 Word/文本的本地提取内容补强结构化结果';
-    } else {
-      parsedResume.value = localResume;
-    }
-  } catch (err: any) {
-    if (localResume && useAIEnhancement.value) {
-      parsedResume.value = localResume;
-      enhancementNotice.value = `AI 补强未完成，已保留本地解析结果：${err?.message || '未知错误'}`;
-    } else {
-      errorMessage.value = err?.message || '文件解析失败，请检查文件格式';
-    }
-  } finally {
-    isParsing.value = false;
-  }
-};
-
-const handleParsePastedText = () => {
-  if (!rawText.value.trim()) {
-    errorMessage.value = '请先粘贴简历文本内容';
-    return;
-  }
-  isParsing.value = true;
-  errorMessage.value = '';
-  try {
-    parsedResume.value = importResumeText(rawText.value, '粘贴文本导入简历');
-  } catch (err: any) {
-    errorMessage.value = err?.message || '文本解析异常';
-  } finally {
-    isParsing.value = false;
-  }
-};
+const handleParsePastedText = () => importer.importText(rawText.value);
 
 const selectVisionFile = (file: File) => {
   try {
     validateResumeImageFile(file);
+    resetImport();
     if (visionPreviewUrl.value) URL.revokeObjectURL(visionPreviewUrl.value);
     visionFile.value = file;
     visionPreviewUrl.value = URL.createObjectURL(file);
-    fileName.value = file.name;
-    parsedResume.value = null;
-    errorMessage.value = '';
-  } catch (err: any) {
-    errorMessage.value = err?.message || '图片格式无效';
+  } catch (error) {
+    importer.reportError(error instanceof Error ? error.message : '图片格式无效');
   }
 };
-
 const handleVisionFile = (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (file) selectVisionFile(file);
 };
-
 const handleVisionDrop = (event: DragEvent) => {
   event.preventDefault();
   const file = event.dataTransfer?.files?.[0];
   if (file) selectVisionFile(file);
 };
-
 const handleVisionParse = async () => {
   if (!visionFile.value) {
-    errorMessage.value = '请先选择简历图片';
+    importer.reportError('请先选择简历图片');
     return;
   }
-  if (!visionConsent.value) {
-    errorMessage.value = '请确认本次图片处理方式后再开始识别';
-    return;
-  }
-  const settings = await getAISettings();
-  aiSettings.value = settings;
-  if (!settings.enabled) {
-    errorMessage.value = '请先在“设置 → AI 智能兜底”中启用并配置支持视觉的模型';
-    return;
-  }
-
-  isParsing.value = true;
-  errorMessage.value = '';
-  try {
-    const imageDataUrl = await prepareResumeImage(visionFile.value);
-    const response = await chrome.runtime.sendMessage({
-      type: 'AI_PARSE_RESUME_IMAGE',
-      payload: { settings, imageDataUrl, fileName: visionFile.value.name, confirmedExternalProcessing: true },
-    });
-    if (!response?.success || !response.resume) throw new Error(response?.error || '视觉模型没有返回简历数据');
-    parsedResume.value = response.resume as StandardResume;
-  } catch (err: any) {
-    errorMessage.value = err?.message || 'AI 视觉简历识别失败';
-  } finally {
-    isParsing.value = false;
-  }
+  const request = importer.importImage(visionFile.value, visionConsent.value);
+  visionConsent.value = false;
+  await request;
 };
-
 const handleConfirmImport = () => {
-  if (!parsedResume.value) return;
-  const cleanData = JSON.parse(JSON.stringify(parsedResume.value));
-  emit('import', cleanData);
+  if (parsedResume.value) emit('import', JSON.parse(JSON.stringify(parsedResume.value)));
 };
 </script>
 
@@ -518,125 +337,7 @@ const handleConfirmImport = () => {
           <span>{{ errorMessage }}</span>
         </div>
 
-        <!-- Parsed Result Preview & Health Check -->
-        <div v-if="parsedResume && healthReport" class="space-y-4 animate-fade-in">
-          <!-- Health Check Diagnostic Banner -->
-          <div class="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <Activity class="w-4 h-4 text-blue-600" />
-                <span class="font-bold text-slate-900 text-xs">简历解析体检报告</span>
-                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[11px]">
-                  已识别 {{ healthReport.identifiedCount }} 项字段
-                </span>
-              </div>
-              <button
-                type="button"
-                @click="parsedResume = null"
-                class="text-xs text-slate-500 hover:text-slate-900 underline font-medium focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-              >
-                重新上传
-              </button>
-            </div>
-
-            <!-- Missing High-frequency Items -->
-            <div v-if="healthReport.missingItems.length > 0" class="space-y-1.5">
-              <div class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                <AlertCircle class="w-3.5 h-3.5 text-amber-500" />
-                <span>建议在网申前补全的高频缺失项 ({{ healthReport.missingItems.length }} 项):</span>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <span
-                  v-for="item in healthReport.missingItems"
-                  :key="item"
-                  class="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/80 rounded-lg text-[11px] font-medium"
-                >
-                  ○ {{ item }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Warnings -->
-            <div v-if="healthReport.warnings.length > 0" class="space-y-1">
-              <div class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                <AlertTriangle class="w-3.5 h-3.5 text-amber-600" />
-                <span>建议核对项:</span>
-              </div>
-              <ul class="text-[11px] text-slate-500 list-disc list-inside space-y-0.5">
-                <li v-for="(warn, i) in healthReport.warnings" :key="i">{{ warn }}</li>
-              </ul>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4 text-xs">
-            <!-- Basic Info Card -->
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
-                <User class="w-4 h-4 text-blue-600" aria-hidden="true" /> 基本信息
-              </h3>
-              <div class="grid grid-cols-2 gap-2 text-slate-700">
-                <div><span class="text-slate-500">姓名:</span> {{ parsedResume.basics.name || '未提取到' }}</div>
-                <div><span class="text-slate-500">性别:</span> {{ parsedResume.basics.gender }}</div>
-                <div><span class="text-slate-500">电话:</span> {{ parsedResume.basics.phone || '未提取到' }}</div>
-                <div><span class="text-slate-500">邮箱:</span> {{ parsedResume.basics.email || '未提取到' }}</div>
-                <div><span class="text-slate-500">生日:</span> {{ parsedResume.basics.birthDate || '未提取到' }}</div>
-                <div><span class="text-slate-500">政治面貌:</span> {{ parsedResume.basics.politicalStatus }}</div>
-                <div><span class="text-slate-500">出生地:</span> {{ parsedResume.basics.birthPlace?.detail || parsedResume.basics.birthPlace?.city || '未提取到' }}</div>
-                <div class="col-span-2"><span class="text-slate-500">求职意向:</span> {{ parsedResume.basics.expectedRole || '未提取到' }}</div>
-              </div>
-            </div>
-
-            <!-- Education Summary Card -->
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
-                <GraduationCap class="w-4 h-4 text-indigo-600" aria-hidden="true" /> 教育背景 ({{ parsedResume.educations.length }} 条)
-              </h3>
-              <div v-if="parsedResume.educations.length === 0" class="text-slate-500 italic">未识别到教育经历</div>
-              <div v-for="(edu, idx) in parsedResume.educations" :key="idx" class="text-slate-700">
-                <span class="font-semibold text-slate-900">{{ edu.schoolName }}</span> · {{ edu.degree }} · {{ edu.major }}
-                <div class="text-xs text-slate-500">{{ edu.startDate }} ~ {{ edu.endDate }}</div>
-              </div>
-            </div>
-
-            <!-- Work Experience Summary Card -->
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
-                <Briefcase class="w-4 h-4 text-blue-600" aria-hidden="true" /> 工作与实习 ({{ parsedResume.experiences.length }} 条)
-              </h3>
-              <div v-if="parsedResume.experiences.length === 0" class="text-slate-500 italic">未识别到工作经历</div>
-              <div v-for="(exp, idx) in parsedResume.experiences" :key="idx" class="text-slate-700 truncate">
-                <span class="font-semibold text-slate-900">{{ exp.company }}</span> - {{ exp.title }}
-                <div class="text-xs text-slate-500">{{ exp.startDate }} ~ {{ exp.endDate }}</div>
-              </div>
-            </div>
-
-            <!-- Project Experience Summary Card -->
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
-                <FolderGit2 class="w-4 h-4 text-amber-600" aria-hidden="true" /> 项目经历 ({{ parsedResume.projects.length }} 条)
-              </h3>
-              <div v-if="parsedResume.projects.length === 0" class="text-slate-500 italic">未识别到项目经历</div>
-              <div v-for="(proj, idx) in parsedResume.projects" :key="idx" class="text-slate-700 truncate">
-                <span class="font-semibold text-slate-900">{{ proj.projectName }}</span> ({{ proj.role }})
-              </div>
-            </div>
-
-            <div class="col-span-2 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <h3 class="font-bold text-slate-800 flex items-center gap-1.5 pb-1.5 border-b border-slate-200">
-                <Trophy class="w-4 h-4 text-orange-600" aria-hidden="true" /> 校招扩展信息
-              </h3>
-              <div class="grid grid-cols-4 gap-2 text-slate-700">
-                <div>家庭成员：<b>{{ parsedResume.familyMembers?.length || 0 }}</b> 条</div>
-                <div>语言成绩：<b>{{ parsedResume.languages?.length || 0 }}</b> 条</div>
-                <div>证书：<b>{{ parsedResume.certificates?.length || 0 }}</b> 条</div>
-                <div>获奖荣誉：<b>{{ parsedResume.awards?.length || 0 }}</b> 条</div>
-                <div>学术成果：<b>{{ parsedResume.academicAchievements?.length || 0 }}</b> 条</div>
-                <div>学生干部：<b>{{ parsedResume.campusExperiences?.length || 0 }}</b> 条</div>
-                <div class="col-span-2 truncate">兴趣爱好：{{ parsedResume.basics.hobbies || '未提取到' }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ResumeImportPreview v-if="parsedResume" :parsed-resume="parsedResume" @reset="resetImport" />
       </div>
 
       <!-- Modal Footer -->

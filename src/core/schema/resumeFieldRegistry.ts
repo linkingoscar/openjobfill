@@ -126,3 +126,30 @@ export function buildResumeClipboardItems(resume: StandardResume): ClipboardItem
   }
   return fields;
 }
+
+export interface ResumeBindingGroup {
+  group: string;
+  options: Array<{ label: string; value: string }>;
+}
+
+/** Manual site mappings use actual records, including empty fields to complete later.
+ * Domain-scoped QA stays in its dedicated matcher; system fields are never offered.
+ */
+export function buildResumeBindingGroups(resume: StandardResume): ResumeBindingGroup[] {
+  const groups = new Map<string, ResumeBindingGroup>();
+  for (const definition of RESUME_FIELD_REGISTRY) {
+    if (!definition.fillable || definition.group === 'qaBank') continue;
+    const group = RESUME_GROUPS.find(([key]) => key === definition.group)![1];
+    const entries = definition.cardinality === 'MANY' ? resume[definition.group] : [resume.basics];
+    if (!Array.isArray(entries)) continue;
+    entries.forEach((_, index) => {
+      const target = groups.get(group) || { group, options: [] };
+      target.options.push({
+        label: definition.label + (definition.cardinality === 'MANY' ? `(${index + 1})` : ''),
+        value: definition.path.replace('[]', `.${index}`),
+      });
+      groups.set(group, target);
+    });
+  }
+  return [...groups.values()];
+}

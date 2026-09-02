@@ -1,3 +1,5 @@
+export type DrawerTab = 'logs' | 'review' | 'clipboard' | 'jdMatch';
+
 export type ClipboardCategory =
   | '基本信息'
   | '教育经历'

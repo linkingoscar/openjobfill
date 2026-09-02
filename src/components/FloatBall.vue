@@ -3,43 +3,29 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { 
   Zap, 
   Sparkles, 
-  CheckCircle, 
   X, 
   Copy, 
   Settings, 
-  User,
-  GraduationCap,
-  Briefcase,
-  HelpCircle,
-  FileText,
   Layers,
-  Award,
-  Users,
   Download,
   Target,
-  Eye,
   EyeOff,
   AlertTriangle,
-  Lightbulb,
   BookmarkPlus,
-  TrendingUp,
   Pipette,
-  Highlighter,
-  Paperclip,
   RefreshCw,
 } from 'lucide-vue-next';
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
-import { trackerStorage } from '@/core/storage/trackerStorage';
-import { applicationDraftStorage, type ApplicationTrackerDraft } from '@/core/storage/applicationDraftStorage';
 import { useFillHistory } from './composables/useFillHistory';
-import { useFillPreview } from './composables/useFillPreview';
+import { useFillSession } from './composables/useFillSession';
+import { useApplicationArchive } from './composables/useApplicationArchive';
 import { useJDAnalysis } from './composables/useJDAnalysis';
 import DrawerHistoryTab from './DrawerHistoryTab.vue';
+import DrawerFillTab from './DrawerFillTab.vue';
+import DrawerJDTab from './DrawerJDTab.vue';
 import DrawerReviewTab from './DrawerReviewTab.vue';
 import DrawerClipboardTab from './DrawerClipboardTab.vue';
-import { formFillerEngine, type AnalyzedPlan } from '@/core/engine/filler';
-import { analyzeRemoteFrames, cancelRemoteFrames } from '@/core/frames/frameCoordinator';
 import { getEnhancerForUrl } from '@/core/adapters';
 import { setNativeValue } from '@/core/engine/dispatcher';
 import { clearAllBadges } from '@/core/engine/badgeDecorator';
@@ -47,47 +33,23 @@ import { startElementPicking } from '@/core/engine/elementPicker';
 import { startManualFill } from '@/core/engine/manualFill';
 import { uploadResumeToPage } from '@/core/engine/attachmentUploader';
 import { inspectFieldSafety } from '@/core/pipeline/fieldSafety';
-import { isFillRunAbortedError } from '@/core/pipeline/runContext';
-import { extractPageJobSnapshot, isApplicationSuccessPage, type PageJobSnapshot } from '@/core/tracker/pageJobExtractor';
-import { canImportPlatformProfile, extractPlatformProfile } from '@/core/importers/platformProfileImporter';
+import { canImportPlatformProfile, extractPlatformProfile, mergePlatformProfile } from '@/core/importers/platformProfileImporter';
 import { generateOptimalSelector } from '@/utils/dom';
-import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
-import type { JobApplicationRecord } from '@/types/tracker';
-import { createApplicationId } from '@/core/tracker/trackerSchema';
 import { createPageFocusTracker } from '@/core/ui/pageFocus';
-import { buildResumeClipboardItems } from '@/core/schema/resumeFieldRegistry';
-import type { ClipboardItem } from '@/types/floatingBall';
+import { buildResumeClipboardItems, buildResumeBindingGroups } from '@/core/schema/resumeFieldRegistry';
+import type { ClipboardItem, DrawerTab } from '@/types/floatingBall';
+import type { RemainingTaskItem } from '@/types/pipeline';
 import { useFloatingPosition } from './composables/useFloatingPosition';
 
-const isFilling = ref(false);
 const isDrawerOpen = ref(false);
-const drawerTab = ref<'logs' | 'review' | 'clipboard' | 'jdMatch'>('logs');
+const drawerTab = ref<DrawerTab>('logs');
 const currentAdapterName = ref('');
-const fillResult = ref<FillResult | null>(null);
-const operationError = ref('');
 const currentResume = ref<StandardResume | null>(null);
 const allResumes = ref<StandardResume[]>([]);
 const selectedResumeId = ref('');
 const isHiddenOnCurrentPage = ref(false);
 const canSyncCurrentPlatform = computed(() => canImportPlatformProfile(window.location.href));
-
-const {
-  responsiveDrawerWidth,
-  responsiveDrawerHeight,
-  floatingLayout,
-  floatingRootStyle,
-  loadFloatingPosition,
-  handleViewportResize,
-  startBallDrag,
-  stopBallDrag,
-  startResize,
-  handleResizeMove,
-  stopResize,
-  cleanup: cleanupFloatingPosition,
-  suppressNextBubbleClick,
-  clearSuppressNextBubbleClick,
-} = useFloatingPosition(isDrawerOpen, isFilling);
 
 const handleHideFloatingBall = () => {
   isDrawerOpen.value = false;
@@ -95,27 +57,9 @@ const handleHideFloatingBall = () => {
 };
 
 // 多步向导与待办核对提示
-const stepNotification = ref({ show: false, text: '' });
 const copyToastMessage = ref('');
-const applicationDraft = ref<ApplicationTrackerDraft | null>(null);
 
-const detectApplicationSuccessDraft = async () => {
-  if (!isApplicationSuccessPage()) return;
-  const job = extractPageJobSnapshot();
-  if (applicationDraft.value?.job.jobUrl === job.jobUrl) return;
-  applicationDraft.value = await applicationDraftStorage.create(job);
-  if (!isDrawerOpen.value) isDrawerOpen.value = true;
-  drawerTab.value = 'jdMatch';
-  copyToastMessage.value = '检测到申请成功页面，已生成投递归档草稿，请确认后保存';
-  setTimeout(() => { copyToastMessage.value = ''; }, 4500);
-};
-
-const dismissApplicationDraft = async () => {
-  applicationDraft.value = null;
-  await applicationDraftStorage.clear();
-};
-
-const handleFocusTaskElement = (task: any) => {
+const handleFocusTaskElement = (task: RemainingTaskItem) => {
   if (task.element) {
     task.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (typeof task.element.focus === 'function') {
@@ -133,69 +77,11 @@ const handleFocusTaskElement = (task: any) => {
 const activeTaskMappingId = ref<string | null>(null);
 const selectedMappingKey = ref('');
 
-const AVAILABLE_BINDING_FIELDS = [
-  { group: '个人基本信息', options: [
-    { label: '姓名', value: 'basics.name' },
-    { label: '名 (First Name)', value: 'basics.firstName' },
-    { label: '姓 (Last Name)', value: 'basics.lastName' },
-    { label: '手机号码', value: 'basics.phone' },
-    { label: '电子邮箱', value: 'basics.email' },
-    { label: '身份证号', value: 'basics.idCardNumber' },
-    { label: '出生日期', value: 'basics.birthDate' },
-    { label: '性别', value: 'basics.gender' },
-    { label: '民族', value: 'basics.ethnicity' },
-    { label: '政治面貌', value: 'basics.politicalStatus' },
-    { label: '婚姻状况', value: 'basics.maritalStatus' },
-    { label: '身高 (cm)', value: 'basics.height' },
-    { label: '体重 (kg)', value: 'basics.weight' },
-    { label: '健康状况', value: 'basics.healthStatus' },
-    { label: '籍贯 / 生源地', value: 'basics.nativePlace.detail' },
-    { label: '出生地', value: 'basics.birthPlace.detail' },
-    { label: '户籍 / 户口所在地', value: 'basics.hukouLocation.detail' },
-    { label: '现居城市', value: 'basics.currentLocation.city' },
-    { label: '现居详细地址', value: 'basics.currentLocation.detail' },
-    { label: '兴趣爱好 / 特长', value: 'basics.hobbies' },
-  ]},
-  { group: '求职与意向', options: [
-    { label: '期望岗位', value: 'basics.expectedRole' },
-    { label: '期望城市', value: 'basics.expectedCity' },
-    { label: '期望最低薪资', value: 'basics.expectedSalaryMin' },
-    { label: '到岗时间', value: 'basics.availableTime' },
-    { label: '当前求职状态', value: 'basics.jobStatus' },
-    { label: '工作年限', value: 'basics.workingYears' },
-    { label: '自我评价', value: 'basics.selfEvaluation' },
-    { label: 'GitHub 地址', value: 'basics.githubUrl' },
-    { label: 'LinkedIn', value: 'basics.linkedinUrl' },
-    { label: '个人主页/博客', value: 'basics.blogUrl' },
-  ]},
-  { group: '教育背景 (第一段)', options: [
-    { label: '学校名称', value: 'educations.0.schoolName' },
-    { label: '学历层次', value: 'educations.0.degree' },
-    { label: '主修专业', value: 'educations.0.major' },
-    { label: '入学年月', value: 'educations.0.startDate' },
-    { label: '毕业年月', value: 'educations.0.endDate' },
-    { label: 'GPA / 成绩', value: 'educations.0.gpa' },
-  ]},
-  { group: '工作实习 (第一段)', options: [
-    { label: '公司名称', value: 'experiences.0.company' },
-    { label: '职位名称', value: 'experiences.0.title' },
-    { label: '工作描述', value: 'experiences.0.description' },
-    { label: '入职时间', value: 'experiences.0.startDate' },
-    { label: '离职时间', value: 'experiences.0.endDate' },
-  ]},
-  { group: '成果与校园经历 (第一段)', options: [
-    { label: '获奖名称', value: 'awards.0.name' },
-    { label: '获奖级别', value: 'awards.0.level' },
-    { label: '论文 / 成果标题', value: 'academicAchievements.0.title' },
-    { label: '会议 / 期刊', value: 'academicAchievements.0.venue' },
-    { label: '校园组织', value: 'campusExperiences.0.organization' },
-    { label: '校园职务', value: 'campusExperiences.0.title' },
-    { label: '家庭成员姓名', value: 'familyMembers.0.name' },
-    { label: '家庭成员关系', value: 'familyMembers.0.relation' },
-  ]},
-];
+const availableBindingFields = computed(() =>
+  currentResume.value ? buildResumeBindingGroups(currentResume.value) : [],
+);
 
-const handleToggleTaskMapping = (task: any) => {
+const handleToggleTaskMapping = (task: RemainingTaskItem) => {
   if (activeTaskMappingId.value === task.id) {
     activeTaskMappingId.value = null;
   } else {
@@ -204,8 +90,9 @@ const handleToggleTaskMapping = (task: any) => {
   }
 };
 
-const handleSaveTaskMapping = async (task: any) => {
-  if (!selectedMappingKey.value || !task.element) return;
+const handleSaveTaskMapping = async (task: RemainingTaskItem) => {
+  if (!task.element || !availableBindingFields.value.some((group) =>
+    group.options.some((option) => option.value === selectedMappingKey.value))) return;
   const selector = generateOptimalSelector(task.element);
   if (!selector) return;
 
@@ -221,23 +108,9 @@ const handleSaveTaskMapping = async (task: any) => {
   setTimeout(() => { copyToastMessage.value = ''; }, 3500);
 };
 
-const pendingChangedRoots = ref<HTMLElement[]>([]);
-
 const notifyStepChange = (newUrl: string, changedNodes: HTMLElement[] = []) => {
+  fillSession.notifyStepChange(newUrl, changedNodes);
   void detectApplicationSuccessDraft();
-  if (isFilling.value) {
-    formFillerEngine.cancelActiveRun('页面步骤已变化');
-    void cancelPreview();
-  }
-  pendingChangedRoots.value = changedNodes;
-  const canIncremental = !!lastPlan.value && newUrl === lastPlan.value.pageUrl && changedNodes.length > 0;
-  stepNotification.value = {
-    show: true,
-    text: canIncremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页',
-  };
-  setTimeout(() => {
-    stepNotification.value.show = false;
-  }, 8000);
 };
 
 // 剪贴板快速搜索与复制提示
@@ -269,7 +142,7 @@ const {
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && isDrawerOpen.value) {
-    if (isFilling.value) formFillerEngine.cancelActiveRun('用户按下 Esc 取消填写');
+    void fillSession.cancel('用户按下 Esc 取消填写');
     isDrawerOpen.value = false;
   }
 };
@@ -279,12 +152,14 @@ const loadActiveResume = async () => {
   const active = await resumeStorage.getActiveResume();
   currentResume.value = active;
   selectedResumeId.value = active.id;
+  return active;
 };
 
 const handleSwitchResume = async (e: Event) => {
   const target = e.target as HTMLSelectElement;
   const newId = target.value;
   if (!newId) return;
+  await fillSession.invalidateResume();
   selectedResumeId.value = newId;
   await resumeStorage.setActiveResumeId(newId);
   await loadActiveResume();
@@ -307,8 +182,7 @@ onMounted(async () => {
   const enhancer = getEnhancerForUrl(window.location.href, document);
   currentAdapterName.value = enhancer?.name || '智能通用决策引擎 (Pipeline v2)';
   await Promise.all([loadActiveResume(), loadFillHistory()]);
-  applicationDraft.value = await applicationDraftStorage.get();
-  await detectApplicationSuccessDraft();
+  await initializeArchive();
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', handleViewportResize);
 });
@@ -320,97 +194,15 @@ onUnmounted(() => {
   cleanupFloatingPosition();
 });
 
-const handleQuickFill = async () => {
+const handleQuickFill = () => {
   isHiddenOnCurrentPage.value = false;
-  if (isFilling.value) return { fillCount: 0, needsUserCount: 0 };
-  isFilling.value = true;
-  fillResult.value = null;
-  if (previewPlan.value?.remoteFrames?.length) {
-    await cancelRemoteFrames(previewPlan.value.remoteFrames);
-  }
-  previewPlan.value = null;
-  operationError.value = '';
-
-  try {
-    const activeResume = await resumeStorage.getActiveResume();
-    currentResume.value = activeResume;
-    selectedResumeId.value = activeResume.id;
-    // 先扫描生成填表规划并展示预览，用户确认后才真正写入（防误填的事前把关）
-    const analyzed = await formFillerEngine.analyze(activeResume);
-    analyzed.remoteFrames = await analyzeRemoteFrames(activeResume.id, { runId: analyzed.runId });
-    setPreviewPlan(analyzed);
-    // 展示实际参与规划的平台增强器；所有站点都通过同一 Pipeline 执行。
-    currentAdapterName.value = analyzed.remoteFrames.length > 0
-      ? `${analyzed.adapterName} + ${analyzed.remoteFrames.length} 个跨域子页面`
-      : analyzed.adapterName;
-    drawerTab.value = 'logs';
-    isDrawerOpen.value = true; // 展开抽屉展示预览清单
-    return {
-      fillCount:
-        analyzed.plan.items.filter((item) => item.action === 'FILL').length +
-        analyzed.remoteFrames.reduce((sum, frame) => sum + frame.highConfidenceCount, 0),
-      needsUserCount:
-        analyzed.plan.items.filter((item) => item.action === 'NEEDS_USER').length +
-        analyzed.remoteFrames.reduce((sum, frame) => sum + frame.needsUserCount, 0),
-    };
-  } catch (err: any) {
-    if (isFillRunAbortedError(err)) {
-      operationError.value = '';
-      return { fillCount: 0, needsUserCount: 0 };
-    }
-    console.error('[OpenJobFill] Analyze error:', err);
-    operationError.value = err?.message || '页面识别失败，请刷新网页后重试';
-    await persistOperationError('analysis', operationError.value);
-    drawerTab.value = 'logs';
-    isDrawerOpen.value = true;
-    throw err;
-  } finally {
-    isFilling.value = false;
-  }
+  return fillSession.analyze();
 };
 
-const handleIncrementalFill = async () => {
-  if (isFilling.value || !lastPlan.value) return;
-  isFilling.value = true;
-  operationError.value = '';
-  stepNotification.value.show = false;
-  try {
-    const activeResume = await resumeStorage.getActiveResume();
-    currentResume.value = activeResume;
-    selectedResumeId.value = activeResume.id;
-    const previousPlan = lastPlan.value;
-    const analyzed = await formFillerEngine.analyzeIncremental(activeResume, previousPlan, {
-      changedRoots: pendingChangedRoots.value.map((node) => node.parentElement || node),
-    });
-    setPreviewPlan(analyzed, previousPlan);
-    currentAdapterName.value = analyzed.adapterName;
-    drawerTab.value = 'logs';
-    isDrawerOpen.value = true;
-  } catch (err: any) {
-    if (isFillRunAbortedError(err)) return;
-    operationError.value = err?.message || '增量识别失败，请重新规划当前页面';
-    await persistOperationError('analysis', operationError.value);
-    drawerTab.value = 'logs';
-    isDrawerOpen.value = true;
-  } finally {
-    isFilling.value = false;
-  }
-};
-
-const handleStepNotification = () => {
-  const canIncremental = !!lastPlan.value
-    && window.location.href === lastPlan.value.pageUrl
-    && pendingChangedRoots.value.length > 0;
-  if (canIncremental) {
-    void handleIncrementalFill();
-  } else {
-    void handleQuickFill();
-  }
-};
+const handleStepNotification = () => { void fillSession.analyzeChangedPage(); };
 
 const handleCancelActiveRun = async () => {
-  formFillerEngine.cancelActiveRun('用户取消填写');
-  await cancelPreview();
+  await fillSession.cancel('用户取消填写');
   copyToastMessage.value = '已停止本次填写';
   setTimeout(() => { copyToastMessage.value = ''; }, 2000);
 };
@@ -445,56 +237,6 @@ const handleUploadResume = () => {
   picker.click();
 };
 
-const handleArchiveJob = async () => {
-  const pageJob = applicationDraft.value?.job || extractPageJobSnapshot();
-  const successDetected = !!applicationDraft.value || isApplicationSuccessPage();
-  if (!jdAnalysis.value && currentResume.value) handleAnalyzeJD();
-  const jobTitle = jdAnalysis.value?.jobTitle || pageJob.jobTitle;
-
-  const confirmationText = successDetected
-    ? `检测到申请成功页面：\n${pageJob.companyName} · ${jobTitle}\n\n是否确认归档为“已投递”？`
-    : `将当前岗位加入投递看板：\n${pageJob.companyName} · ${jobTitle}\n\n请确认你已经完成投递，确认后才会保存为“已投递”。`;
-  if (!window.confirm(confirmationText)) {
-    copyToastMessage.value = '已取消归档，岗位草稿仍保留在当前页面';
-    setTimeout(() => { copyToastMessage.value = ''; }, 2500);
-    return;
-  }
-
-  const record: JobApplicationRecord = {
-    schemaVersion: 2,
-    id: createApplicationId(),
-    clientRequestId: applicationDraft.value?.clientRequestId || createApplicationId('application'),
-    companyName: pageJob.companyName,
-    jobTitle: jobTitle,
-    appliedDate: new Date().toISOString().slice(0, 10),
-    status: 'applied',
-    jobUrl: pageJob.jobUrl,
-    salary: pageJob.salary || (currentResume.value?.basics.expectedSalaryMin ? `${currentResume.value.basics.expectedSalaryMin}k` : ''),
-    resumeVersionTitle: currentResume.value?.title || '默认简历',
-    jdSummary: pageJob.description,
-    notes: `用户确认${successDetected ? '申请成功页面' : '已完成投递'}后由 OpenJobFill 建档。综合技能匹配度: ${jdAnalysis.value?.matchScore || 0}%`,
-    source: successDetected ? 'success_detection' : 'manual',
-    sourceDomain: window.location.hostname,
-    fieldSources: {
-      companyName: pageJob.fieldSources?.companyName === 'structured_data' ? 'structured_data' : 'heuristic',
-      jobTitle: pageJob.fieldSources?.jobTitle === 'structured_data' ? 'structured_data' : 'heuristic',
-      ...(pageJob.salary ? { salary: pageJob.fieldSources?.salary === 'structured_data' ? 'structured_data' as const : 'heuristic' as const } : {}),
-      ...(pageJob.description ? { jdSummary: pageJob.fieldSources?.description === 'structured_data' ? 'structured_data' as const : 'heuristic' as const } : {}),
-    },
-    lockedFields: [],
-    syncState: 'local',
-    createdAt: new Date().toISOString(),
-    confirmedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  await trackerStorage.saveApplication(record);
-  applicationDraft.value = null;
-  await applicationDraftStorage.clear();
-  copyToastMessage.value = `📌 已归档【${record.companyName} - ${record.jobTitle}】至投递看板！`;
-  setTimeout(() => { copyToastMessage.value = ''; }, 3000);
-};
-
 const handleSyncPlatformProfile = async () => {
   const active = await resumeStorage.getActiveResume();
   const extracted = extractPlatformProfile(document, window.location.href);
@@ -504,14 +246,8 @@ const handleSyncPlatformProfile = async () => {
     return;
   }
   if (!window.confirm(`识别到 ${count} 组资料。是否合并到当前简历“${active.title}”？现有非空基本信息不会被空值覆盖。`)) return;
-  const next: StandardResume = {
-    ...active,
-    basics: { ...active.basics, ...extracted.basics },
-    educations: [...active.educations, ...extracted.educations.filter((incoming) => !active.educations.some((item) => item.schoolName === incoming.schoolName && item.degree === incoming.degree))],
-    experiences: [...active.experiences, ...extracted.experiences.filter((incoming) => !active.experiences.some((item) => item.company === incoming.company && item.title === incoming.title && item.startDate === incoming.startDate))],
-    updatedAt: Date.now(),
-  };
-  await resumeStorage.saveResume(next);
+  await fillSession.invalidateResume();
+  await resumeStorage.saveResume(mergePlatformProfile(active, extracted));
   await loadActiveResume();
   copyToastMessage.value = `已从${extracted.platform === 'boss' ? ' BOSS 直聘' : '智联招聘'}页面合并 ${count} 组资料`;
   setTimeout(() => { copyToastMessage.value = ''; }, 3500);
@@ -621,26 +357,59 @@ const handleManualFill = async () => {
   });
 };
 
-// ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
+// UI owns presentation; the session owns all writable fill state.
+const fillSession = useFillSession({
+  loadResume: loadActiveResume,
+  present: (adapterName) => {
+    if (adapterName) currentAdapterName.value = adapterName;
+    drawerTab.value = 'logs';
+    isDrawerOpen.value = true;
+  },
+  persistResult: persistFillHistory,
+  persistError: persistOperationError,
+});
 const {
-  previewPlan,
-  setPreviewPlan,
-  lastPlan,
-  previewFillItems,
-  previewNeedsUserItems,
-  previewWorkflowItems,
-  confirmFill,
-  cancelPreview,
-  handlePreviewManualFill,
-} = useFillPreview(
-  isFilling,
-  fillResult,
-  operationError,
-  drawerTab,
-  persistFillHistory,
-  persistOperationError,
-  handleManualFill,
-);
+  isFilling, fillResult, operationError, stepNotification,
+  previewPlan, previewFillItems, previewNeedsUserItems, previewWorkflowItems, confirmFill,
+} = fillSession;
+const cancelPreview = () => fillSession.cancel();
+const handlePreviewManualFill = async () => {
+  await fillSession.cancel();
+  await handleManualFill();
+};
+
+const {
+  applicationDraft, detectApplicationSuccessDraft, dismissApplicationDraft, handleArchiveJob,
+  initialize: initializeArchive,
+} = useApplicationArchive({
+  getResume: () => currentResume.value,
+  getJD: () => {
+    if (!jdAnalysis.value && currentResume.value) handleAnalyzeJD();
+    return jdAnalysis.value;
+  },
+  presentDraft: () => { isDrawerOpen.value = true; drawerTab.value = 'jdMatch'; },
+  notify: (message) => {
+    copyToastMessage.value = message;
+    setTimeout(() => { copyToastMessage.value = ''; }, 3500);
+  },
+});
+
+const {
+  responsiveDrawerWidth,
+  responsiveDrawerHeight,
+  floatingLayout,
+  floatingRootStyle,
+  loadFloatingPosition,
+  handleViewportResize,
+  startBallDrag,
+  stopBallDrag,
+  startResize,
+  handleResizeMove,
+  stopResize,
+  cleanup: cleanupFloatingPosition,
+  suppressNextBubbleClick,
+  clearSuppressNextBubbleClick,
+} = useFloatingPosition(isDrawerOpen, isFilling);
 
 defineExpose({
   handleQuickFill,
@@ -861,150 +630,25 @@ defineExpose({
           </button>
         </div>
 
-        <!-- TAB 1: 填表日志与徽标 -->
-        <div 
-          id="drawer-panel-logs"
-          role="tabpanel"
-          aria-labelledby="drawer-tab-logs"
-          v-if="drawerTab === 'logs'" 
-          class="flex-1 flex flex-col min-h-0 overflow-hidden"
+        <DrawerFillTab
+          v-if="drawerTab === 'logs'"
+          :current-adapter-name="currentAdapterName"
+          :operation-error="operationError"
+          :is-filling="isFilling"
+          :has-preview="!!previewPlan"
+          :fill-result="fillResult"
+          :preview-fill-items="previewFillItems"
+          :preview-needs-user-items="previewNeedsUserItems"
+          :preview-workflow-items="previewWorkflowItems"
+          @clear-badges="handleClearBadges"
+          @confirm="confirmFill"
+          @preview-manual="handlePreviewManualFill"
+          @analyze="handleQuickFill"
+          @manual="handleManualFill"
+          @upload="handleUploadResume"
+          @cancel="isFilling ? handleCancelActiveRun() : cancelPreview()"
         >
-          <div class="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>当前适配引擎:</span>
-            <span class="font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 truncate max-w-[170px]">
-              {{ currentAdapterName }}
-            </span>
-          </div>
-
-          <div class="p-4 flex-1 overflow-y-auto space-y-3">
-            <div
-              v-if="operationError && !isFilling"
-              role="alert"
-              class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs"
-            >
-              <div class="font-bold flex items-center gap-1.5">
-                <AlertTriangle class="w-4 h-4" aria-hidden="true" />
-                本次操作没有完成
-              </div>
-              <p class="mt-1 leading-relaxed">{{ operationError }}</p>
-            </div>
-
-            <div v-if="!fillResult && !isFilling && !previewPlan && !operationError" class="text-center py-8 text-slate-500">
-              <Sparkles class="w-8 h-8 mx-auto mb-2 text-blue-400 opacity-60" aria-hidden="true" />
-              <p class="font-medium text-xs text-slate-700">点击下方按钮或按 <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono text-xs text-slate-800">Alt+Shift+F</kbd></p>
-              <p class="text-xs text-slate-500 mt-1">先智能识别生成预览，核对无误后一键确认填写</p>
-            </div>
-
-            <div v-if="isFilling" role="status" aria-live="polite" class="text-center py-8 text-slate-600">
-              <div class="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-              <p class="font-medium text-xs">正在分析页面结构并注入行内徽标...</p>
-            </div>
-
-            <!-- Preview Plan (填前预览确认：先识别展示，确认后才写入) -->
-            <div v-if="previewPlan && !fillResult" class="space-y-2">
-              <div
-                :class="[
-                  'p-2.5 rounded-xl border text-xs',
-                  previewFillItems.length > 0
-                    ? 'bg-blue-50 border-blue-200 text-blue-800'
-                    : 'bg-amber-50 border-amber-200 text-amber-800'
-                ]"
-              >
-                <span class="font-bold flex items-center gap-1">
-                  <Eye class="w-4 h-4 text-blue-600" aria-hidden="true" />
-                  {{ previewFillItems.length > 0
-                    ? `已识别 ${previewFillItems.length} 个字段，请核对后确认填写`
-                    : '当前页面没有可自动填写的字段' }}
-                </span>
-                <span v-if="previewNeedsUserItems.length > 0" class="block mt-0.5 text-amber-700">
-                  另有 {{ previewNeedsUserItems.length }} 项需要你手动补充
-                </span>
-                <span v-if="previewWorkflowItems.length > 0" class="block mt-1 text-indigo-700">
-                  确认后还会执行 {{ previewWorkflowItems.length }} 个重复区块流程；只允许编辑、保存和新增，不会提交申请或进入下一步
-                </span>
-              </div>
-
-              <div class="max-h-56 overflow-y-auto space-y-1 pr-1">
-                <div
-                  v-for="item in previewFillItems"
-                  :key="item.id"
-                  class="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 flex items-center justify-between text-xs"
-                >
-                  <span class="font-medium text-slate-700 truncate">{{ item.field.label }}</span>
-                  <span class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">
-                    {{ item.targetValue }}
-                  </span>
-                </div>
-                <div
-                  v-for="action in previewWorkflowItems"
-                  :key="`workflow-${action.groupKey}`"
-                  class="p-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-800"
-                >
-                  <span class="font-medium">{{ action.summary }}</span>
-                </div>
-                <div
-                  v-for="item in previewNeedsUserItems"
-                  :key="item.id"
-                  class="p-2 rounded-lg bg-amber-50/60 border border-amber-100 flex items-center text-xs"
-                >
-                  <span class="text-amber-700 truncate">需手动：{{ item.field.label }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Result Logs -->
-            <div v-if="fillResult" class="space-y-2">
-              <div
-                :class="[
-                  'flex items-center justify-between p-2.5 rounded-xl border text-xs',
-                  fillResult.filledCount > 0
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : 'bg-amber-50 border-amber-200 text-amber-800'
-                ]"
-              >
-                <span class="font-bold flex items-center gap-1">
-                  <CheckCircle class="w-4 h-4 text-emerald-600" aria-hidden="true" />
-                  {{ fillResult.filledCount > 0
-                    ? `成功填入 ${fillResult.filledCount} 项（已高亮）`
-                    : '本次没有字段填写成功' }}
-                </span>
-                <span class="text-slate-500">耗时 {{ fillResult.durationMs }}ms</span>
-              </div>
-
-              <div class="text-xs font-semibold text-slate-700 pt-1 flex items-center justify-between">
-                <span>字段填入详情：</span>
-                <button
-                  type="button"
-                  @click="handleClearBadges"
-                  class="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  <span>清除徽标</span>
-                </button>
-              </div>
-
-              <div class="max-h-56 overflow-y-auto space-y-1 pr-1">
-                <div
-                  v-for="(log, idx) in fillResult.logs"
-                  :key="idx"
-                  class="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between text-xs"
-                >
-                  <div class="flex items-center gap-1.5 truncate max-w-[190px]">
-                    <span
-                      :class="[
-                        'w-1.5 h-1.5 rounded-full flex-shrink-0',
-                        log.status === 'success' ? 'bg-emerald-500' : 'bg-amber-400'
-                      ]"
-                    ></span>
-                    <span class="font-medium text-slate-700 truncate">{{ log.label }}</span>
-                  </div>
-                  <span class="text-slate-500 truncate max-w-[110px]" :title="log.value">
-                    {{ log.value || log.message }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
+          <template #history>
             <DrawerHistoryTab
               :records="fillHistoryRecords"
               :loading="isHistoryLoading"
@@ -1018,77 +662,8 @@ defineExpose({
               @replay-run="handleRunReplay"
               @clear="handleClearFillHistory"
             />
-          </div>
-
-          <!-- Footer Action Button：预览确认态 -->
-          <footer v-if="previewPlan && !fillResult" class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
-            <button
-              v-if="previewFillItems.length > 0 || previewWorkflowItems.length > 0"
-              type="button"
-              @click="confirmFill"
-              :disabled="isFilling"
-              class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-emerald-500"
-            >
-              <CheckCircle class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{{ isFilling ? '正在填写...' : `确认填写 ${previewFillItems.length} 项${previewWorkflowItems.length ? '并执行区块流程' : ''}` }}</span>
-            </button>
-            <button
-              v-else
-              type="button"
-              @click="handlePreviewManualFill"
-              class="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-amber-500"
-            >
-              <Pipette class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>改用手动点选填写</span>
-            </button>
-            <button
-              type="button"
-              @click="isFilling ? handleCancelActiveRun() : cancelPreview()"
-              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              {{ isFilling ? '停止' : '取消' }}
-            </button>
-          </footer>
-
-          <!-- Footer Action Button：初始态 -->
-          <footer v-else class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
-            <button
-              type="button"
-              @click="handleQuickFill"
-              :disabled="isFilling"
-              class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              <Sparkles class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{{ isFilling ? '正在识别...' : '一键识别并预览填写 (Alt+Shift+F)' }}</span>
-            </button>
-            <button
-              v-if="isFilling"
-              type="button"
-              @click="handleCancelActiveRun"
-              class="px-3 py-2 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-xl font-bold transition active:scale-95 focus-visible:ring-2 focus-visible:ring-rose-500"
-            >
-              停止
-            </button>
-            <button
-              type="button"
-              @click="handleManualFill"
-              title="点选手动填充：点击网页上的输入框，从简历字段中选一个填入（自动填充漏填/填错时补救）"
-              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-1.5 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              <Pipette class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>手动</span>
-            </button>
-            <button
-              type="button"
-              @click="handleUploadResume"
-              title="选择本地 PDF/Word 简历，并注入当前网页的简历附件上传区"
-              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-1.5 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              <Paperclip class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>附件</span>
-            </button>
-          </footer>
-        </div>
+          </template>
+        </DrawerFillTab>
 
         <!-- TAB: 待办与核对 (Review) -->
         <DrawerReviewTab
@@ -1096,177 +671,24 @@ defineExpose({
           :fill-result="fillResult"
           :active-task-mapping-id="activeTaskMappingId"
           :selected-mapping-key="selectedMappingKey"
-          :available-binding-fields="AVAILABLE_BINDING_FIELDS"
+          :available-binding-fields="availableBindingFields"
           @focus-task="handleFocusTaskElement"
           @toggle-mapping="handleToggleTaskMapping"
           @save-mapping="handleSaveTaskMapping"
           @update:selected-mapping-key="selectedMappingKey = $event"
         />
 
-        <!-- TAB 2: 岗位 JD 匹配度分析 -->
-        <div 
-          id="drawer-panel-jd"
-          role="tabpanel"
-          aria-labelledby="drawer-tab-jd"
-          v-if="drawerTab === 'jdMatch'" 
-          class="flex-1 flex flex-col min-h-0 overflow-hidden"
-        >
-          <div class="p-4 flex-1 overflow-y-auto space-y-3.5">
-            <div
-              v-if="applicationDraft"
-              class="p-3 rounded-xl border border-emerald-200 bg-emerald-50/80 space-y-2"
-              role="status"
-              aria-live="polite"
-            >
-              <div class="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
-                <CheckCircle class="w-4 h-4 text-emerald-600" aria-hidden="true" />
-                检测到申请成功，已生成投递草稿
-              </div>
-              <p class="text-[11px] text-emerald-900 truncate" :title="`${applicationDraft.job.companyName} · ${applicationDraft.job.jobTitle}`">
-                {{ applicationDraft.job.companyName }} · {{ applicationDraft.job.jobTitle }}
-              </p>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  @click="handleArchiveJob"
-                  class="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  确认归档为已投递
-                </button>
-                <button
-                  type="button"
-                  @click="dismissApplicationDraft"
-                  class="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-200 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  稍后
-                </button>
-              </div>
-            </div>
-
-            <!-- Job Title & Score Gauge -->
-            <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-slate-500">识别到的岗位名称:</span>
-                <button 
-                  type="button" 
-                  @click="handleAnalyzeJD" 
-                  class="text-blue-600 font-bold hover:underline"
-                >
-                  重新分析
-                </button>
-              </div>
-              <div class="font-bold text-slate-900 text-sm truncate">
-                {{ jdAnalysis?.jobTitle || '正在识别页面岗位...' }}
-              </div>
-
-              <!-- Score Bar -->
-              <div class="pt-1">
-                <div class="flex items-center justify-between text-xs mb-1">
-                  <span class="font-semibold text-slate-700">简历与岗位综合匹配度</span>
-                  <span 
-                    :class="[
-                      'font-extrabold text-sm',
-                      (jdAnalysis?.matchScore || 0) >= 80 ? 'text-emerald-600' : (jdAnalysis?.matchScore || 0) >= 60 ? 'text-amber-600' : 'text-rose-600'
-                    ]"
-                  >
-                    {{ jdAnalysis?.matchScore || 0 }}%
-                  </span>
-                </div>
-                <div class="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
-                  <div 
-                    class="h-full transition-all duration-500 rounded-full"
-                    :class="(jdAnalysis?.matchScore || 0) >= 80 ? 'bg-emerald-500' : (jdAnalysis?.matchScore || 0) >= 60 ? 'bg-amber-500' : 'bg-rose-500'"
-                    :style="{ width: `${jdAnalysis?.matchScore || 0}%` }"
-                  ></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Matched Keywords -->
-            <div class="space-y-1.5">
-              <div class="text-xs font-bold text-slate-700 flex items-center gap-1">
-                <CheckCircle class="w-3.5 h-3.5 text-emerald-600" />
-                <span>已命中的核心技能 ({{ jdAnalysis?.matchedKeywords.length || 0 }})</span>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <span
-                  v-for="kw in jdAnalysis?.matchedKeywords"
-                  :key="kw"
-                  class="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold"
-                >
-                  {{ kw }}
-                </span>
-                <span v-if="!jdAnalysis?.matchedKeywords?.length" class="text-slate-400 text-xs italic">
-                  未检测到完全一致的技能标签
-                </span>
-              </div>
-            </div>
-
-            <!-- Missing Keywords (Click to Copy) -->
-            <div class="space-y-1.5">
-              <div class="text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span class="flex items-center gap-1">
-                  <AlertTriangle class="w-3.5 h-3.5 text-amber-500" />
-                  <span>岗位提及但简历中缺失的关键词 ({{ jdAnalysis?.missingKeywords.length || 0 }})</span>
-                </span>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="kw in jdAnalysis?.missingKeywords"
-                  :key="kw"
-                  type="button"
-                  @click="handleCopyKeyword(kw)"
-                  class="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                  :title="`点击复制【${kw}】`"
-                >
-                  <span>{{ kw }}</span>
-                  <Copy class="w-2.5 h-2.5 opacity-60" />
-                </button>
-                <span v-if="!jdAnalysis?.missingKeywords?.length" class="text-emerald-600 text-xs font-medium">
-                  🎉 太棒了，简历已覆盖当前 JD 提及的所有关键技术！
-                </span>
-              </div>
-              <p class="text-xs text-slate-400">💡 提示：点击缺失标签可快速复制，建议在自我介绍或回答中补充以提高 ATS 筛选率。</p>
-            </div>
-
-            <!-- Diagnostic Tips -->
-            <div class="p-3 bg-blue-50/60 border border-blue-100 rounded-xl space-y-1.5">
-              <div class="text-xs font-bold text-blue-900 flex items-center gap-1">
-                <Lightbulb class="w-3.5 h-3.5 text-blue-600" />
-                <span>智能诊断与优化建议</span>
-              </div>
-              <ul class="text-xs text-blue-800 space-y-1 list-disc list-inside">
-                <li v-for="(tip, idx) in jdAnalysis?.diagnosticTips" :key="idx">
-                  {{ tip }}
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <!-- Tab 2 Footer -->
-          <footer class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
-            <button
-              type="button"
-              @click="handleToggleJDHighlight"
-              :class="[
-                'px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition focus-visible:ring-2 focus-visible:ring-amber-500 border',
-                isHighlightingJD ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-              ]"
-              title="在当前招聘网页原文上用荧光笔标记技能词"
-            >
-              <Highlighter class="w-3.5 h-3.5" :class="isHighlightingJD ? 'text-amber-600 fill-amber-500' : 'text-slate-500'" />
-              <span>{{ isHighlightingJD ? '清除荧光' : '网页荧光笔' }}</span>
-            </button>
-            <button
-              type="button"
-              @click="handleArchiveJob"
-              class="flex-1 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold flex items-center justify-center gap-1 shadow-md shadow-blue-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-blue-500 text-xs"
-            >
-              <BookmarkPlus class="w-3.5 h-3.5" />
-              <span>归档本岗位</span>
-            </button>
-          </footer>
-        </div>
+        <DrawerJDTab
+          v-if="drawerTab === 'jdMatch'"
+          :jd-analysis="jdAnalysis"
+          :application-draft="applicationDraft"
+          :is-highlighting-j-d="isHighlightingJD"
+          @archive="handleArchiveJob"
+          @dismiss-draft="dismissApplicationDraft"
+          @analyze="handleAnalyzeJD"
+          @toggle-highlight="handleToggleJDHighlight"
+          @copy-keyword="handleCopyKeyword"
+        />
 
         <!-- TAB 3: 简历速查剪贴板 -->
         <DrawerClipboardTab

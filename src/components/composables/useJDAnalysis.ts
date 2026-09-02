@@ -1,7 +1,7 @@
 import { ref, type Ref } from 'vue';
 import { analyzeJDMatch, clearJDHighlights, highlightJDOnWebpage, type JDAnalysisResult } from '@/core/matcher/jdMatcher';
 import type { StandardResume } from '@/types/resume';
-import type { DrawerTab } from './useFillPreview';
+import type { DrawerTab } from '@/types/floatingBall';
 
 /** JD 匹配分析与网页标注状态边界。 */
 export function useJDAnalysis(
