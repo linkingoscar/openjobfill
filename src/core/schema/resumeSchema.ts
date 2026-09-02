@@ -90,6 +90,7 @@ function migrateV4ToV5(payload: UnknownRecord): UnknownRecord {
   if (!isRecord(migrated.fieldMeta)) migrated.fieldMeta = {};
   if (migrated.variantType !== 'job-variant' && migrated.variantType !== 'master') migrated.variantType = 'master';
   if (!Array.isArray(migrated.variantOverrides)) migrated.variantOverrides = [];
+  if (!isRecord(migrated.variantOrdering)) migrated.variantOrdering = {};
   if (Array.isArray(migrated.qaBank)) {
     migrated.qaBank = migrated.qaBank.map((raw) => {
       if (!isRecord(raw)) return raw;
@@ -318,6 +319,17 @@ function parseVariantContext(payload: UnknownRecord): UnknownRecord | undefined 
   return context;
 }
 
+function parseVariantOrdering(payload: UnknownRecord): UnknownRecord {
+  if (!isRecord(payload.variantOrdering)) return {};
+  const result: UnknownRecord = {};
+  for (const key of ['projects', 'experiences']) {
+    const raw = payload.variantOrdering[key];
+    if (!Array.isArray(raw)) continue;
+    result[key] = Array.from(new Set(raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)));
+  }
+  return result;
+}
+
 export function parseResumePayload(input: unknown, options: ResumeParseOptions = {}): ResumeParseResult {
   const { payload, migratedFrom } = migrateResumePayload(input);
   const now = options.now ?? Date.now();
@@ -379,6 +391,7 @@ export function parseResumePayload(input: unknown, options: ResumeParseOptions =
   resumeWithV5.parentResumeId = parentResumeId;
   resumeWithV5.variantContext = parseVariantContext(payload);
   resumeWithV5.variantOverrides = variantOverrides;
+  resumeWithV5.variantOrdering = parseVariantOrdering(payload);
 
   if (options.strict !== false && issues.length > 0) throw new ResumeSchemaError(`简历格式无效：${issues[0]}`, issues);
   return { resume, migratedFrom, issues };
