@@ -1,4 +1,5 @@
 import type { FieldDescriptor, FieldType, FieldSectionInfo } from '../../types/pipeline';
+import type { SiteProfileControlKind } from '../../types/siteProfile';
 import {
   findAssociatedLabelText, 
   getElementWindow, 
@@ -60,12 +61,18 @@ export interface FormRootDiagnostic {
   score: number;
   selected: boolean;
   fallback: boolean;
+  profileHint: boolean;
 }
 
 export interface PageScanDiagnostics {
   documentsScanned: number;
   fallbackDocumentCount: number;
   formRoots: FormRootDiagnostic[];
+}
+
+export interface PageAnalysisHints {
+  formRootSelectors?: readonly string[];
+  controlSelectors?: Partial<Record<SiteProfileControlKind, readonly string[]>>;
 }
 
 export class PageAnalyzer {
@@ -86,7 +93,7 @@ export class PageAnalyzer {
   /**
    * 深度扫描页面表单控件，生成结构化的 FieldDescriptor[]
    */
-  analyzePage(container: Document | HTMLElement = document): FieldDescriptor[] {
+  analyzePage(container: Document | HTMLElement = document, hints: PageAnalysisHints = {}): FieldDescriptor[] {
     const descriptors: FieldDescriptor[] = [];
     const visitedElements = new Set<HTMLElement>();
     this.lastDiagnostics = { documentsScanned: 0, fallbackDocumentCount: 0, formRoots: [] };
@@ -131,8 +138,12 @@ export class PageAnalyzer {
     }
 
     const allCandidateElements: HTMLElement[] = [];
+    const hintedControlSelectors = Object.entries(hints.controlSelectors || {})
+      .filter(([kind]) => kind !== 'upload')
+      .flatMap(([, selectors]) => selectors || []);
     const customComponentSelector = [
       ...CONTROL_TRIGGER_SELECTORS,
+      ...hintedControlSelectors,
       '[role="combobox"]', '[class*="select-selection"]', '[class*="cascader"]',
       '.datepicker-input', '.input-layer', '[role="radio"]', '[role="checkbox"]', '[aria-pressed]',
     ].join(',');
@@ -142,7 +153,12 @@ export class PageAnalyzer {
       try {
         const availableRoots = getAllOpenRoots(targetDoc);
         const roots = targetDoc.nodeType === 9
-          ? this.selectFormRoots(availableRoots, documentIndex)
+          ? this.selectFormRoots(
+              availableRoots,
+              documentIndex,
+              hints.formRootSelectors || [],
+              hintedControlSelectors,
+            )
           : availableRoots;
         const nativeSelector = 'input, textarea, select, [contenteditable="true"]';
         const nativeInputs = roots.flatMap((root) => [
@@ -183,7 +199,7 @@ export class PageAnalyzer {
       visitedElements.add(el);
       fieldCounter++;
 
-      const type = this.detectFieldType(el);
+      const type = this.detectFieldType(el, hints.controlSelectors);
       const label = findAssociatedLabelText(el);
       const placeholder = el.getAttribute('placeholder') || '';
       const name = el.getAttribute('name') || '';
@@ -230,8 +246,23 @@ export class PageAnalyzer {
     return `${root.tagName.toLowerCase()}${id}${classes ? `.${classes}` : ''}`.slice(0, 180);
   }
 
-  private scoreFormRoot(root: HTMLElement): Omit<FormRootDiagnostic, 'documentIndex' | 'selected' | 'fallback'> {
-    const inputCount = root.querySelectorAll(FORM_CONTROL_SELECTOR).length;
+  private countFormControls(root: ParentNode, profileControlSelectors: readonly string[]): number {
+    const controls = new Set<HTMLElement>(root.querySelectorAll<HTMLElement>(FORM_CONTROL_SELECTOR));
+    for (const selector of profileControlSelectors) {
+      try {
+        for (const element of Array.from(root.querySelectorAll<HTMLElement>(selector))) controls.add(element);
+      } catch {
+        // A stale site hint must not break the generic form-root scorer.
+      }
+    }
+    return controls.size;
+  }
+
+  private scoreFormRoot(
+    root: HTMLElement,
+    profileControlSelectors: readonly string[],
+  ): Omit<FormRootDiagnostic, 'documentIndex' | 'selected' | 'fallback' | 'profileHint'> {
+    const inputCount = this.countFormControls(root, profileControlSelectors);
     const structuralText = `${root.id} ${root.className} ${root.getAttribute('aria-label') || ''}`.toLowerCase();
     const visibleText = (root.textContent || '').replace(/\s+/g, ' ').slice(0, 5000).toLowerCase();
     const combined = `${structuralText} ${visibleText}`;
@@ -270,24 +301,48 @@ export class PageAnalyzer {
     };
   }
 
-  private selectFormRoots(roots: ParentNode[], documentIndex: number): ParentNode[] {
+  private selectFormRoots(
+    roots: ParentNode[],
+    documentIndex: number,
+    profileRootSelectors: readonly string[],
+    profileControlSelectors: readonly string[],
+  ): ParentNode[] {
     const candidates = new Set<HTMLElement>();
+    const profileCandidates = new Set<HTMLElement>();
     for (const root of roots) {
       if (root instanceof HTMLElement && root.matches(FORM_ROOT_SELECTOR)) candidates.add(root);
       for (const candidate of Array.from(root.querySelectorAll<HTMLElement>(FORM_ROOT_SELECTOR))) {
         candidates.add(candidate);
       }
+      for (const selector of profileRootSelectors) {
+        try {
+          if (root instanceof HTMLElement && root.matches(selector)) {
+            candidates.add(root);
+            profileCandidates.add(root);
+          }
+          for (const candidate of Array.from(root.querySelectorAll<HTMLElement>(selector))) {
+            candidates.add(candidate);
+            profileCandidates.add(candidate);
+          }
+        } catch {
+          // Bundled selectors are validated separately; a stale selector must not break generic scanning.
+        }
+      }
     }
 
     const scored = [...candidates]
-      .map((element) => ({ element, ...this.scoreFormRoot(element) }))
+      .map((element) => ({
+        element,
+        profileHint: profileCandidates.has(element),
+        ...this.scoreFormRoot(element, profileControlSelectors),
+      }))
       .filter((candidate) => candidate.inputCount > 0)
-      .sort((a, b) => b.score - a.score);
-    const reliable = scored.filter((candidate) => candidate.score >= 8
-      && (candidate.inputCount >= 2 || candidate.sectionMatchCount > 0));
+      .sort((a, b) => Number(b.profileHint) - Number(a.profileHint) || b.score - a.score);
+    const reliable = scored.filter((candidate) => candidate.profileHint || (candidate.score >= 8
+      && (candidate.inputCount >= 2 || candidate.sectionMatchCount > 0)));
     const selected: HTMLElement[] = [];
     for (const candidate of reliable) {
-      if (selected.some((root) => root.contains(candidate.element))) continue;
+      if (selected.some((root) => root.contains(candidate.element) || candidate.element.contains(root))) continue;
       selected.push(candidate.element);
     }
 
@@ -300,6 +355,7 @@ export class PageAnalyzer {
         score: candidate.score,
         selected: selected.includes(candidate.element),
         fallback: false,
+        profileHint: candidate.profileHint,
       });
     }
 
@@ -317,11 +373,12 @@ export class PageAnalyzer {
     this.lastDiagnostics.formRoots.push({
       documentIndex,
       root: 'document',
-      inputCount: roots.reduce((total, root) => total + root.querySelectorAll(FORM_CONTROL_SELECTOR).length, 0),
+      inputCount: roots.reduce((total, root) => total + this.countFormControls(root, profileControlSelectors), 0),
       sectionMatchCount: 0,
       score: 0,
       selected: true,
       fallback: true,
+      profileHint: false,
     });
     return roots;
   }
@@ -344,7 +401,21 @@ export class PageAnalyzer {
     return false;
   }
 
-  private detectFieldType(el: HTMLElement): FieldType {
+  private detectFieldType(
+    el: HTMLElement,
+    profileControlSelectors?: Partial<Record<SiteProfileControlKind, readonly string[]>>,
+  ): FieldType {
+    for (const [kind, selectors] of Object.entries(profileControlSelectors || {}) as [SiteProfileControlKind, readonly string[]][]) {
+      if (kind === 'upload') continue;
+      const matches = selectors.some((selector) => {
+        try {
+          return el.matches(selector);
+        } catch {
+          return false;
+        }
+      });
+      if (matches) return kind === 'input' ? 'text' : kind;
+    }
     if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
       return 'contenteditable';
     }

@@ -2,7 +2,11 @@ import type { CustomQABankItem } from './resume';
 import type { FillLogItem } from './adapter';
 import type { FieldSafetyInfo } from '../core/pipeline/fieldSafety';
 import type { CustomRuleMatchMethod } from './rule';
-import type { RepeatableWorkflowConfig, SiteProfileVerificationStatus } from './siteProfile';
+import type {
+  RepeatableWorkflowConfig,
+  SiteProfileControlKind,
+  SiteProfileVerificationStatus,
+} from './siteProfile';
 
 export type FieldType =
   | 'text'
@@ -190,6 +194,10 @@ export interface PlatformEnhancer {
     version: number;
     verificationStatus: SiteProfileVerificationStatus;
   };
+  /** Site-profile structural hints used to constrain page scanning. */
+  formRootSelectors?: string[];
+  /** Site-specific non-native controls that the generic scanner would miss. */
+  controlSelectors?: Partial<Record<SiteProfileControlKind, string[]>>;
   matches(url: string, doc?: Document): boolean;
   
   // 增强字段属性识别

@@ -51,6 +51,20 @@ function queryFirstVisible(root: ParentNode, selectors: string[]): HTMLElement |
   return null;
 }
 
+function queryVisible(root: ParentNode, selectors: string[]): HTMLElement[] {
+  const candidates = new Set<HTMLElement>();
+  for (const selector of selectors) {
+    try {
+      for (const candidate of Array.from(root.querySelectorAll<HTMLElement>(selector))) {
+        if (isElementVisible(candidate)) candidates.add(candidate);
+      }
+    } catch {
+      // Continue to the next bundled selector.
+    }
+  }
+  return [...candidates];
+}
+
 function getVisibleCards(root: HTMLElement, config: RepeatableWorkflowConfig): HTMLElement[] {
   for (const selector of config.itemSelectors) {
     try {
@@ -63,15 +77,35 @@ function getVisibleCards(root: HTMLElement, config: RepeatableWorkflowConfig): H
   return [];
 }
 
-function findExactAction(root: ParentNode, labels: string[]): HTMLElement | null {
+function findExactAction(root: ParentNode, labels: string[], selectors: string[] = []): HTMLElement | null {
   const allowed = new Set(labels.map(normalizeText));
-  return Array.from(root.querySelectorAll<HTMLElement>(CONTROL_SELECTOR)).find((candidate) => {
+  const preferred = selectors.length ? queryVisible(root, selectors) : [];
+  const fallback = Array.from(root.querySelectorAll<HTMLElement>(CONTROL_SELECTOR));
+  return [...new Set([...preferred, ...fallback])].find((candidate) => {
     if (!isElementVisible(candidate)) return false;
     const text = normalizeText(candidate.textContent || candidate.getAttribute('aria-label') || '');
     if (!allowed.has(text) || DANGEROUS_ACTION.test(text)) return false;
-    if (candidate instanceof HTMLButtonElement && candidate.type === 'submit') return false;
-    return candidate.getAttribute('aria-disabled') !== 'true' && !candidate.hasAttribute('disabled');
+    const button = candidate instanceof HTMLButtonElement ? candidate : candidate.closest('button');
+    if (button?.type === 'submit') return false;
+    const control = candidate.matches(CONTROL_SELECTOR) ? candidate : candidate.closest<HTMLElement>(CONTROL_SELECTOR);
+    return candidate.getAttribute('aria-disabled') !== 'true'
+      && !candidate.hasAttribute('disabled')
+      && control?.getAttribute('aria-disabled') !== 'true'
+      && !control?.hasAttribute('disabled');
   }) || null;
+}
+
+function sectionTitleMatches(root: HTMLElement, config: RepeatableWorkflowConfig): boolean {
+  if (!config.titleLabels?.length) return true;
+  if (root.getAttribute('data-section') === config.sectionKey) return true;
+  const allowed = config.titleLabels.map(normalizeText);
+  const titleCandidates = config.titleSelectors?.length
+    ? queryVisible(root, config.titleSelectors)
+    : [root];
+  return titleCandidates.some((candidate) => {
+    const text = normalizeText(candidate.textContent || candidate.getAttribute('aria-label') || '');
+    return allowed.some((label) => text === label || text.includes(label));
+  });
 }
 
 function editorSignature(root: HTMLElement): string {
@@ -104,8 +138,9 @@ async function waitFor(
 export class RepeatableSectionWorkflowRunner {
   findSectionRoot(config: RepeatableWorkflowConfig): HTMLElement | null {
     for (const doc of getAllDocumentsAcrossIframes()) {
-      const root = queryFirstVisible(doc, config.rootSelectors);
-      if (root) return root;
+      for (const root of queryVisible(doc, config.rootSelectors)) {
+        if (sectionTitleMatches(root, config)) return root;
+      }
     }
     return null;
   }
@@ -120,7 +155,11 @@ export class RepeatableSectionWorkflowRunner {
     if (queryFirstVisible(root, [EDITABLE_SELECTOR])) return true;
     const cards = getVisibleCards(root, config);
     const scope = cards[cards.length - 1] || root;
-    const edit = findExactAction(scope, config.editButtonLabels || ['编辑', '修改', 'Edit']);
+    const edit = findExactAction(
+      scope,
+      config.editButtonLabels || ['编辑', '修改', 'Edit'],
+      config.editButtonSelectors,
+    );
     if (!edit) return false;
     simulateClick(edit);
     return waitFor(() => !!queryFirstVisible(root, [EDITABLE_SELECTOR]), signal);
@@ -129,8 +168,15 @@ export class RepeatableSectionWorkflowRunner {
   private async save(root: HTMLElement, config: RepeatableWorkflowConfig, signal?: AbortSignal): Promise<boolean> {
     const scope = this.getEditableScope(root, config);
     const before = editorSignature(scope);
-    const save = findExactAction(scope, config.saveButtonLabels || ['保存', '确定', '完成', 'Save'])
-      || findExactAction(root, config.saveButtonLabels || ['保存', '确定', '完成', 'Save']);
+    const save = findExactAction(
+      scope,
+      config.saveButtonLabels || ['保存', '确定', '完成', 'Save'],
+      config.saveButtonSelectors,
+    ) || findExactAction(
+      root,
+      config.saveButtonLabels || ['保存', '确定', '完成', 'Save'],
+      config.saveButtonSelectors,
+    );
     if (!save) return false;
     simulateClick(save);
     return waitFor(() => {
@@ -142,7 +188,11 @@ export class RepeatableSectionWorkflowRunner {
   private async add(root: HTMLElement, config: RepeatableWorkflowConfig, signal?: AbortSignal): Promise<boolean> {
     const previousCount = getVisibleCards(root, config).length;
     const previousSignature = editorSignature(root);
-    const add = findExactAction(root, config.addButtonLabels || ['新增', '添加', '新增经历', '添加经历', 'Add']);
+    const add = findExactAction(
+      root,
+      config.addButtonLabels || ['新增', '添加', '新增经历', '添加经历', 'Add'],
+      config.addButtonSelectors,
+    );
     if (!add) return false;
     simulateClick(add);
     return waitFor(() => {

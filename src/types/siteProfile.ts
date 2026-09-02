@@ -8,6 +8,24 @@ export type SiteProfileVerificationStatus =
 
 export type RepeatableSectionKey = 'education' | 'experience' | 'project' | 'family';
 export type RepeatableWorkflowMode = 'parallel' | 'save-before-next' | 'single-card';
+export type SiteProfileControlKind =
+  | 'input'
+  | 'textarea'
+  | 'radio'
+  | 'checkbox'
+  | 'select'
+  | 'cascader'
+  | 'date'
+  | 'upload';
+
+/** Structural evidence extracted from a known application form implementation. */
+export interface SiteProfileStructure {
+  formRootSelectors: string[];
+  titleSelectors?: string[];
+  labelSelectors?: string[];
+  controlSelectors?: Partial<Record<SiteProfileControlKind, string[]>>;
+  evidenceSource?: 'offerlink-static-1.8.5';
+}
 
 /**
  * Declarative, non-executable workflow description. Action controls are selected
@@ -18,6 +36,11 @@ export interface RepeatableWorkflowConfig {
   mode: RepeatableWorkflowMode;
   rootSelectors: string[];
   itemSelectors: string[];
+  titleSelectors?: string[];
+  titleLabels?: string[];
+  editButtonSelectors?: string[];
+  saveButtonSelectors?: string[];
+  addButtonSelectors?: string[];
   editButtonLabels?: string[];
   saveButtonLabels?: string[];
   addButtonLabels?: string[];
@@ -43,6 +66,7 @@ export interface SiteProfile {
   /** All selectors must exist; use this for otherwise generic framework classes. */
   detectAll?: string[];
   baseEnhancerId?: string;
+  structure?: SiteProfileStructure;
   fieldMappings?: Record<string, string>;
   repeaterConfigs?: Partial<Record<RepeatableSectionKey, PlatformRepeaterConfig>>;
   workflows?: RepeatableWorkflowConfig[];

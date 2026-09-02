@@ -5,6 +5,7 @@ import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../uti
 import { prepareEditableSections } from './expansionHelper';
 import { throwIfAborted } from '../pipeline/runContext';
 import type { RepeatableSectionKey, RepeatableWorkflowConfig, RepeatableWorkflowMode } from '../../types/siteProfile';
+import { repeatableSectionWorkflowRunner } from './sectionWorkflow';
 
 const GROUP_KEYWORDS: Record<RepeatableSectionKey, string[]> = {
   education: ['教育', '学历', 'education'],
@@ -58,14 +59,7 @@ export class SectionEngine {
   }
 
   private hasWorkflowRoot(workflow: RepeatableWorkflowConfig): boolean {
-    return getAllDocumentsAcrossIframes().some((doc) => workflow.rootSelectors.some((selector) => {
-      try {
-        const root = doc.querySelector<HTMLElement>(selector);
-        return !!root && isElementVisible(root);
-      } catch {
-        return false;
-      }
-    }));
+    return !!repeatableSectionWorkflowRunner.findSectionRoot(workflow);
   }
 
   /** Build a read-only preparation plan. This method never clicks or writes the page. */

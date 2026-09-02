@@ -64,4 +64,19 @@ describe('受控重复区块状态机', () => {
     expect(result.steps.at(-1)?.state).toBe('BLOCKED');
     expect(submitted).toBe(false);
   });
+
+  it('站点画像命中 submit 内层元素时也不得绕过安全门禁', async () => {
+    document.body.innerHTML = `
+      <section data-section="education">
+        <div class="record-card"><input><button type="submit"><span class="save-label">保存</span></button></div>
+      </section>`;
+    let submitted = false;
+    document.querySelector('button')!.addEventListener('click', () => { submitted = true; });
+    const result = await new RepeatableSectionWorkflowRunner().run({
+      ...CONFIG,
+      saveButtonSelectors: ['.save-label'],
+    }, 1, async () => ({ canAdvance: true }));
+    expect(result.success).toBe(false);
+    expect(submitted).toBe(false);
+  });
 });

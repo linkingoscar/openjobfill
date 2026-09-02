@@ -193,7 +193,10 @@ export class FormFillerEngine {
     // 4. 阶段一：页面全要素深度扫描 (Page Analyzer 重新扫描最新挂载的 DOM 节点)
     run.throwIfAborted();
     const scanStartedAt = Date.now();
-    const descriptors = pageAnalyzer.analyzePage(document);
+    const descriptors = pageAnalyzer.analyzePage(document, {
+      formRootSelectors: enhancer?.formRootSelectors,
+      controlSelectors: enhancer?.controlSelectors,
+    });
     const formRoots = pageAnalyzer.getLastDiagnostics();
     const formScanMs = Date.now() - scanStartedAt;
     SnapshotRecorder.record('scan', {
@@ -338,12 +341,17 @@ export class FormFillerEngine {
       const scanDiagnostics: PageScanDiagnostics[] = [];
       const descriptors = roots.length > 0
         ? roots.flatMap((root) => {
-            const fields = pageAnalyzer.analyzePage(root);
+            const fields = pageAnalyzer.analyzePage(root, {
+              controlSelectors: enhancer?.controlSelectors,
+            });
             scanDiagnostics.push(pageAnalyzer.getLastDiagnostics());
             return fields;
           })
         : (() => {
-            const fields = pageAnalyzer.analyzePage(document);
+            const fields = pageAnalyzer.analyzePage(document, {
+              formRootSelectors: enhancer?.formRootSelectors,
+              controlSelectors: enhancer?.controlSelectors,
+            });
             scanDiagnostics.push(pageAnalyzer.getLastDiagnostics());
             return fields;
           })();
@@ -476,7 +484,10 @@ export class FormFillerEngine {
         if (pageChanged) {
           run.throwIfAborted();
           const customRule = await ruleStorage.findMatchingRuleForUrl(analyzed.pageUrl);
-          const descriptors = pageAnalyzer.analyzePage(document);
+          const descriptors = pageAnalyzer.analyzePage(document, {
+            formRootSelectors: enhancer?.formRootSelectors,
+            controlSelectors: enhancer?.controlSelectors,
+          });
           effectivePlan = planGenerator.generatePlan(descriptors, resume, enhancer, customRule?.fields || []);
           await applyAIFallbackToPlan(effectivePlan, resume, run.signal);
         }
@@ -517,7 +528,9 @@ export class FormFillerEngine {
             getSectionRecordCount(resume, action.groupKey),
             async (recordIndex, editableScope) => {
               run.throwIfAborted();
-              const descriptors = pageAnalyzer.analyzePage(editableScope);
+              const descriptors = pageAnalyzer.analyzePage(editableScope, {
+                controlSelectors: enhancer?.controlSelectors,
+              });
               for (const field of descriptors) {
                 field.section = { type: action.groupKey, index: recordIndex, rawTitle: action.groupKey };
               }
