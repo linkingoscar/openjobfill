@@ -11,6 +11,7 @@ export interface FrameTarget {
 
 export type ExtensionMessage =
   | { type: 'TRIGGER_AUTO_FILL'; payload?: { resumeId?: string } }
+  | { type: 'TRIGGER_ACTIVE_TAB_FILL'; payload?: { resumeId?: string } }
   | { type: 'RECRUITMENT_PAGE_DETECTED' }
   | { type: 'ENSURE_RUNTIME_AND_FORWARD'; payload?: { resumeId?: string } }
   | { type: 'RUNTIME_TRIGGER_AUTO_FILL'; payload?: { resumeId?: string } }
@@ -150,6 +151,7 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
     case 'RECRUITMENT_PAGE_DETECTED':
       return payload === undefined;
     case 'TRIGGER_AUTO_FILL':
+    case 'TRIGGER_ACTIVE_TAB_FILL':
     case 'ENSURE_RUNTIME_AND_FORWARD':
     case 'RUNTIME_TRIGGER_AUTO_FILL':
       return payload === undefined || (isRecord(payload) && (payload.resumeId === undefined || isString(payload.resumeId)));
