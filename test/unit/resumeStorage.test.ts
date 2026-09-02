@@ -91,12 +91,46 @@ describe('ResumeStorage 首装初始化', () => {
       fieldMeta: { 'basics.name': { source: 'manual', confirmed: true, locked: true, updatedAt: 1000 } },
       variantType: 'master',
       variantOverrides: [],
+      variantOrdering: {},
     } as any;
     await resumeStorage.saveResume(trusted);
     const restored = (await resumeStorage.getAllResumes())[0] as any;
     expect(restored.schemaVersion).toBe(5);
     expect(restored.fieldMeta['basics.name']).toMatchObject({ confirmed: true, locked: true });
     expect(restored.variantType).toBe('master');
+  });
+
+  it('管理页 dotted 增量路径必须还原为 fieldMeta 的字段路径 key', async () => {
+    installChromeStorageMock();
+    await resumeStorage.getAllResumes();
+    await resumeStorage.updateResumeFieldsDirect('resume-default', {
+      'fieldMeta.basics.name.source': 'manual',
+      'fieldMeta.basics.name.confirmed': true,
+      'fieldMeta.basics.name.locked': true,
+      'fieldMeta.basics.name.updatedAt': 1234,
+    });
+    const restored = (await resumeStorage.getAllResumes())[0] as any;
+    expect(restored.fieldMeta['basics.name']).toMatchObject({ source: 'manual', confirmed: true, locked: true, updatedAt: 1234 });
+    expect(restored.fieldMeta.basics).toBeUndefined();
+  });
+
+  it('岗位版本只覆盖允许内容，并持续继承主档案后续事实更新', async () => {
+    installChromeStorageMock();
+    const [master] = await resumeStorage.getAllResumes();
+    await resumeStorage.updateResumeFieldsDirect(master.id, {
+      'basics.phone': '13800000001',
+      'basics.expectedRole': '通用岗位',
+    });
+    const variant = await resumeStorage.createJobVariant(master.id, { company: 'Example', role: '前端工程师', jobFamily: 'frontend' });
+    await resumeStorage.updateResumeFieldsDirect(variant.id, { 'basics.expectedRole': '前端工程师' });
+    await resumeStorage.updateResumeFieldsDirect(master.id, { 'basics.phone': '13800000002' });
+
+    const rawVariant = (await resumeStorage.getAllResumes()).find((resume) => resume.id === variant.id) as any;
+    expect(rawVariant.variantOverrides).toContain('basics.expectedRole');
+    const resolvedVariant = await resumeStorage.getResumeForFill(variant.id);
+    expect(resolvedVariant.basics.expectedRole).toBe('前端工程师');
+    expect(resolvedVariant.basics.phone).toBe('13800000002');
+    expect(resolvedVariant.parentResumeId).toBe(master.id);
   });
 
   it('跨页面交错更新应由 background 串行化并保留双方字段', async () => {
