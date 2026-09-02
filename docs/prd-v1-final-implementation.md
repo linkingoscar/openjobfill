@@ -35,8 +35,11 @@
 - `variantOrdering`：按项目/经历稳定记录 ID 保存顺序；
 - `variantPresentation`：技能高亮和作品链接选择；
 - `variantTextOverrides`：按 `collection + recordId + field` 保存短描述，避免 master 插入或重排后串到其它记录；
+- 新建岗位版本不复制 master 的整份 `fieldMeta`；master 后续重新确认、锁定或关闭自动填会继续继承，只有岗位版本显式改过的可信状态才覆盖；
 - 未 override 的事实持续继承 master 最新值；
-- 管理页侧栏、popup 和填表引擎读取岗位版本时都解析为最新继承视图。
+- 管理页侧栏、popup 和填表引擎读取岗位版本时都解析为最新继承视图；
+- 档案中心可查看“主档案 ↔ 当前岗位版本”的显式差异；
+- “还原继承”会清除当前岗位版本的内容覆盖、排序、短文案、展示选择和版本级可信状态，但保留岗位/company context，使其重新完整继承 master。
 
 简历文件导入发生在岗位版本激活状态时，姓名、联系方式、教育/经历等事实默认合并到 parent master，岗位专属 sidecar 不被导入静默覆盖。
 
@@ -103,9 +106,13 @@ AI-only 图片/扫描导入从空 trusted seed 开始，不允许把 AI 自己�
 
 - selector/fingerprint 冲突自动 `STALE`；
 - 实际严格验证结果回写 success/failure 健康度；
+- 规则管理页展示每条映射的状态、成功/失败次数、最近严格验证时间和最后失败原因；
+- 用户可主动把单条映射设为 `DISABLED`，运行时完全忽略且严格验证反馈不会自动“复活”；
+- `STALE` 映射需要编辑/重新绑定后再启用；
 - 兼容矩阵：`UNSEEN / DETECTED / PARTIAL / PERSONAL_VERIFIED / DEGRADED`；
 - 自动测试最多只能推进到 `PARTIAL`；
-- `PERSONAL_VERIFIED` 必须由用户在真实个人网申页完成后显式记录；失败后可降级为 `DEGRADED`。
+- 当前真实招聘页面提供显式“真人验收当前站点”入口；底层要求至少 3 个已尝试模块全部为 `PASS` 才允许进入 `PERSONAL_VERIFIED`；
+- `PERSONAL_VERIFIED` 记录真人确认时间、URL scope 和浏览器版本；之后严格验证失败会自动降级为 `DEGRADED`。
 
 ### 2.8 Scoped QA Bank
 
@@ -118,14 +125,18 @@ AI-only 图片/扫描导入从空 trusted seed 开始，不允许把 AI 自己�
 - 运行时按当前 hostname、岗位版本 context 和字段 maxlength 选择最匹配版本；
 - AI 草稿只有用户采用/确认后才允许进入 QA bank。
 
-### 2.9 本地质量与诊断
+### 2.9 本地质量、诊断与数据生命周期
 
 - Fill history 不保存实际填写值；
 - URL/错误/敏感字段脱敏；
 - 标准失败码：mapping、adapter、write、verification、attachment、page/resume change、safety、AI timeout/invalid 等；
 - 保存验证成功数、重点核对、可选未匹配、阻断、AI mapping 数和尝试策略；
 - 历史页展示本地质量指标和站点兼容矩阵；
-- 支持脱敏诊断导出和确定性离线 replay。
+- 支持脱敏诊断导出和确定性离线 replay；
+- 历史记录可单独清空；
+- 设置页可单独清空 AI API Key；
+- 设置页可删除全部 OpenJobFill 用户数据：简历、岗位版本、问答、规则、投递记录、历史、回放、兼容性、AI 配置，同时尝试撤销用户授予的可选招聘站点/AI origin 权限；
+- 删除全部数据后重新生成的只是空白默认档案，不保留之前的用户事实。
 
 ## 3. P1 实现映射
 
@@ -238,10 +249,12 @@ GitHub Actions 门禁包括：
 - locked/confirmed import；
 - AI-only evidence/confidence gate；
 - stable-ID job variant ordering/text sidecar；
+- master 后续 trust metadata 能被岗位版本继承；
+- disabled learned mapping 不参与匹配；
 - activeTab message protocol；
 - required host permission 不允许全站 wildcard；
 - custom domain/AI origin permission pattern；
-- `PERSONAL_VERIFIED` 不可由 fixture 自动产生。
+- `PERSONAL_VERIFIED` 不可由 fixture 自动产生，且真实标记要求至少 3 个 PASS 模块。
 
 ## 5. 真实站点验收：仍必须由本人完成
 
@@ -258,8 +271,8 @@ PRD 的 Definition of Done 要求至少 3 个本人经常使用的真实站点�
 7. 对文件上传检查页面真实文件名/完成状态；
 8. 人工处理剩余必填项；
 9. **不要让 OpenJobFill 提交**，由本人决定是否手动提交；
-10. 回到兼容矩阵，只有本人确认该模块在真实页成功后才能记录 `PERSONAL_VERIFIED`；
-11. 对至少 3 个本人常用站点重复以上流程；
-12. 若后续站点 DOM 更新导致失败，应降级 `DEGRADED` 并修复/重学映射。
+10. 在当前站点的兼容矩阵中点击“真人验收当前站点”；如果不足 3 个已尝试且全部 PASS 的模块，系统会拒绝标记；
+11. 对至少 3 个本人常用站点重复以上流程，直到矩阵中至少 3 个 hostname 显示 `PERSONAL_VERIFIED`；
+12. 若后续站点 DOM 更新导致失败，状态应自动降级 `DEGRADED`，并在个人规则页处理 STALE/重新绑定。
 
 在上述真实登录态验收完成前，本 PR 应保持 Draft，不能把“开发侧完成”表述成“PRD DoD 全部完成”。
