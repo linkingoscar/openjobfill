@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { AlertTriangle, Sparkles, Eye, CheckCircle, EyeOff, Pipette, Paperclip, ShieldAlert, Bot } from 'lucide-vue-next';
+import {
+  AlertTriangle,
+  Sparkles,
+  Eye,
+  CheckCircle,
+  EyeOff,
+  Pipette,
+  Paperclip,
+  ShieldAlert,
+  Bot,
+  BookmarkPlus,
+  XCircle,
+} from 'lucide-vue-next';
 import type { FillResult } from '@/types/adapter';
 import type { FillDecision, FieldRiskLevel } from '@/core/pipeline/decisionPolicy';
 
 interface PreviewItem {
   id: string;
-  field: { label: string };
+  field: { label: string; element?: HTMLElement };
   targetValue?: unknown;
   semanticKey?: string;
   confidence?: number;
@@ -29,6 +41,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'clear-badges' | 'confirm' | 'preview-manual' | 'analyze' | 'manual' | 'upload' | 'cancel'): void;
+  (event: 'update-preview-value', itemId: string, value: string | number | boolean): void;
+  (event: 'skip-preview-item', itemId: string): void;
+  (event: 'save-preview-rule', item: PreviewItem): void;
 }>();
 
 const highConfidenceItems = computed(() => props.previewFillItems.filter((item) => item.decision !== 'FILL_REVIEW_REQUIRED'));
@@ -45,6 +60,18 @@ const sourceLabel = (source?: PreviewItem['source']) => ({
 }[source || 'fallback'] || '未知');
 
 const riskLabel = (risk?: FieldRiskLevel) => ({ CRITICAL: 'Critical', HIGH: 'High', MEDIUM: 'Medium', LONG_TEXT: '长文本', LOW: 'Low' }[risk || 'LOW']);
+const isPrimitive = (value: unknown): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value);
+const canEditLocally = (item: PreviewItem) => !!item.field.element && isPrimitive(item.targetValue);
+const canSaveRule = (item: PreviewItem) => !!item.field.element && !!item.semanticKey;
+
+function handleValueChange(item: PreviewItem, event: Event) {
+  const target = event.target as HTMLInputElement | HTMLSelectElement;
+  if (typeof item.targetValue === 'boolean') emit('update-preview-value', item.id, target.value === 'true');
+  else if (typeof item.targetValue === 'number') {
+    const value = Number(target.value);
+    if (Number.isFinite(value)) emit('update-preview-value', item.id, value);
+  } else emit('update-preview-value', item.id, target.value);
+}
 </script>
 
 <template>
@@ -77,38 +104,53 @@ const riskLabel = (risk?: FieldRiskLevel) => ({ CRITICAL: 'Critical', HIGH: 'Hig
           <span v-if="reviewRequiredItems.length" class="block mt-1 text-amber-700">其中 {{ reviewRequiredItems.length }} 项必须重点核对后再整体确认</span>
           <span v-if="previewNeedsUserItems.length" class="block mt-1 text-slate-700">另有 {{ previewNeedsUserItems.length }} 项不会自动执行，保留在人工/安全待办中</span>
           <span v-if="previewWorkflowItems.length" class="block mt-1 text-indigo-700">确认后会执行 {{ previewWorkflowItems.length }} 个重复区块流程；仅编辑/新增/保存，不会提交申请或进入下一步</span>
+          <span class="block mt-1 text-blue-700">本页预览可逐项临时改值、取消；“保存规则”才会写入当前站点的个人映射。</span>
         </div>
 
         <section v-if="highConfidenceItems.length" class="space-y-1">
           <h3 class="text-[11px] font-bold text-emerald-700 uppercase tracking-wide">高置信填写 · {{ highConfidenceItems.length }}</h3>
-          <div v-for="item in highConfidenceItems" :key="item.id" class="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-xs">
+          <div v-for="item in highConfidenceItems" :key="item.id" class="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-xs space-y-1.5">
             <div class="flex items-center justify-between gap-2">
               <span class="font-medium text-slate-700 truncate">{{ item.field.label }}</span>
-              <span class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">{{ item.targetValue }}</span>
+              <span v-if="!canEditLocally(item)" class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">{{ item.targetValue }}</span>
             </div>
-            <div class="mt-1 flex flex-wrap gap-1 text-[10px] text-slate-500">
+            <select v-if="canEditLocally(item) && typeof item.targetValue === 'boolean'" :value="String(item.targetValue)" @change="handleValueChange(item, $event)" class="w-full px-2 py-1 rounded border border-emerald-200 bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500"><option value="true">是</option><option value="false">否</option></select>
+            <input v-else-if="canEditLocally(item)" :value="String(item.targetValue ?? '')" @change="handleValueChange(item, $event)" class="w-full px-2 py-1 rounded border border-emerald-200 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" aria-label="临时修改本次填写值" />
+            <div class="flex flex-wrap gap-1 text-[10px] text-slate-500">
               <span class="px-1.5 py-0.5 bg-white rounded border">{{ sourceLabel(item.source) }}</span>
               <span class="px-1.5 py-0.5 bg-white rounded border">{{ riskLabel(item.riskLevel) }}</span>
               <span v-if="typeof item.confidence === 'number'" class="px-1.5 py-0.5 bg-white rounded border">{{ Math.round(item.confidence * 100) }}%</span>
               <span v-if="item.semanticKey" class="truncate max-w-[190px]" :title="item.semanticKey">{{ item.semanticKey }}</span>
             </div>
+            <div v-if="item.field.element" class="flex gap-1 pt-0.5">
+              <button type="button" @click="emit('skip-preview-item', item.id)" class="px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"><XCircle class="w-3 h-3" />取消本项</button>
+              <button v-if="canSaveRule(item)" type="button" @click="emit('save-preview-rule', item)" class="px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 inline-flex items-center gap-1"><BookmarkPlus class="w-3 h-3" />保存规则</button>
+            </div>
+            <div v-else class="text-[10px] text-slate-400">跨域子页面项为只读预览；需在对应页面手动调整或重新映射。</div>
           </div>
         </section>
 
         <section v-if="reviewRequiredItems.length" class="space-y-1">
           <h3 class="text-[11px] font-bold text-amber-700 uppercase tracking-wide flex items-center gap-1"><ShieldAlert class="w-3.5 h-3.5" />必须重点核对 · {{ reviewRequiredItems.length }}</h3>
-          <div v-for="item in reviewRequiredItems" :key="item.id" class="p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs">
+          <div v-for="item in reviewRequiredItems" :key="item.id" class="p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs space-y-1.5">
             <div class="flex items-center justify-between gap-2">
               <span class="font-semibold text-slate-800 truncate">{{ item.field.label }}</span>
-              <span class="text-amber-800 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">{{ item.targetValue }}</span>
+              <span v-if="!canEditLocally(item)" class="text-amber-800 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">{{ item.targetValue }}</span>
             </div>
-            <div class="mt-1 text-[10px] text-amber-800">{{ item.reason || '高风险或置信度不足，必须人工重点核对' }}</div>
-            <div class="mt-1 flex flex-wrap gap-1 text-[10px] text-slate-500">
+            <select v-if="canEditLocally(item) && typeof item.targetValue === 'boolean'" :value="String(item.targetValue)" @change="handleValueChange(item, $event)" class="w-full px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 focus:ring-2 focus:ring-amber-500"><option value="true">是</option><option value="false">否</option></select>
+            <input v-else-if="canEditLocally(item)" :value="String(item.targetValue ?? '')" @change="handleValueChange(item, $event)" class="w-full px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500" aria-label="重点核对并临时修改本次填写值" />
+            <div class="text-[10px] text-amber-800">{{ item.reason || '高风险或置信度不足，必须人工重点核对' }}</div>
+            <div class="flex flex-wrap gap-1 text-[10px] text-slate-500">
               <span class="px-1.5 py-0.5 bg-white rounded border">{{ sourceLabel(item.source) }}</span>
               <span class="px-1.5 py-0.5 bg-white rounded border">{{ riskLabel(item.riskLevel) }}</span>
               <span v-if="typeof item.confidence === 'number'" class="px-1.5 py-0.5 bg-white rounded border">{{ Math.round(item.confidence * 100) }}%</span>
               <span v-if="item.source === 'ai'" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-violet-50 text-violet-700 rounded border border-violet-200"><Bot class="w-3 h-3" />AI</span>
             </div>
+            <div v-if="item.field.element" class="flex gap-1 pt-0.5">
+              <button type="button" @click="emit('skip-preview-item', item.id)" class="px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"><XCircle class="w-3 h-3" />取消本项</button>
+              <button v-if="canSaveRule(item)" type="button" @click="emit('save-preview-rule', item)" class="px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 inline-flex items-center gap-1"><BookmarkPlus class="w-3 h-3" />保存规则</button>
+            </div>
+            <div v-else class="text-[10px] text-slate-400">跨域子页面项为只读预览；不能从父页面伪装成已编辑或已保存规则。</div>
           </div>
         </section>
 
