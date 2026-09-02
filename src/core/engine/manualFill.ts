@@ -8,7 +8,7 @@
  * 全程本地，不经过任何网络。
  */
 import type { StandardResume } from '../../types/resume';
-import { startElementPicking } from './elementPicker';
+import { generateOptimalSelector, startElementPicking } from './elementPicker';
 import { setNativeValue, setNativeRadioChecked } from './dispatcher';
 import { selectCustomOption } from './selector';
 import { fillDatePicker } from './datepicker';
@@ -19,11 +19,34 @@ import {
   isTextAreaElement,
 } from '../../utils/dom';
 import { inspectFieldSafety } from '../pipeline/fieldSafety';
+import { ruleStorage } from '../storage/ruleStorage';
 
 export interface ManualFillField {
   resumeKey: string;
   label: string;
   value: string;
+}
+
+export interface ManualFillSuccess extends ManualFillField {
+  selector: string;
+  element: HTMLElement;
+  mappingRemembered: boolean;
+}
+
+/** Persist a mapping only after the user explicitly picked both target and value. */
+export async function rememberManualFillMapping(
+  url: string,
+  field: ManualFillField,
+  element: HTMLElement,
+): Promise<boolean> {
+  const selector = generateOptimalSelector(element);
+  if (!selector) return false;
+  try {
+    await ruleStorage.bindFieldToSite(url, selector, field.resumeKey, field.label);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const MENU_ID = 'openjobfill-manualfill-menu';
@@ -314,7 +337,7 @@ function removeMenu(): void {
  * 流程：点选输入框 → 弹字段浮层 → 选中填入 → 自动进入下一次点选。
  * 按 ESC 或点击浮层外部可随时退出。
  */
-export function startManualFill(resume: StandardResume, onFilled?: (label: string, value: string) => void): void {
+export function startManualFill(resume: StandardResume, onFilled?: (result: ManualFillSuccess) => void): void {
   const fields = buildFillableFields(resume);
 
   if (fields.length === 0) {
@@ -335,7 +358,11 @@ export function startManualFill(resume: StandardResume, onFilled?: (label: strin
         fields,
         async (field) => {
           const success = await applyValueToElement(el, field.value);
-          if (success) onFilled?.(field.label, field.value);
+          if (success) {
+            const selector = generateOptimalSelector(el);
+            const mappingRemembered = await rememberManualFillMapping(window.location.href, field, el);
+            onFilled?.({ ...field, selector, element: el, mappingRemembered });
+          }
           // 填入后继续点选下一个，形成连续补救
           startManualFill(resume, onFilled);
         },

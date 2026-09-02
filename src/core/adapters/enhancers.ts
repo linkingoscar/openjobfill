@@ -1,4 +1,5 @@
 import type { PlatformEnhancer } from '../../types/pipeline';
+import { createProfileEnhancer, getSiteProfileForUrl } from './siteProfiles';
 
 export const mokaEnhancer: PlatformEnhancer = {
   id: 'moka-enhancer',
@@ -322,6 +323,13 @@ export function getEnhancerMatchTrace(url: string, doc?: Document): PlatformEnha
 }
 
 export function getEnhancerForUrl(url: string, doc?: Document): PlatformEnhancer | null {
+  const profile = getSiteProfileForUrl(url, doc);
+  if (profile) {
+    const base = profile.baseEnhancerId
+      ? ALL_PLATFORM_ENHANCERS.find((enhancer) => enhancer.id === profile.baseEnhancerId)
+      : undefined;
+    return createProfileEnhancer(profile, base);
+  }
   const matchedId = getEnhancerMatchTrace(url, doc).find((candidate) => candidate.matched)?.id;
   return matchedId ? ALL_PLATFORM_ENHANCERS.find((enhancer) => enhancer.id === matchedId) || null : null;
 }

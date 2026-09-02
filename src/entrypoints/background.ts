@@ -4,6 +4,7 @@ import { buildMappingPrompt, parseMappingResponse } from '../core/ai/fieldMapper
 import { buildVisionResumePrompt, parseVisionResumeResponse } from '../core/importers/visionResumeImporter';
 import { selectCrossOriginFrameRoots } from '../core/frames/frameCoordinator';
 import { resumeStorage, RESUME_STORAGE_MESSAGE_TYPES } from '../core/storage/resumeStorage';
+import { trackerStorage, TRACKER_STORAGE_MESSAGE_TYPES } from '../core/storage/trackerStorage';
 import { isExtensionMessage, type ExtensionMessage } from '../types/message';
 
 let resumeWriteQueue: Promise<void> = Promise.resolve();
@@ -358,6 +359,46 @@ export default defineBackground(() => {
       enqueueResumeWrite(() => resumeStorage.deleteResume(id))
         .then(() => sendResponse({ success: true }))
         .catch((error) => sendResponse({ success: false, error: error?.message || '删除简历失败' }));
+      return true;
+    }
+
+    if (message.type.startsWith('TRACKER_STORAGE_') && sender.id !== chrome.runtime.id) {
+      sendResponse({ success: false, error: '投递记录存储请求来源无效' });
+      return;
+    }
+
+    if (message.type === TRACKER_STORAGE_MESSAGE_TYPES.GET) {
+      trackerStorage.getApplicationsDirect()
+        .then((applications) => sendResponse({ success: true, applications }))
+        .catch((error) => sendResponse({ success: false, error: error?.message || '读取投递记录失败' }));
+      return true;
+    }
+
+    if (message.type === TRACKER_STORAGE_MESSAGE_TYPES.SAVE) {
+      trackerStorage.saveApplicationDirect(message.payload.application)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, error: error?.message || '保存投递记录失败' }));
+      return true;
+    }
+
+    if (message.type === TRACKER_STORAGE_MESSAGE_TYPES.REPLACE_ALL) {
+      trackerStorage.saveApplicationsDirect(message.payload.applications)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, error: error?.message || '恢复投递记录失败' }));
+      return true;
+    }
+
+    if (message.type === TRACKER_STORAGE_MESSAGE_TYPES.DELETE) {
+      trackerStorage.deleteApplicationDirect(message.payload.id)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, error: error?.message || '删除投递记录失败' }));
+      return true;
+    }
+
+    if (message.type === TRACKER_STORAGE_MESSAGE_TYPES.UPDATE_STATUS) {
+      trackerStorage.updateApplicationStatusDirect(message.payload.id, message.payload.status)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, error: error?.message || '更新投递状态失败' }));
       return true;
     }
 

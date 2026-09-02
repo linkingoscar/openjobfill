@@ -14,3 +14,16 @@ export {
   getControlAdapterMatchTrace,
   getMatchingControlAdapters,
 } from './controlAdapters';
+
+export {
+  SITE_PROFILES,
+  createProfileEnhancer,
+  getSiteProfileForUrl,
+  getSiteProfileMatchTrace,
+  validateSiteProfile,
+} from './siteProfiles';
+
+export {
+  COMPATIBILITY_FIXTURES,
+  auditCompatibilityCatalog,
+} from './compatibilityLab';

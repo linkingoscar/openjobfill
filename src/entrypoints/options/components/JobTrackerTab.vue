@@ -21,7 +21,8 @@ import {
   FileSpreadsheet
 } from 'lucide-vue-next';
 import { trackerStorage } from '@/core/storage/trackerStorage';
-import type { JobApplicationRecord, ApplicationStatus } from '@/types/tracker';
+import type { JobApplicationRecord, ApplicationStatus, TrackerEditableField } from '@/types/tracker';
+import { createApplicationId, TRACKER_EDITABLE_FIELDS } from '@/core/tracker/trackerSchema';
 
 const emit = defineEmits<{
   (e: 'show-toast', msg: string): void;
@@ -44,6 +45,7 @@ const formData = ref<JobApplicationRecord>({
   salary: '',
   resumeVersionTitle: '',
   notes: '',
+  source: 'manual',
   updatedAt: ''
 });
 
@@ -98,7 +100,9 @@ const getColumnItems = (statusKey: ApplicationStatus) => {
 const handleOpenCreateModal = () => {
   editingRecord.value = null;
   formData.value = {
-    id: `app-${Date.now()}`,
+    schemaVersion: 2,
+    id: createApplicationId(),
+    clientRequestId: createApplicationId('application'),
     companyName: '',
     jobTitle: '',
     appliedDate: new Date().toISOString().slice(0, 10),
@@ -107,6 +111,9 @@ const handleOpenCreateModal = () => {
     salary: '',
     resumeVersionTitle: '',
     notes: '',
+    source: 'manual',
+    syncState: 'local',
+    createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
   isModalOpen.value = true;
@@ -123,7 +130,16 @@ const handleSaveRecord = async () => {
     emit('show-toast', '请填写公司名称和职位名称');
     return;
   }
-  await trackerStorage.saveApplication(formData.value);
+  const userFields = TRACKER_EDITABLE_FIELDS.filter((field) => editingRecord.value
+    ? formData.value[field] !== editingRecord.value[field]
+    : formData.value[field] !== undefined && formData.value[field] !== '');
+  const userSources = Object.fromEntries(userFields.map((field) => [field, 'user'])) as Partial<Record<TrackerEditableField, 'user'>>;
+  await trackerStorage.saveApplication({
+    ...formData.value,
+    source: editingRecord.value ? 'user_confirmed' : 'manual',
+    fieldSources: { ...(formData.value.fieldSources || {}), ...userSources },
+    lockedFields: [...new Set([...(formData.value.lockedFields || []), ...userFields])],
+  });
   await loadApplications();
   isModalOpen.value = false;
   emit('show-toast', '投递记录保存成功！');
@@ -314,6 +330,7 @@ const handleExportCSV = async () => {
                 v-if="item.jobUrl"
                 :href="item.jobUrl"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="text-slate-400 hover:text-blue-600 p-0.5"
                 title="打开投递原网页"
               >

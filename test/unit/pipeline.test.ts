@@ -479,6 +479,52 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(result.durationMs).toBeLessThan(120);
     });
 
+    it('普通预览也不得提前展开、编辑或新增重复区块', async () => {
+      document.body.innerHTML = `
+        <form class="application-form">
+          <h2>工作经历</h2>
+          <div class="experience-card"><label>公司</label><input name="company"></div>
+          <button type="button">添加工作经历</button>
+        </form>`;
+      let expansionClicks = 0;
+      document.querySelector('button')!.addEventListener('click', () => expansionClicks++);
+      const resume = structuredClone(MOCK_RESUME);
+      resume.experiences.push({ ...resume.experiences[0], id: 'exp-2', company: '第二家公司' });
+
+      const analyzed = await formFillerEngine.analyze(resume);
+
+      expect(expansionClicks).toBe(0);
+      expect(analyzed.sectionPreparation?.actions.some((action) => action.groupKey === 'experience')).toBe(true);
+      formFillerEngine.cancelRun(analyzed.runId);
+    });
+
+    it('确认后由站点画像状态机填写并验证单卡记录，再执行区块保存', async () => {
+      document.body.innerHTML = `
+        <section class="apply-module" data-section="education">
+          <div class="apply-form">
+            <label>毕业院校</label><input name="school" placeholder="请输入学校">
+            <button type="button">保存</button>
+          </div>
+        </section>`;
+      const input = document.querySelector<HTMLInputElement>('input')!;
+      let saveClicks = 0;
+      document.querySelector('button')!.addEventListener('click', () => {
+        saveClicks++;
+        input.style.display = 'none';
+      });
+
+      const analyzed = await formFillerEngine.analyze(MOCK_RESUME);
+      expect(input.value).toBe('');
+      expect(saveClicks).toBe(0);
+      expect(analyzed.sectionPreparation?.actions[0]).toMatchObject({
+        groupKey: 'education', mode: 'single-card',
+      });
+
+      const result = await formFillerEngine.executePlan(analyzed);
+      expect(result.filledCount).toBe(1);
+      expect(saveClicks).toBe(1);
+    });
+
     it('表单节点被刷新后，不应继续执行旧预览计划', async () => {
       document.body.innerHTML = `
         <form>

@@ -25,7 +25,7 @@
 | `src/engine/aiService.ts` | `llmProvider.ts`、`fieldMapper.ts`、`providerPresets.ts` | 已补服务商预设、有限重试、地址归一化、OpenRouter 头 |
 | `src/engine/attachmentUploader.ts` | `src/core/engine/attachmentUploader.ts` | 已迁移并接入浮球“附件”按钮 |
 | `src/engine/autoFiller.ts` | `filler.ts` + `src/core/pipeline/*` | 两阶段预览管道承接 |
-| `src/engine/cardStateMachine.ts` | `sectionEngine.ts`、预览确认流程 | 不照搬自动点“保存/下一步”，避免未经确认推进或提交表单 |
+| `src/engine/cardStateMachine.ts` | `sectionEngine.ts`、`sectionWorkflow.ts`、预览确认流程 | 已按声明式 SiteProfile 重写；预览只列动作，确认后仅允许精确“编辑/保存/新增”，拒绝 submit/下一步并逐步验证 |
 | `src/engine/dataDeriver.ts` | `src/core/derivation/profileDeriver.ts` | 已迁移；未回答意愿题不再默认“是” |
 | `src/engine/domPruner.ts` | `snapshotRecorder.ts` | 脱敏字段骨架替代原始 DOM 快照 |
 | `src/engine/dynamicBalancer.ts` | `sectionEngine.ts`、`repeater.ts` | 现有多经历差量加行承接 |
@@ -41,7 +41,7 @@
 | `src/engine/importers/platformSync.ts` | `platformProfileImporter.ts`、`FloatBall.vue` | 已迁移；显式点击确认后合并当前可见资料 |
 | `src/engine/importers/types.ts` | `src/types/resume.ts` | 统一类型承接 |
 | `src/engine/importers/visionImporter.ts` | `visionResumeImporter.ts`、`resumeImagePreparation.ts`、PDF 页面渲染、后台多模态 API | 已迁移；PDF 文本+页面图、Word 提取文本、独立图片页签、逐次确认、结果合并预览 |
-| `src/engine/jobTracker.ts` | `trackerStorage.ts`、`pageJobExtractor.ts` | 已补页面岗位信息提取 |
+| `src/engine/jobTracker.ts` | `trackerStorage.ts`、`trackerSchema.ts`、`applicationDraftStorage.ts`、`pageJobExtractor.ts` | 已补 JSON-LD、来源/锁定、幂等去重、Schema 迁移和成功草稿恢复 |
 | `src/engine/privacyScrubber.ts` | `src/core/privacy/privacyScrubber.ts` | 已迁移并改为递归脱敏 |
 | `src/engine/snapshotReplay.ts` | `snapshotRecorder.ts` | 已迁移录制、脱敏导出与离线回放 |
 | `src/options/App.vue` | `src/entrypoints/options/*` | 现有模块化设置页承接；新增意愿矩阵和 AI 预设 |
@@ -75,3 +75,4 @@
 - 简历输入统一经过运行时 Schema 校验和 v1→v4 顺序迁移，未知未来版本不会被伪装成当前版本。
 - 预览快照包含脱敏的表单根评分、平台匹配轨迹、动态分组结果和分阶段耗时；另提供不可执行、无 DOM 写入的 association dry run。
 - 复杂控件执行已收敛到统一 ControlAdapter Runtime：58 个参考 Adapter 名称一一登记，站点专项优先、组件库其次、Native 最后；Phoenix、HcSuperSelector、51Job Setday 和 My97 只通过受限 MAIN-world 固定动作桥执行。
+- 站点流程收敛到 27 个版本化声明式 SiteProfile；兼容目录会拒绝重复域名、未知 Fixture、不安全动作和无验证日期的 `SITE_VERIFIED`。

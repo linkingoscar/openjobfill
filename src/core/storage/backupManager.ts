@@ -6,13 +6,10 @@ import { getCustomDomains, saveCustomDomains } from '../whitelist';
 import type { StandardResume } from '../../types/resume';
 import type { CustomSiteRule } from '../../types/rule';
 import type { JobApplicationRecord, ApplicationStatus } from '../../types/tracker';
+import { APPLICATION_STATUSES, normalizeJobApplicationRecord } from '../tracker/trackerSchema';
 
 const BACKUP_APP = 'OpenJobFill';
 const CURRENT_BACKUP_VERSION = 1;
-const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
-  'applied', 'screening', 'assessment', 'interview1',
-  'interview2', 'hr', 'offer', 'rejected',
-];
 
 export interface FullBackupData {
   app: 'OpenJobFill';
@@ -191,7 +188,8 @@ function normalizeBackupApplication(value: unknown, index: number): JobApplicati
     }
   }
 
-  return {
+  const normalized = normalizeJobApplicationRecord({
+    ...value,
     id, companyName, jobTitle, appliedDate, status, jobUrl,
     ...(typeof value.salary === 'string' ? { salary: value.salary } : {}),
     ...(typeof value.resumeVersionTitle === 'string' ? { resumeVersionTitle: value.resumeVersionTitle } : {}),
@@ -200,7 +198,9 @@ function normalizeBackupApplication(value: unknown, index: number): JobApplicati
     updatedAt: typeof value.updatedAt === 'string' && value.updatedAt.trim()
       ? value.updatedAt
       : new Date().toISOString(),
-  };
+  });
+  if (!normalized) throw new Error(`第 ${index + 1} 条投递记录格式无效`);
+  return normalized;
 }
 
 function normalizeBackupApplications(value: unknown): JobApplicationRecord[] {

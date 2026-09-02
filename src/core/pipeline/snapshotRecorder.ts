@@ -3,6 +3,7 @@ import type { FillResult } from '../../types/adapter';
 import { scrubSensitiveData } from '../privacy/privacyScrubber';
 import type { PageScanDiagnostics } from './pageAnalyzer';
 import type { SectionCapacityDiagnostic } from '../engine/sectionEngine';
+import type { SiteProfileMatchTrace } from '../../types/siteProfile';
 import type { PlatformEnhancerMatchTrace } from '../adapters/enhancers';
 import { getMatchingControlAdapters } from '../adapters/controlAdapters';
 
@@ -52,7 +53,12 @@ export interface SnapshotImportResult {
 
 export interface AssociationDryRunReport {
   reportType: 'OPENJOBFILL_ASSOCIATION_DRY_RUN';
-  adapter: { id: string | null; name: string; trace: PlatformEnhancerMatchTrace[] };
+  adapter: {
+    id: string | null;
+    name: string;
+    trace: PlatformEnhancerMatchTrace[];
+    siteProfiles: SiteProfileMatchTrace[];
+  };
   counts: {
     scanned: number;
     associated: number;
@@ -257,7 +263,7 @@ export function compactPlanSnapshot(plan: FillPlan) {
 /** Build a value-free report during preview analysis; this function never writes the page. */
 export function buildAssociationDryRunReport(options: {
   plan: FillPlan;
-  adapter: { id?: string; name: string; trace?: PlatformEnhancerMatchTrace[] };
+  adapter: { id?: string; name: string; trace?: PlatformEnhancerMatchTrace[]; siteProfiles?: SiteProfileMatchTrace[] };
   formRoots: PageScanDiagnostics;
   dynamicGroups: SectionCapacityDiagnostic[];
   timings: AssociationDryRunReport['timings'];
@@ -293,7 +299,12 @@ export function buildAssociationDryRunReport(options: {
   }, { matchedFields: 0, genericFallbackFields: 0, mainWorldCandidates: 0, byAdapter: {} });
   return {
     reportType: 'OPENJOBFILL_ASSOCIATION_DRY_RUN',
-    adapter: { id: options.adapter.id || null, name: options.adapter.name, trace: options.adapter.trace || [] },
+    adapter: {
+      id: options.adapter.id || null,
+      name: options.adapter.name,
+      trace: options.adapter.trace || [],
+      siteProfiles: options.adapter.siteProfiles || [],
+    },
     counts: {
       scanned: options.plan.totalFieldsCount,
       associated: options.plan.items.filter((item) => item.action === 'FILL').length,

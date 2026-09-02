@@ -106,7 +106,8 @@ const CANONICAL_MAPPINGS: Record<CanonicalDomain, Record<string, string[]>> = {
     [CanonicalJobType.CONTRACT]: ['外包', '劳务派遣', '合同制', 'contract', 'contractor'],
   },
   availability: {
-    [CanonicalAvailability.IMMEDIATELY]: ['随时到岗', '即时', '立即', '1周内', 'immediately', 'asap', 'within 1 week'],
+    [CanonicalAvailability.IMMEDIATELY]: ['随时到岗', '即时', '立即', 'immediately', 'asap'],
+    [CanonicalAvailability.WITHIN_1_WEEK]: ['1周内', '一周内', '7天内', 'within 1 week', 'within one week'],
     [CanonicalAvailability.WITHIN_1_MONTH]: ['1个月内', '1-2周', '30天内', 'within 1 month', '1 month'],
     [CanonicalAvailability.WITHIN_3_MONTHS]: ['1-3个月', '3个月内', 'within 3 months'],
     [CanonicalAvailability.NEGOTIABLE]: ['面议', '协商', '待定', 'negotiable'],

@@ -2,6 +2,7 @@ import type { AISettings, AIFieldMappingResponse, ResumeKeyOption, UnmatchedFiel
 import type { StandardResume } from './resume';
 import type { FillResult } from './adapter';
 import type { RemoteFramePlan } from './pipeline';
+import type { ApplicationStatus, JobApplicationRecord } from './tracker';
 
 export interface FrameTarget {
   frameId: number;
@@ -45,7 +46,12 @@ export type ExtensionMessage =
   | { type: 'RESUME_STORAGE_UPDATE_FIELDS'; payload: { id: string; updates: Record<string, unknown> } }
   | { type: 'RESUME_STORAGE_APPEND_ARRAY_ITEM'; payload: { id: string; path: string; item: unknown } }
   | { type: 'RESUME_STORAGE_REPLACE_ALL'; payload: { resumes: StandardResume[] } }
-  | { type: 'RESUME_STORAGE_DELETE'; payload: { id: string } };
+  | { type: 'RESUME_STORAGE_DELETE'; payload: { id: string } }
+  | { type: 'TRACKER_STORAGE_GET' }
+  | { type: 'TRACKER_STORAGE_SAVE'; payload: { application: JobApplicationRecord } }
+  | { type: 'TRACKER_STORAGE_REPLACE_ALL'; payload: { applications: JobApplicationRecord[] } }
+  | { type: 'TRACKER_STORAGE_DELETE'; payload: { id: string } }
+  | { type: 'TRACKER_STORAGE_UPDATE_STATUS'; payload: { id: string; status: ApplicationStatus } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -85,6 +91,23 @@ function isFrameTargets(value: unknown): value is FrameTarget[] {
     && Number.isInteger(target.frameId)
     && isNonEmptyString(target.analysisId),
   );
+}
+
+const APPLICATION_STATUSES = new Set([
+  'applied', 'screening', 'assessment', 'interview1', 'interview2', 'hr', 'offer', 'rejected',
+]);
+
+function isTrackerApplication(value: unknown): value is JobApplicationRecord {
+  return isRecord(value)
+    && isBoundedString(value.id, 240)
+    && isBoundedString(value.companyName, 160)
+    && isBoundedString(value.jobTitle, 200)
+    && isBoundedString(value.appliedDate, 10)
+    && APPLICATION_STATUSES.has(String(value.status))
+    && isString(value.jobUrl)
+    && value.jobUrl.length <= 2_000
+    && isString(value.updatedAt)
+    && value.updatedAt.length <= 64;
 }
 
 /**
@@ -194,6 +217,21 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         && payload.resumes.every((resume) => isRecord(resume) && isString(resume.id) && isRecord(resume.basics));
     case 'RESUME_STORAGE_DELETE':
       return isRecord(payload) && isString(payload.id) && payload.id.length > 0;
+    case 'TRACKER_STORAGE_GET':
+      return payload === undefined;
+    case 'TRACKER_STORAGE_SAVE':
+      return isRecord(payload) && isTrackerApplication(payload.application);
+    case 'TRACKER_STORAGE_REPLACE_ALL':
+      return isRecord(payload)
+        && Array.isArray(payload.applications)
+        && payload.applications.length <= 10_000
+        && payload.applications.every(isTrackerApplication);
+    case 'TRACKER_STORAGE_DELETE':
+      return isRecord(payload) && isBoundedString(payload.id, 240);
+    case 'TRACKER_STORAGE_UPDATE_STATUS':
+      return isRecord(payload)
+        && isBoundedString(payload.id, 240)
+        && APPLICATION_STATUSES.has(String(payload.status));
     default:
       return false;
   }
@@ -206,4 +244,5 @@ export interface ExtensionResponse {
   plans?: RemoteFramePlan[];
   mapping?: AIFieldMappingResponse['mapping'];
   resume?: StandardResume;
+  applications?: JobApplicationRecord[];
 }

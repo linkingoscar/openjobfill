@@ -31,6 +31,7 @@ import {
 import { resumeStorage } from '@/core/storage/resumeStorage';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { trackerStorage } from '@/core/storage/trackerStorage';
+import { applicationDraftStorage, type ApplicationTrackerDraft } from '@/core/storage/applicationDraftStorage';
 import { useFillHistory } from './composables/useFillHistory';
 import { useFillPreview } from './composables/useFillPreview';
 import { useJDAnalysis } from './composables/useJDAnalysis';
@@ -53,6 +54,7 @@ import { generateOptimalSelector, isInputElement, isTextAreaElement } from '@/ut
 import type { FillResult } from '@/types/adapter';
 import type { StandardResume } from '@/types/resume';
 import type { JobApplicationRecord } from '@/types/tracker';
+import { createApplicationId } from '@/core/tracker/trackerSchema';
 import type { ClipboardItem } from '@/types/floatingBall';
 import { useFloatingPosition } from './composables/useFloatingPosition';
 
@@ -93,21 +95,22 @@ const handleHideFloatingBall = () => {
 // 多步向导与待办核对提示
 const stepNotification = ref({ show: false, text: '' });
 const copyToastMessage = ref('');
-const applicationDraft = ref<{ job: PageJobSnapshot; detectedAt: string } | null>(null);
+const applicationDraft = ref<ApplicationTrackerDraft | null>(null);
 
-const detectApplicationSuccessDraft = () => {
+const detectApplicationSuccessDraft = async () => {
   if (!isApplicationSuccessPage()) return;
   const job = extractPageJobSnapshot();
   if (applicationDraft.value?.job.jobUrl === job.jobUrl) return;
-  applicationDraft.value = { job, detectedAt: new Date().toISOString() };
+  applicationDraft.value = await applicationDraftStorage.create(job);
   if (!isDrawerOpen.value) isDrawerOpen.value = true;
   drawerTab.value = 'jdMatch';
   copyToastMessage.value = '检测到申请成功页面，已生成投递归档草稿，请确认后保存';
   setTimeout(() => { copyToastMessage.value = ''; }, 4500);
 };
 
-const dismissApplicationDraft = () => {
+const dismissApplicationDraft = async () => {
   applicationDraft.value = null;
+  await applicationDraftStorage.clear();
 };
 
 const handleFocusTaskElement = (task: any) => {
@@ -219,7 +222,7 @@ const handleSaveTaskMapping = async (task: any) => {
 const pendingChangedRoots = ref<HTMLElement[]>([]);
 
 const notifyStepChange = (newUrl: string, changedNodes: HTMLElement[] = []) => {
-  detectApplicationSuccessDraft();
+  void detectApplicationSuccessDraft();
   if (isFilling.value) {
     formFillerEngine.cancelActiveRun('页面步骤已变化');
     void cancelPreview();
@@ -299,7 +302,8 @@ onMounted(async () => {
   const enhancer = getEnhancerForUrl(window.location.href, document);
   currentAdapterName.value = enhancer?.name || '智能通用决策引擎 (Pipeline v2)';
   await Promise.all([loadActiveResume(), loadFillHistory()]);
-  detectApplicationSuccessDraft();
+  applicationDraft.value = await applicationDraftStorage.get();
+  await detectApplicationSuccessDraft();
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', handleViewportResize);
 });
@@ -451,7 +455,9 @@ const handleArchiveJob = async () => {
   }
 
   const record: JobApplicationRecord = {
-    id: `app-${Date.now()}`,
+    schemaVersion: 2,
+    id: createApplicationId(),
+    clientRequestId: applicationDraft.value?.clientRequestId || createApplicationId('application'),
     companyName: pageJob.companyName,
     jobTitle: jobTitle,
     appliedDate: new Date().toISOString().slice(0, 10),
@@ -462,12 +468,23 @@ const handleArchiveJob = async () => {
     jdSummary: pageJob.description,
     notes: `用户确认${successDetected ? '申请成功页面' : '已完成投递'}后由 OpenJobFill 建档。综合技能匹配度: ${jdAnalysis.value?.matchScore || 0}%`,
     source: successDetected ? 'success_detection' : 'manual',
+    sourceDomain: window.location.hostname,
+    fieldSources: {
+      companyName: pageJob.fieldSources?.companyName === 'structured_data' ? 'structured_data' : 'heuristic',
+      jobTitle: pageJob.fieldSources?.jobTitle === 'structured_data' ? 'structured_data' : 'heuristic',
+      ...(pageJob.salary ? { salary: pageJob.fieldSources?.salary === 'structured_data' ? 'structured_data' as const : 'heuristic' as const } : {}),
+      ...(pageJob.description ? { jdSummary: pageJob.fieldSources?.description === 'structured_data' ? 'structured_data' as const : 'heuristic' as const } : {}),
+    },
+    lockedFields: [],
+    syncState: 'local',
+    createdAt: new Date().toISOString(),
     confirmedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   await trackerStorage.saveApplication(record);
   applicationDraft.value = null;
+  await applicationDraftStorage.clear();
   copyToastMessage.value = `📌 已归档【${record.companyName} - ${record.jobTitle}】至投递看板！`;
   setTimeout(() => { copyToastMessage.value = ''; }, 3000);
 };
@@ -684,9 +701,11 @@ const handleManualFill = async () => {
   if (!currentResume.value) return;
   // 收起抽屉避免遮挡，进入点选手动填充模式
   isDrawerOpen.value = false;
-  startManualFill(currentResume.value, (label) => {
-    copyToastMessage.value = `已手动填入：${label}`;
-    setTimeout(() => { copyToastMessage.value = ''; }, 1500);
+  startManualFill(currentResume.value, (result) => {
+    copyToastMessage.value = result.mappingRemembered
+      ? `已手动填入并记住映射：${result.label}`
+      : `已手动填入：${result.label}（本次映射未保存）`;
+    setTimeout(() => { copyToastMessage.value = ''; }, 2200);
   });
 };
 
@@ -697,6 +716,7 @@ const {
   lastPlan,
   previewFillItems,
   previewNeedsUserItems,
+  previewWorkflowItems,
   confirmFill,
   cancelPreview,
   handlePreviewManualFill,
@@ -987,6 +1007,9 @@ defineExpose({
                 <span v-if="previewNeedsUserItems.length > 0" class="block mt-0.5 text-amber-700">
                   另有 {{ previewNeedsUserItems.length }} 项需要你手动补充
                 </span>
+                <span v-if="previewWorkflowItems.length > 0" class="block mt-1 text-indigo-700">
+                  确认后还会执行 {{ previewWorkflowItems.length }} 个重复区块流程；只允许编辑、保存和新增，不会提交申请或进入下一步
+                </span>
               </div>
 
               <div class="max-h-56 overflow-y-auto space-y-1 pr-1">
@@ -999,6 +1022,13 @@ defineExpose({
                   <span class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">
                     {{ item.targetValue }}
                   </span>
+                </div>
+                <div
+                  v-for="action in previewWorkflowItems"
+                  :key="`workflow-${action.groupKey}`"
+                  class="p-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-800"
+                >
+                  <span class="font-medium">{{ action.summary }}</span>
                 </div>
                 <div
                   v-for="item in previewNeedsUserItems"
@@ -1079,14 +1109,14 @@ defineExpose({
           <!-- Footer Action Button：预览确认态 -->
           <footer v-if="previewPlan && !fillResult" class="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
             <button
-              v-if="previewFillItems.length > 0"
+              v-if="previewFillItems.length > 0 || previewWorkflowItems.length > 0"
               type="button"
               @click="confirmFill"
               :disabled="isFilling"
               class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
               <CheckCircle class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{{ isFilling ? '正在填写...' : `确认填写 ${previewFillItems.length} 项` }}</span>
+              <span>{{ isFilling ? '正在填写...' : `确认填写 ${previewFillItems.length} 项${previewWorkflowItems.length ? '并执行区块流程' : ''}` }}</span>
             </button>
             <button
               v-else

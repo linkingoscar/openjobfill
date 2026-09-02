@@ -47,6 +47,8 @@ FillPlan
 
 本轮已完成 58 项 `REGISTERED + ROUTE_VERIFIED`，并对 Native、Ant/Element/Semi 通用控件、Moka 搜索下拉、51Job 组合电话与三层联动、TP-Link 民族选择、交通银行弹层、My97 日期、富文本、日期区间、Radio/Checkbox、Shadow DOM 以及 MAIN-world 消息协议建立自动化覆盖。纯 `div` 触发器也纳入页面扫描和 Driver 分类回归。站点专属项仍需按真实页面版本逐项升级为 `SITE_VERIFIED`，不能仅凭本地结构契约宣称线上完全适配。
 
+站点流程不再混入本目录：27 个 hostname/path/SaaS 模板画像、Save-before-next/单卡工作流和 Fixture 引用由 [`site-profile-compatibility-lab.md`](site-profile-compatibility-lab.md) 管理。Adapter 通过不等于站点通过，两项门禁必须分别满足。
+
 ## 维护准则
 
 1. 新 selector 必须限定在字段自身或祖先控件根，不允许从字段退化到全文档第一个匹配项。

@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { isExtensionMessage } from '@/types/message';
 
 describe('Extension message protocol', () => {
+  it('accepts bounded Tracker storage messages and rejects invalid statuses', () => {
+    const application = {
+      id: 'app-1', companyName: '示例公司', jobTitle: '工程师', appliedDate: '2026-09-01',
+      status: 'applied', jobUrl: 'https://jobs.example.com/1', updatedAt: '2026-09-01T00:00:00.000Z',
+    };
+    expect(isExtensionMessage({ type: 'TRACKER_STORAGE_GET' })).toBe(true);
+    expect(isExtensionMessage({ type: 'TRACKER_STORAGE_SAVE', payload: { application } })).toBe(true);
+    expect(isExtensionMessage({ type: 'TRACKER_STORAGE_UPDATE_STATUS', payload: { id: 'app-1', status: 'offer' } })).toBe(true);
+    expect(isExtensionMessage({ type: 'TRACKER_STORAGE_UPDATE_STATUS', payload: { id: 'app-1', status: 'unknown' } })).toBe(false);
+  });
+
   it('accepts the storage and cross-frame messages used by current callers', () => {
     expect(isExtensionMessage({
       type: 'RESUME_STORAGE_UPDATE_FIELDS',

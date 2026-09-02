@@ -4,15 +4,37 @@ import { autoExpandHeuristicSections, ensureSectionRows } from './repeater';
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
 import { prepareEditableSections } from './expansionHelper';
 import { throwIfAborted } from '../pipeline/runContext';
+import type { RepeatableSectionKey, RepeatableWorkflowConfig, RepeatableWorkflowMode } from '../../types/siteProfile';
+
+const GROUP_KEYWORDS: Record<RepeatableSectionKey, string[]> = {
+  education: ['教育', '学历', 'education'],
+  experience: ['工作', '实习', 'experience', 'employment'],
+  project: ['项目', 'project'],
+  family: ['家庭', 'family'],
+};
 
 export interface SectionCapacityDiagnostic {
-  groupKey: 'education' | 'experience' | 'project' | 'family';
+  groupKey: RepeatableSectionKey;
   desiredCount: number;
   initialCount: number;
   finalCount: number;
   createdCount: number;
-  status: 'satisfied' | 'expanded' | 'failed';
+  status: 'satisfied' | 'planned' | 'expanded' | 'failed';
   failureCode?: 'CAPACITY_NOT_REACHED';
+}
+
+export interface SectionPreparationAction {
+  groupKey: RepeatableSectionKey;
+  desiredCount: number;
+  initialCount: number;
+  mode: RepeatableWorkflowMode;
+  workflow?: RepeatableWorkflowConfig;
+  summary: string;
+}
+
+export interface SectionPreparationPlan {
+  actions: SectionPreparationAction[];
+  requiresConfirmation: boolean;
 }
 
 export class SectionEngine {
@@ -22,62 +44,106 @@ export class SectionEngine {
     return this.lastDiagnostics.map((item) => ({ ...item }));
   }
 
-  /**
-   * 自动探测页面现有卡片行数，并按需差量点击 "+添加经历" 按钮 (Required - Existing)
-   */
-  async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null, signal?: AbortSignal): Promise<boolean> {
-    throwIfAborted(signal);
-    this.lastDiagnostics = [];
-    let anyExpanded = false;
-    if (await prepareEditableSections(signal) > 0) anyExpanded = true;
-
-    const groups: Array<{
-      key: SectionCapacityDiagnostic['groupKey'];
-      keywords: string[];
-      desiredCount: number;
-    }> = [
-      { key: 'education', keywords: ['教育', '学历', 'education'], desiredCount: resume.educations?.length || 0 },
-      { key: 'experience', keywords: ['工作', '实习', 'experience', 'employment'], desiredCount: resume.experiences?.length || 0 },
-      { key: 'project', keywords: ['项目', 'project'], desiredCount: resume.projects?.length || 0 },
-      { key: 'family', keywords: ['家庭', 'family'], desiredCount: resume.familyMembers?.length || 0 },
+  private getDesiredGroups(resume: StandardResume): Array<{
+    key: RepeatableSectionKey;
+    keywords: string[];
+    desiredCount: number;
+  }> {
+    return [
+      { key: 'education', keywords: GROUP_KEYWORDS.education, desiredCount: resume.educations?.length || 0 },
+      { key: 'experience', keywords: GROUP_KEYWORDS.experience, desiredCount: resume.experiences?.length || 0 },
+      { key: 'project', keywords: GROUP_KEYWORDS.project, desiredCount: resume.projects?.length || 0 },
+      { key: 'family', keywords: GROUP_KEYWORDS.family, desiredCount: resume.familyMembers?.length || 0 },
     ];
+  }
 
-    for (const group of groups) {
+  private hasWorkflowRoot(workflow: RepeatableWorkflowConfig): boolean {
+    return getAllDocumentsAcrossIframes().some((doc) => workflow.rootSelectors.some((selector) => {
+      try {
+        const root = doc.querySelector<HTMLElement>(selector);
+        return !!root && isElementVisible(root);
+      } catch {
+        return false;
+      }
+    }));
+  }
+
+  /** Build a read-only preparation plan. This method never clicks or writes the page. */
+  planSectionPreparation(resume: StandardResume, enhancer?: PlatformEnhancer | null): SectionPreparationPlan {
+    this.lastDiagnostics = [];
+    const actions: SectionPreparationAction[] = [];
+    for (const group of this.getDesiredGroups(resume)) {
       if (group.desiredCount === 0) continue;
       const initialCount = this.countExistingSectionCards(group.keywords, enhancer, group.key);
-      let expanded = false;
-      if (group.desiredCount > 1 && group.desiredCount > initialCount) {
-        expanded = await this.expandSection(
-          group.key,
-          group.keywords,
-          group.desiredCount,
-          group.desiredCount - initialCount,
-          enhancer,
-          signal,
-        );
-        if (expanded) anyExpanded = true;
+      const workflow = enhancer?.workflowConfigs?.find((candidate) => candidate.sectionKey === group.key);
+      const mode = workflow?.mode || 'parallel';
+      const needsWorkflow = !!workflow && group.desiredCount > 0 && this.hasWorkflowRoot(workflow);
+      const needsExpansion = !workflow && group.desiredCount > initialCount;
+      if (needsWorkflow || needsExpansion) {
+        actions.push({
+          groupKey: group.key,
+          desiredCount: group.desiredCount,
+          initialCount,
+          mode,
+          workflow,
+          summary: workflow
+            ? `${group.key} 将按“填写 → 保存 → 新增”流程处理 ${group.desiredCount} 条记录`
+            : `${group.key} 将从 ${initialCount} 条扩展到 ${group.desiredCount} 条`,
+        });
       }
-      const finalCount = expanded
-        ? this.countExistingSectionCards(group.keywords, enhancer, group.key)
-        : initialCount;
-      const reached = finalCount >= group.desiredCount;
       this.lastDiagnostics.push({
         groupKey: group.key,
         desiredCount: group.desiredCount,
         initialCount,
-        finalCount,
-        createdCount: Math.max(0, finalCount - initialCount),
-        status: reached ? (finalCount > initialCount ? 'expanded' : 'satisfied') : 'failed',
-        failureCode: reached ? undefined : 'CAPACITY_NOT_REACHED',
+        finalCount: initialCount,
+        createdCount: 0,
+        status: needsWorkflow || needsExpansion ? 'planned' : 'satisfied',
       });
     }
+    return { actions, requiresConfirmation: actions.length > 0 };
+  }
 
-    if (anyExpanded) {
-      // 额外等待 150ms 确保 Vue/React/Angular 虚拟 DOM 挂载完成
-      await sleep(150, signal);
+  /** Execute only parallel/static preparation after the user has confirmed the preview. */
+  async executeParallelPreparation(
+    plan: SectionPreparationPlan,
+    enhancer?: PlatformEnhancer | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    let anyExpanded = false;
+    if (plan.actions.length > 0 && await prepareEditableSections(signal) > 0) anyExpanded = true;
+
+    for (const action of plan.actions.filter((candidate) => candidate.mode === 'parallel')) {
+      const keywords = GROUP_KEYWORDS[action.groupKey];
+      const delta = Math.max(0, action.desiredCount - action.initialCount);
+      const expanded = delta > 0 && await this.expandSection(
+        action.groupKey,
+        keywords,
+        action.desiredCount,
+        delta,
+        enhancer,
+        signal,
+      );
+      if (expanded) anyExpanded = true;
+      const finalCount = this.countExistingSectionCards(keywords, enhancer, action.groupKey);
+      const diagnostic = this.lastDiagnostics.find((item) => item.groupKey === action.groupKey);
+      if (diagnostic) {
+        diagnostic.finalCount = finalCount;
+        diagnostic.createdCount = Math.max(0, finalCount - diagnostic.initialCount);
+        diagnostic.status = finalCount >= action.desiredCount ? 'expanded' : 'failed';
+        diagnostic.failureCode = finalCount >= action.desiredCount ? undefined : 'CAPACITY_NOT_REACHED';
+      }
     }
-
+    if (anyExpanded) await sleep(150, signal);
     return anyExpanded;
+  }
+
+  /**
+   * 自动探测页面现有卡片行数，并按需差量点击 "+添加经历" 按钮 (Required - Existing)
+   */
+  async ensureSectionCapacity(resume: StandardResume, enhancer?: PlatformEnhancer | null, signal?: AbortSignal): Promise<boolean> {
+    const plan = this.planSectionPreparation(resume, enhancer);
+    return this.executeParallelPreparation(plan, enhancer, signal);
   }
 
   private async expandSection(

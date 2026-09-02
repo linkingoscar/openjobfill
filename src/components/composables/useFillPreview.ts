@@ -66,16 +66,20 @@ export function useFillPreview(
     ...(previewPlan.value?.plan.items.filter((item) => item.action === 'NEEDS_USER') ?? []),
     ...getRemotePreviewItems('NEEDS_USER'),
   ]);
+  const previewWorkflowItems = computed(() => previewPlan.value?.sectionPreparation?.actions || []);
 
   const confirmFill = async () => {
-    if (!previewPlan.value || previewFillItems.value.length === 0 || isFilling.value) return;
+    if (!previewPlan.value
+      || (previewFillItems.value.length === 0 && previewWorkflowItems.value.length === 0)
+      || isFilling.value) return;
     isFilling.value = true;
     operationError.value = '';
     try {
       const result = await formFillerEngine.executePlan(previewPlan.value!);
+      const executedPlan = { ...previewPlan.value, plan: result.plan || previewPlan.value.plan };
       lastPlan.value = previewBasePlan.value
-        ? mergePlans(previewBasePlan.value, previewPlan.value)
-        : previewPlan.value;
+        ? mergePlans(previewBasePlan.value, executedPlan)
+        : executedPlan;
       fillResult.value = result;
       await persistFillHistory(result);
       previewPlan.value = null;
@@ -124,6 +128,7 @@ export function useFillPreview(
     lastPlan,
     previewFillItems,
     previewNeedsUserItems,
+    previewWorkflowItems,
     confirmFill,
     cancelPreview,
     handlePreviewManualFill,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildFillableFields } from '@/core/engine/manualFill';
+import { buildFillableFields, rememberManualFillMapping } from '@/core/engine/manualFill';
+import { ruleStorage } from '@/core/storage/ruleStorage';
+import { beforeEach } from 'vitest';
 import type { StandardResume } from '@/types/resume';
 
 const RESUME: StandardResume = {
@@ -39,6 +41,7 @@ const RESUME: StandardResume = {
 };
 
 describe('manualFill.buildFillableFields', () => {
+  beforeEach(() => localStorage.clear());
   it('提取有值的基础字段并展开嵌套对象', () => {
     const fields = buildFillableFields(RESUME);
     const byKey = new Map(fields.map((f) => [f.resumeKey, f.value]));
@@ -91,5 +94,18 @@ describe('manualFill.buildFillableFields', () => {
     for (const f of fields) {
       expect(f.value).not.toBe('');
     }
+  });
+
+  it('用户明确点选目标和值后，记住当前站点映射供下次自动填写', async () => {
+    document.body.innerHTML = '<form><input id="manual-company"></form>';
+    const element = document.querySelector<HTMLElement>('#manual-company')!;
+    const remembered = await rememberManualFillMapping(
+      'https://careers.example.com/apply',
+      { resumeKey: 'experiences.0.company', label: '公司', value: '示例科技' },
+      element,
+    );
+    expect(remembered).toBe(true);
+    const rule = await ruleStorage.findMatchingRuleForUrl('https://careers.example.com/apply/step2');
+    expect(rule?.fields[0]).toMatchObject({ selector: '#manual-company', resumeKey: 'experiences.0.company' });
   });
 });

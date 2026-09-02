@@ -6,6 +6,7 @@ import { planGenerator } from '../pipeline/planGenerator';
 import { pipelineExecutor } from '../pipeline/executor';
 import { sectionEngine } from './sectionEngine';
 import { getEnhancerForUrl, getEnhancerMatchTrace } from '../adapters/enhancers';
+import { getSiteProfileMatchTrace } from '../adapters/siteProfiles';
 import { ruleStorage } from '../storage/ruleStorage';
 import { resumeStorage } from '../storage/resumeStorage';
 import { scanMissingRequiredFields, scanAttachmentDropzones } from './badgeDecorator';
@@ -19,6 +20,9 @@ import {
   type AssociationDryRunReport,
 } from '../pipeline/snapshotRecorder';
 import { createPageFingerprint, FillRunContext, throwIfAborted } from '../pipeline/runContext';
+import type { SectionPreparationPlan } from './sectionEngine';
+import { repeatableSectionWorkflowRunner } from './sectionWorkflow';
+import type { RepeatableSectionKey } from '../../types/siteProfile';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
 export interface AnalyzedPlan {
@@ -34,7 +38,26 @@ export interface AnalyzedPlan {
   pageFingerprint: string;
   remoteFrames?: RemoteFramePlan[];
   diagnostics?: AssociationDryRunReport;
+  /** Read-only list of page actions shown in preview and executed only after confirmation. */
+  sectionPreparation?: SectionPreparationPlan;
   dryRun?: boolean;
+}
+
+function getSectionRecordCount(resume: StandardResume, section: RepeatableSectionKey): number {
+  if (section === 'education') return resume.educations?.length || 0;
+  if (section === 'experience') return resume.experiences?.length || 0;
+  if (section === 'project') return resume.projects?.length || 0;
+  return resume.familyMembers?.length || 0;
+}
+
+function mergeExecutionResult(target: PipelineExecutionResult, incoming: PipelineExecutionResult): void {
+  target.filledCount += incoming.filledCount;
+  target.skippedCount += incoming.skippedCount;
+  target.failedCount += incoming.failedCount;
+  target.verifiedCount += incoming.verifiedCount;
+  target.logs.push(...incoming.logs);
+  target.remainingTasks.push(...incoming.remainingTasks);
+  target.durationMs += incoming.durationMs;
 }
 
 /** 预览期间页面或简历发生变化时，阻止写入旧计划。 */
@@ -110,6 +133,7 @@ async function assertAnalyzedPlanIsCurrent(analyzed: AnalyzedPlan): Promise<void
 
 export class FormFillerEngine {
   private readonly activeRuns = new Map<string, FillRunContext>();
+  private readonly runResumes = new Map<string, StandardResume>();
   private activeRunId: string | null = null;
 
   getActiveRunId(): string | null {
@@ -118,6 +142,7 @@ export class FormFillerEngine {
 
   cancelRun(runId: string, reason = '填写已取消'): void {
     this.activeRuns.get(runId)?.abort(reason);
+    this.runResumes.delete(runId);
   }
 
   cancelActiveRun(reason = '填写已取消'): void {
@@ -139,6 +164,7 @@ export class FormFillerEngine {
     }
     const run = new FillRunContext({ runId: options.runId });
     this.activeRuns.set(run.runId, run);
+    this.runResumes.set(run.runId, resume);
     this.activeRunId = run.runId;
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     const analysisStartedAt = Date.now();
@@ -150,21 +176,13 @@ export class FormFillerEngine {
     const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
     if (enhancer) {
       console.log(`[OpenJobFill Pipeline] Matched Platform Enhancer: ${enhancer.name} (${enhancer.id})`);
-      if (!options.dryRun && enhancer.onBeforePlan) {
-        await enhancer.onBeforePlan(resume, typeof document !== 'undefined' ? document : undefined, run.signal);
-      }
     }
 
-    // 2. 全局通用多经历卡片差量扩增 (SectionEngine)
+    // 2. Read-only section preparation plan. DOM actions wait for user confirmation.
     const sectionStartedAt = Date.now();
-    if (!options.dryRun) {
-      try {
-        await sectionEngine.ensureSectionCapacity(resume, enhancer, run.signal);
-      } catch (err) {
-        if (run.signal.aborted) throw err;
-        console.warn('[OpenJobFill Pipeline] SectionEngine expansion warning:', err);
-      }
-    }
+    const sectionPreparation = options.dryRun
+      ? { actions: [], requiresConfirmation: false }
+      : sectionEngine.planSectionPreparation(resume, enhancer);
     const sectionPreparationMs = Date.now() - sectionStartedAt;
     const dynamicGroups = options.dryRun ? [] : sectionEngine.getLastDiagnostics();
 
@@ -222,6 +240,7 @@ export class FormFillerEngine {
         id: enhancer?.id,
         name: enhancer?.name || '智能通用决策引擎 (Pipeline v2)',
         trace: getEnhancerMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
+        siteProfiles: getSiteProfileMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
       },
       formRoots,
       dynamicGroups,
@@ -250,6 +269,7 @@ export class FormFillerEngine {
       runId: run.runId,
       pageFingerprint: run.pageFingerprint,
       diagnostics,
+      sectionPreparation,
       dryRun: options.dryRun,
     };
     } catch (error) {
@@ -263,6 +283,7 @@ export class FormFillerEngine {
       if (!completed) {
         run.abort('分析已取消');
         this.activeRuns.delete(run.runId);
+        this.runResumes.delete(run.runId);
         if (this.activeRunId === run.runId) this.activeRunId = null;
       }
     }
@@ -276,6 +297,7 @@ export class FormFillerEngine {
     const analyzed = await this.analyze(resume, { ...options, dryRun: true });
     await SnapshotRecorder.persist(analyzed.runId);
     this.activeRuns.delete(analyzed.runId);
+    this.runResumes.delete(analyzed.runId);
     if (this.activeRunId === analyzed.runId) this.activeRunId = null;
     return analyzed;
   }
@@ -297,6 +319,7 @@ export class FormFillerEngine {
     }
     const run = new FillRunContext({ runId: options.runId });
     this.activeRuns.set(run.runId, run);
+    this.runResumes.set(run.runId, resume);
     this.activeRunId = run.runId;
     let completed = false;
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
@@ -370,6 +393,7 @@ export class FormFillerEngine {
           id: enhancer?.id,
           name: enhancer?.name || '智能通用决策引擎 (增量管道)',
           trace: getEnhancerMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
+          siteProfiles: getSiteProfileMatchTrace(currentUrl, typeof document !== 'undefined' ? document : undefined),
         },
         formRoots,
         dynamicGroups: [],
@@ -412,6 +436,7 @@ export class FormFillerEngine {
       if (!completed) {
         run.abort('增量分析已取消');
         this.activeRuns.delete(run.runId);
+        this.runResumes.delete(run.runId);
         if (this.activeRunId === run.runId) this.activeRunId = null;
       }
     }
@@ -438,11 +463,111 @@ export class FormFillerEngine {
       // 先做完整性校验，再触碰任何页面控件，避免局部写入后才发现计划已过期。
       await assertAnalyzedPlanIsCurrent(analyzed);
 
-      const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(plan, {
+      const resume = this.runResumes.get(analyzed.runId)
+        || (isExtensionStorageAvailable()
+          ? (await resumeStorage.getAllResumes()).find((candidate) => candidate.id === analyzed.resumeId)
+          : undefined);
+      const enhancer = getEnhancerForUrl(analyzed.pageUrl, typeof document !== 'undefined' ? document : undefined);
+      const preparation = analyzed.sectionPreparation || { actions: [], requiresConfirmation: false };
+      let effectivePlan = plan;
+
+      if (resume && preparation.actions.length > 0) {
+        const pageChanged = await sectionEngine.executeParallelPreparation(preparation, enhancer, run.signal);
+        if (pageChanged) {
+          run.throwIfAborted();
+          const customRule = await ruleStorage.findMatchingRuleForUrl(analyzed.pageUrl);
+          const descriptors = pageAnalyzer.analyzePage(document);
+          effectivePlan = planGenerator.generatePlan(descriptors, resume, enhancer, customRule?.fields || []);
+          await applyAIFallbackToPlan(effectivePlan, resume, run.signal);
+        }
+      }
+
+      const workflowActions = resume
+        ? preparation.actions.filter((action) => action.mode !== 'parallel' && action.workflow)
+        : [];
+      const workflowRoots = workflowActions
+        .map((action) => repeatableSectionWorkflowRunner.findSectionRoot(action.workflow!))
+        .filter((root): root is HTMLElement => !!root);
+      const baseItems = effectivePlan.items.filter((item) => {
+        if (workflowActions.some((action) => item.field.section?.type === action.groupKey)) return false;
+        return !workflowRoots.some((root) => root.contains(item.field.element));
+      });
+      const basePlan: FillPlan = {
+        ...effectivePlan,
+        items: baseItems,
+        totalFieldsCount: baseItems.length,
+        highConfidenceCount: baseItems.filter((item) => item.action === 'FILL').length,
+        needsUserCount: baseItems.filter((item) => item.action === 'NEEDS_USER').length,
+        skipCount: baseItems.filter((item) => item.action === 'SKIP').length,
+      };
+
+      const executionResult: PipelineExecutionResult = await pipelineExecutor.executePlan(basePlan, {
         signal: run.signal,
         runId: run.runId,
         pageUrl: run.pageUrl,
       });
+      const executedPlanItems = [...basePlan.items];
+
+      if (resume) {
+        const customRule = await ruleStorage.findMatchingRuleForUrl(analyzed.pageUrl);
+        for (const action of workflowActions) {
+          const config = action.workflow!;
+          const workflowResult = await repeatableSectionWorkflowRunner.run(
+            config,
+            getSectionRecordCount(resume, action.groupKey),
+            async (recordIndex, editableScope) => {
+              run.throwIfAborted();
+              const descriptors = pageAnalyzer.analyzePage(editableScope);
+              for (const field of descriptors) {
+                field.section = { type: action.groupKey, index: recordIndex, rawTitle: action.groupKey };
+              }
+              const recordPlan = planGenerator.generatePlan(descriptors, resume, enhancer, customRule?.fields || []);
+              executedPlanItems.push(...recordPlan.items);
+              await applyAIFallbackToPlan(recordPlan, resume, run.signal);
+              const recordResult = await pipelineExecutor.executePlan(recordPlan, {
+                signal: run.signal,
+                runId: run.runId,
+                pageUrl: run.pageUrl,
+              });
+              mergeExecutionResult(executionResult, recordResult);
+              return { canAdvance: !recordResult.remainingTasks.some((task) => task.required) };
+            },
+            run.signal,
+          );
+          SnapshotRecorder.record('fill', {
+            workflow: action.groupKey,
+            success: workflowResult.success,
+            completedRecords: workflowResult.completedRecords,
+            steps: workflowResult.steps,
+          }, undefined, run.runId);
+          if (!workflowResult.success) {
+            executionResult.failedCount++;
+            executionResult.logs.push({
+              field: action.groupKey,
+              label: `${action.groupKey} 重复区块`,
+              value: '',
+              status: 'failed',
+              message: workflowResult.failureReason,
+              failureCode: 'verification_mismatch',
+            });
+            executionResult.remainingTasks.push({
+              id: `workflow-${action.groupKey}-${run.runId}`,
+              label: `${action.groupKey} 重复区块`,
+              type: 'unknown',
+              required: true,
+              reason: workflowResult.failureReason || '重复区块流程需要人工继续',
+            });
+          }
+        }
+      }
+      executionResult.plan = {
+        ...effectivePlan,
+        items: executedPlanItems,
+        totalFieldsCount: executedPlanItems.length,
+        highConfidenceCount: executedPlanItems.filter((item) => item.action === 'FILL').length,
+        needsUserCount: executedPlanItems.filter((item) => item.action === 'NEEDS_USER').length,
+        skipCount: executedPlanItems.filter((item) => item.action === 'SKIP').length,
+      };
       run.throwIfAborted();
       const remoteResults = await executeRemoteFrames(analyzed.remoteFrames || [], { runId: run.runId, signal: run.signal });
     const remoteDurationMs = remoteResults.reduce((max, remote) => Math.max(max, remote.durationMs), 0);
@@ -480,7 +605,7 @@ export class FormFillerEngine {
       failedCount: executionResult.failedCount,
       verifiedCount: executionResult.verifiedCount,
       fields: executionResult.logs.map((log) => {
-        const planItem = plan.items.find((item) =>
+        const planItem = executionResult.plan.items.find((item) =>
           (item.semanticKey && item.semanticKey === log.field) || item.field.label === log.label,
         );
         return {
@@ -495,7 +620,7 @@ export class FormFillerEngine {
         };
       }),
     }, executionResult.durationMs, run.runId);
-    await SnapshotRecorder.finish(executionResult, plan.totalFieldsCount, run.runId);
+    await SnapshotRecorder.finish(executionResult, executionResult.plan.totalFieldsCount, run.runId);
 
     return {
       success: executionResult.filledCount > 0,
@@ -518,6 +643,7 @@ export class FormFillerEngine {
       throw error;
     } finally {
       this.activeRuns.delete(analyzed.runId);
+      this.runResumes.delete(analyzed.runId);
       if (this.activeRunId === analyzed.runId) this.activeRunId = null;
     }
   }

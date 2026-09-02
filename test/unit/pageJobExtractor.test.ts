@@ -31,4 +31,25 @@ describe('page job extractor', () => {
     document.body.innerHTML = '<main><h1>高级前端开发工程师</h1><p>欢迎投递简历。</p></main>';
     expect(isApplicationSuccessPage(document, new URL('https://jobs.example.com/jobs/123') as unknown as Location)).toBe(false);
   });
+
+  it('优先使用 JSON-LD JobPosting，并记录字段来源', () => {
+    document.title = '错误标题 - 错误公司';
+    document.body.innerHTML = `
+      <script type="application/ld+json">${JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'JobPosting',
+        title: '高级产品经理',
+        hiringOrganization: { '@type': 'Organization', name: '结构化科技' },
+        jobLocation: { address: { addressRegion: '上海市', addressLocality: '浦东新区' } },
+        description: '<p>负责产品规划与用户研究</p>',
+        baseSalary: { currency: 'CNY', value: { minValue: 25000, maxValue: 35000, unitText: 'MONTH' } },
+      })}</script>
+      <h1>错误岗位</h1>`;
+    const snapshot = extractPageJobSnapshot(document, new URL('https://jobs.example.com/pm') as unknown as Location);
+    expect(snapshot).toMatchObject({
+      companyName: '结构化科技', jobTitle: '高级产品经理', city: '上海市 浦东新区',
+      salary: '25000-35000 MONTH', description: '负责产品规划与用户研究',
+    });
+    expect(snapshot.fieldSources).toMatchObject({ companyName: 'structured_data', jobTitle: 'structured_data' });
+  });
 });

@@ -140,13 +140,17 @@ export class PlanGenerator {
       const customMatch = resolvedCustomMatch?.mapping || null;
 
       if (customMatch) {
-        const val = getValueByPath(resume, customMatch.resumeKey);
+        let customResumeKey = customMatch.resumeKey;
+        if (field.section && field.section.index > 0 && customResumeKey.includes('.0.')) {
+          customResumeKey = customResumeKey.replace('.0.', `.${field.section.index}.`);
+        }
+        const val = getValueByPath(resume, customResumeKey);
         if (hasUsableValue(val)) {
           items.push({
             id: `plan_${field.id}`,
             field,
-            semanticKey: customMatch.resumeKey,
-            targetValue: this.toFieldTargetValue(field, resume, customMatch.resumeKey, val),
+            semanticKey: customResumeKey,
+            targetValue: this.toFieldTargetValue(field, resume, customResumeKey, val),
             confidence: 1.0,
             action: 'FILL',
             source: 'user_rule',
@@ -154,7 +158,7 @@ export class PlanGenerator {
             driverType: this.resolveDriverType(field),
           });
           highConfidenceCount++;
-          matchedSemanticKeys.add(customMatch.resumeKey);
+          matchedSemanticKeys.add(customResumeKey);
           continue;
         }
       }

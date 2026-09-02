@@ -5,6 +5,7 @@ export interface PageJobSnapshot {
   city?: string;
   description?: string;
   jobUrl: string;
+  fieldSources?: Partial<Record<'companyName' | 'jobTitle' | 'salary' | 'city' | 'description', 'structured_data' | 'meta' | 'dom' | 'heuristic'>>;
 }
 
 const APPLICATION_SUCCESS_PATTERNS = [
@@ -57,9 +58,71 @@ function inferCompanyFromTitle(title: string, hostname: string): string {
   return company || hostname.replace(/^www\./, '') || '目标企业';
 }
 
+interface StructuredJobPosting {
+  title?: string;
+  description?: string;
+  hiringOrganization?: { name?: string } | string;
+  jobLocation?: Array<{ address?: Record<string, unknown> }> | { address?: Record<string, unknown> };
+  baseSalary?: unknown;
+}
+
+function stripMarkup(value: unknown, maxLength: number): string {
+  return cleanText(String(value || '').replace(/<[^>]+>/g, ' '), maxLength);
+}
+
+function flattenJsonLd(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  return [record, ...flattenJsonLd(record['@graph'])];
+}
+
+function readJobPosting(doc: Document): StructuredJobPosting | null {
+  const scripts = Array.from(doc.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]')).slice(0, 12);
+  for (const script of scripts) {
+    const raw = script.textContent?.slice(0, 80_000);
+    if (!raw) continue;
+    try {
+      const item = flattenJsonLd(JSON.parse(raw)).find((candidate) => {
+        const type = candidate['@type'];
+        return type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
+      });
+      if (item) return item as StructuredJobPosting;
+    } catch {
+      // Ignore malformed third-party structured data and continue with visible DOM evidence.
+    }
+  }
+  return null;
+}
+
+function structuredLocation(posting: StructuredJobPosting | null): string {
+  if (!posting?.jobLocation) return '';
+  const locations = Array.isArray(posting.jobLocation) ? posting.jobLocation : [posting.jobLocation];
+  for (const location of locations) {
+    const address = location?.address;
+    if (!address || typeof address !== 'object') continue;
+    const text = cleanText([address.addressRegion, address.addressLocality].filter(Boolean).join(' '), 80);
+    if (text) return text;
+  }
+  return '';
+}
+
+function structuredSalary(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string' || typeof value === 'number') return cleanText(String(value), 100);
+  if (typeof value !== 'object') return '';
+  const raw = value as Record<string, unknown>;
+  const amount = raw.value && typeof raw.value === 'object' ? raw.value as Record<string, unknown> : raw;
+  const min = amount.minValue;
+  const max = amount.maxValue;
+  const unit = cleanText(String(amount.unitText || raw.currency || ''), 20);
+  return cleanText([min, max].filter((entry) => entry !== undefined).join('-') + (unit ? ` ${unit}` : ''), 100);
+}
+
 /** 从当前岗位页提取投递看板草稿；只读取公开页面文本，不读取简历表单值。 */
 export function extractPageJobSnapshot(doc: Document = document, location: Location = window.location): PageJobSnapshot {
   const title = cleanText(doc.title, 160);
+  const structured = readJobPosting(doc);
   const companyMeta = cleanText(
     doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content')
       || doc.querySelector('meta[name="author"]')?.getAttribute('content'),
@@ -73,13 +136,33 @@ export function extractPageJobSnapshot(doc: Document = document, location: Locat
   const bodyText = cleanText((doc.body as HTMLElement | null)?.innerText || doc.body?.textContent, 4000);
   const salaryMatch = bodyText.match(/(?:\d{1,3}(?:\.\d+)?\s*[kK千]-\d{1,3}(?:\.\d+)?\s*[kK千](?:[·x×]\s*\d{1,2}薪)?|\d{4,6}\s*[-~至]\s*\d{4,6}\s*元)/);
   const titleParts = title.split(/[-_—|–]/).map((part) => cleanText(part, 80)).filter(Boolean);
+  const structuredCompany = typeof structured?.hiringOrganization === 'string'
+    ? cleanText(structured.hiringOrganization, 60)
+    : cleanText(structured?.hiringOrganization?.name, 60);
+  const structuredTitle = cleanText(structured?.title, 80);
+  const structuredDescription = stripMarkup(structured?.description, 2_000);
+  const structuredCity = structuredLocation(structured);
+  const structuredPay = structuredSalary(structured?.baseSalary);
+
+  const companyName = structuredCompany || companyMeta || companyElement || inferCompanyFromTitle(title, location.hostname);
+  const jobTitle = structuredTitle || jobElement || titleParts[0] || '网申岗位';
+  const finalSalary = structuredPay || salaryElement || salaryMatch?.[0];
+  const finalCity = structuredCity || city || undefined;
+  const finalDescription = structuredDescription || description || undefined;
 
   return {
-    companyName: companyMeta || companyElement || inferCompanyFromTitle(title, location.hostname),
-    jobTitle: jobElement || titleParts[0] || '网申岗位',
-    salary: salaryElement || salaryMatch?.[0],
-    city: city || undefined,
-    description: description || undefined,
+    companyName,
+    jobTitle,
+    salary: finalSalary,
+    city: finalCity,
+    description: finalDescription,
     jobUrl: location.href,
+    fieldSources: {
+      companyName: structuredCompany ? 'structured_data' : companyMeta ? 'meta' : companyElement ? 'dom' : 'heuristic',
+      jobTitle: structuredTitle ? 'structured_data' : jobElement ? 'dom' : 'heuristic',
+      ...(finalSalary ? { salary: structuredPay ? 'structured_data' as const : salaryElement ? 'dom' as const : 'heuristic' as const } : {}),
+      ...(finalCity ? { city: structuredCity ? 'structured_data' as const : 'dom' as const } : {}),
+      ...(finalDescription ? { description: structuredDescription ? 'structured_data' as const : 'dom' as const } : {}),
+    },
   };
 }

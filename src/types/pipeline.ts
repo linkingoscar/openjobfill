@@ -1,7 +1,8 @@
-import type { StandardResume, CustomQABankItem } from './resume';
+import type { CustomQABankItem } from './resume';
 import type { FillLogItem } from './adapter';
 import type { FieldSafetyInfo } from '../core/pipeline/fieldSafety';
 import type { CustomRuleMatchMethod } from './rule';
+import type { RepeatableWorkflowConfig, SiteProfileVerificationStatus } from './siteProfile';
 
 export type FieldType =
   | 'text'
@@ -183,6 +184,12 @@ export interface PlatformEnhancer {
   name: string;
   description?: string;
   priority: number;
+  /** Bundled declarative site profile that selected or refined this enhancer. */
+  siteProfile?: {
+    id: string;
+    version: number;
+    verificationStatus: SiteProfileVerificationStatus;
+  };
   matches(url: string, doc?: Document): boolean;
   
   // 增强字段属性识别
@@ -199,6 +206,6 @@ export interface PlatformEnhancer {
     family?: PlatformRepeaterConfig;
   };
 
-  // 增行/初始化钩子
-  onBeforePlan?(resume: StandardResume, doc?: Document, signal?: AbortSignal): Promise<void> | void;
+  /** Explicit repeatable-card workflows. No submit/next action is permitted. */
+  workflowConfigs?: RepeatableWorkflowConfig[];
 }
