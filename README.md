@@ -183,7 +183,7 @@
 ## 🚀 安装与运行指南
 
 ### 1. 环境准备与依赖安装
-确保已安装 [Node.js](https://nodejs.org/) (>= 18.0) 和 [pnpm](https://pnpm.io/)：
+确保已安装 [Node.js](https://nodejs.org/) **24 或以上版本**和 [pnpm](https://pnpm.io/)；CI 使用 Node 24。现有 PDF 解析依赖不兼容 Node 18/20。安装依赖时会自动执行 `wxt prepare` 生成类型：
 ```bash
 pnpm install
 ```

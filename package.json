@@ -5,6 +5,9 @@
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "postinstall": "wxt prepare",
     "dev": "wxt",
