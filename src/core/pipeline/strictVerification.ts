@@ -65,6 +65,10 @@ function normalizeSelect(value: unknown): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 }
+function normalizeAdministrativeText(value: unknown): string {
+  const raw = text(value);
+  return raw.length >= 3 && /[省市区县]$/.test(raw) ? raw.slice(0, -1) : raw;
+}
 
 export function inferVerificationValueType(driverType: DriverType, semanticKey?: string): VerificationValueType {
   const key = semanticKey || '';
@@ -87,9 +91,6 @@ function equalDate(actual: unknown, expected: unknown): VerificationStatus {
   if (!a || !e) return 'MISMATCH';
   if (a === e) return 'VERIFIED';
   if (a === 'PRESENT' || e === 'PRESENT') return 'MISMATCH';
-  // The target fact defines the required precision. If the profile only stores YYYY-MM,
-  // a page that renders a concrete day in that same month is fully verified. The reverse
-  // direction is only partial because the page dropped information that the profile had.
   if (e.length === 7 && a.length === 10 && a.startsWith(`${e}-`)) return 'VERIFIED';
   if (e.length === 4 && a.length >= 7 && a.startsWith(e)) return 'VERIFIED';
   if (a.length < e.length && a.length >= 7 && e.startsWith(a)) return 'PARTIALLY_VERIFIED';
@@ -100,14 +101,11 @@ function equalSelect(actual: unknown, expected: unknown): { status: Verification
   const a = normalizeSelect(actual); const e = normalizeSelect(expected);
   if (!a || !e) return { status: 'MISMATCH', actual: a, expected: e };
   if (a === e) return { status: 'VERIFIED', actual: a, expected: e };
-
   const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
   for (const domain of domains) {
     const canonicalActual = optionResolver.toCanonical(domain, a);
     const canonicalExpected = optionResolver.toCanonical(domain, e);
-    if (canonicalActual && canonicalExpected && canonicalActual === canonicalExpected) {
-      return { status: 'VERIFIED', actual: canonicalActual, expected: canonicalExpected };
-    }
+    if (canonicalActual && canonicalExpected && canonicalActual === canonicalExpected) return { status: 'VERIFIED', actual: canonicalActual, expected: canonicalExpected };
   }
   return { status: 'MISMATCH', actual: a, expected: e };
 }
@@ -138,15 +136,21 @@ export function verifyTypedValue(actual: unknown, expected: unknown, valueType: 
     case 'SELECT': {
       const result = equalSelect(actual, expected); status = result.status; normalizedActual = result.actual; normalizedExpected = result.expected; break;
     }
-    case 'LONG_TEXT':
-    case 'TEXT': normalizedActual = text(actual); normalizedExpected = text(expected); status = normalizedActual === normalizedExpected ? 'VERIFIED' : 'MISMATCH'; break;
+    case 'LONG_TEXT': normalizedActual = text(actual); normalizedExpected = text(expected); status = normalizedActual === normalizedExpected ? 'VERIFIED' : 'MISMATCH'; break;
+    case 'TEXT': {
+      normalizedActual = text(actual); normalizedExpected = text(expected);
+      if (normalizedActual === normalizedExpected) status = 'VERIFIED';
+      else {
+        const adminActual = normalizeAdministrativeText(actual); const adminExpected = normalizeAdministrativeText(expected);
+        status = adminActual.length >= 2 && adminActual === adminExpected ? 'VERIFIED' : 'MISMATCH';
+      }
+      break;
+    }
   }
   return { status, actual, expected, normalizedActual, normalizedExpected, reason: status === 'MISMATCH' ? '读回值与目标值不严格等价' : undefined };
 }
 
 export function verifyByField(actual: unknown, expected: unknown, driverType: DriverType, semanticKey?: string): VerificationResult {
-  // Cascaders frequently render the same path with a different separator. Treat an obvious
-  // multi-segment path as a region/path equivalence check without introducing substring matching.
   if (driverType === 'cascader') {
     const aSegments = normalizeRegion(actual); const eSegments = normalizeRegion(expected);
     if (aSegments.length >= 2 && eSegments.length >= 2) return verifyTypedValue(actual, expected, 'REGION');
