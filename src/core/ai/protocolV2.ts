@@ -69,6 +69,12 @@ const DOCUMENT_ARRAY_FIELDS: Record<string, Set<string>> = {
   academicAchievements: new Set(['title', 'venue', 'authorOrder', 'url', 'date', 'abstract']),
   campusExperiences: new Set(['organization', 'title', 'startDate', 'endDate', 'description', 'responsibility']),
 };
+const BASIC_BOOLEAN_FIELDS = new Set(['visaSponsorship', 'acceptOvertime', 'acceptBusinessTrip', 'adjustable', 'cityFlexible', 'hasRelatives', 'hasPunishment']);
+const BASIC_NUMBER_FIELDS = new Set(['age', 'workingYears', 'expectedSalaryMin', 'expectedSalaryMax']);
+const ARRAY_BOOLEAN_FIELDS: Record<string, Set<string>> = {
+  educations: new Set(['isFullTime', 'isHighest', 'is985_211']),
+  experiences: new Set(['isCurrent']),
+};
 
 /** Exact structural whitelist for AI document parsing. System/meta keys and arbitrary paths are rejected. */
 export function isAllowedDocumentCandidatePath(path: string): boolean {
@@ -85,6 +91,19 @@ export function isAllowedDocumentCandidatePath(path: string): boolean {
   return fields.has(parts[2]);
 }
 
+function isValidDocumentCandidateValue(path: string, value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  const parts = path.split('.');
+  if (parts[0] === 'basics' && parts.length === 2) {
+    if (BASIC_BOOLEAN_FIELDS.has(parts[1])) return typeof value === 'boolean';
+    if (BASIC_NUMBER_FIELDS.has(parts[1])) return typeof value === 'number' && Number.isFinite(value);
+    return typeof value === 'string' && !!value.trim();
+  }
+  if (parts[0] === 'basics' && parts.length === 3) return typeof value === 'string' && !!value.trim();
+  if (parts.length === 3 && ARRAY_BOOLEAN_FIELDS[parts[0]]?.has(parts[2])) return typeof value === 'boolean';
+  return typeof value === 'string' && !!value.trim();
+}
+
 export function validateDocumentParseResponse(
   response: unknown,
   allowedPaths?: Set<string>,
@@ -97,10 +116,9 @@ export function validateDocumentParseResponse(
     const item = candidate as Record<string, unknown>;
     if (typeof item.path !== 'string') return [];
     if (allowedPaths ? !allowedPaths.has(item.path) : !isAllowedDocumentCandidatePath(item.path)) return [];
-    if (seen.has(item.path)) return [];
+    if (seen.has(item.path) || !isValidDocumentCandidateValue(item.path, item.value)) return [];
     const confidence = Number(item.confidence);
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return [];
-    if (item.value === undefined || item.value === null || (typeof item.value === 'string' && !item.value.trim())) return [];
     const evidence = item.evidence && typeof item.evidence === 'object' ? item.evidence as Record<string, unknown> : undefined;
     const page = evidence && typeof evidence.page === 'number' && Number.isInteger(evidence.page) && evidence.page > 0 && evidence.page <= 200
       ? evidence.page
