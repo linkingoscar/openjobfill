@@ -80,7 +80,7 @@ function migrateLegacyItemNames(payload: UnknownRecord): UnknownRecord {
       const tags = Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === 'string') : [];
       item.keyword = tags.length > 0 ? tags.join(',') : item.question;
     }
-    delete item.question; delete item.tags;
+    delete item.tags;
   });
   return migrated;
 }
@@ -90,6 +90,16 @@ function migrateV4ToV5(payload: UnknownRecord): UnknownRecord {
   if (!isRecord(migrated.fieldMeta)) migrated.fieldMeta = {};
   if (migrated.variantType !== 'job-variant' && migrated.variantType !== 'master') migrated.variantType = 'master';
   if (!Array.isArray(migrated.variantOverrides)) migrated.variantOverrides = [];
+  if (Array.isArray(migrated.qaBank)) {
+    migrated.qaBank = migrated.qaBank.map((raw) => {
+      if (!isRecord(raw)) return raw;
+      const item = { ...raw };
+      if (item.scope === 'domain') item.scope = 'company-domain';
+      if (!item.companyDomain && typeof item.domain === 'string') item.companyDomain = item.domain;
+      if (!item.question && typeof item.keyword === 'string') item.question = item.keyword;
+      return item;
+    });
+  }
   return migrated;
 }
 
@@ -152,7 +162,10 @@ const ARRAY_FIELDS: Record<string, Record<string, FieldKind>> = {
   awards: { id: 'string', name: 'string', issueDate: 'string', level: 'string', grade: 'string', role: 'string', description: 'string' },
   academicAchievements: { id: 'string', title: 'string', venue: 'string', authorOrder: 'string', url: 'string', date: 'string', abstract: 'string' },
   campusExperiences: { id: 'string', organization: 'string', title: 'string', startDate: 'string', endDate: 'string', description: 'string', responsibility: 'string' },
-  qaBank: { id: 'string', keyword: 'string', answer: 'string', scope: 'string', domain: 'string' },
+  qaBank: {
+    id: 'string', keyword: 'string', answer: 'string', question: 'string', scope: 'string', domain: 'string',
+    jobFamily: 'string', companyDomain: 'string', jobPostingId: 'string',
+  },
 };
 
 const ARRAY_DEFAULTS: Record<string, UnknownRecord> = {
@@ -184,6 +197,57 @@ function parseLocation(value: unknown, context: string, issues: string[]): Unkno
   return copyKnownFields(value, LOCATION_FIELDS, context, issues);
 }
 
+const QA_SCOPES = new Set(['global', 'job-family', 'company-domain', 'job-posting']);
+const QA_VERSION_SOURCES = new Set(['manual', 'ai-confirmed']);
+
+function parseQAVersions(item: UnknownRecord, itemId: string, now: number, context: string, issues: string[]): UnknownRecord[] {
+  if (item.versions === undefined) {
+    return typeof item.answer === 'string' && item.answer.trim()
+      ? [{ id: `qa-version-${itemId}-legacy`, answer: item.answer, createdAt: now, confirmedByUser: true, source: 'manual' }]
+      : [];
+  }
+  if (!Array.isArray(item.versions)) {
+    issues.push(`${context}.versions 必须是数组`);
+    return [];
+  }
+  return item.versions.flatMap((raw, index) => {
+    if (!isRecord(raw)) { issues.push(`${context}.versions[${index}] 必须是对象`); return []; }
+    if (typeof raw.answer !== 'string' || !raw.answer.trim()) { issues.push(`${context}.versions[${index}].answer 必须是非空字符串`); return []; }
+    const createdAt = typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : now;
+    const source = typeof raw.source === 'string' && QA_VERSION_SOURCES.has(raw.source) ? raw.source : 'manual';
+    const version: UnknownRecord = {
+      id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : `qa-version-${itemId}-${index}-${now}`,
+      answer: raw.answer,
+      createdAt,
+      confirmedByUser: raw.confirmedByUser === true,
+      source,
+    };
+    if (typeof raw.maxChars === 'number' && Number.isFinite(raw.maxChars) && raw.maxChars > 0) version.maxChars = Math.round(raw.maxChars);
+    if (typeof raw.lastUsedAt === 'number' && Number.isFinite(raw.lastUsedAt)) version.lastUsedAt = raw.lastUsedAt;
+    if (typeof raw.lastUsedUrl === 'string') version.lastUsedUrl = raw.lastUsedUrl.slice(0, 1000);
+    return [version];
+  });
+}
+
+function parseQAItem(item: UnknownRecord, index: number, now: number, issues: string[]): UnknownRecord {
+  const context = `简历.qaBank[${index}]`;
+  const clean = { ...ARRAY_DEFAULTS.qaBank, ...copyKnownFields(item, ARRAY_FIELDS.qaBank, context, issues) };
+  if (typeof clean.id !== 'string' || !clean.id.trim()) clean.id = `qaBank-${now}-${index}`;
+  if (typeof clean.keyword !== 'string' || !clean.keyword.trim()) clean.keyword = typeof clean.question === 'string' ? clean.question : '';
+  if (typeof clean.question !== 'string' || !clean.question.trim()) clean.question = clean.keyword;
+  const rawScope = clean.scope === 'domain' ? 'company-domain' : clean.scope;
+  clean.scope = typeof rawScope === 'string' && QA_SCOPES.has(rawScope) ? rawScope : 'global';
+  if (!clean.companyDomain && typeof clean.domain === 'string' && clean.domain.trim()) clean.companyDomain = clean.domain;
+  if (clean.scope === 'company-domain' && !clean.companyDomain) clean.scope = 'global';
+  if (clean.scope === 'job-family' && !clean.jobFamily) clean.scope = 'global';
+  if (clean.scope === 'job-posting' && !clean.jobPostingId) clean.scope = 'global';
+  clean.versions = parseQAVersions(item, String(clean.id), now, context, issues);
+  if ((!clean.answer || !String(clean.answer).trim()) && (clean.versions as UnknownRecord[]).length) {
+    clean.answer = String((clean.versions as UnknownRecord[])[0].answer || '');
+  }
+  return clean;
+}
+
 function parseArray(payload: UnknownRecord, key: string, now: number, issues: string[]): UnknownRecord[] {
   const value = payload[key];
   if (value === undefined) return [];
@@ -191,9 +255,12 @@ function parseArray(payload: UnknownRecord, key: string, now: number, issues: st
   const result: UnknownRecord[] = [];
   value.forEach((item, index) => {
     if (!isRecord(item)) { issues.push(`简历.${key}[${index}] 必须是对象`); return; }
+    if (key === 'qaBank') {
+      result.push(parseQAItem(item, index, now, issues));
+      return;
+    }
     const clean = { ...ARRAY_DEFAULTS[key], ...copyKnownFields(item, ARRAY_FIELDS[key], `简历.${key}[${index}]`, issues) };
     if (typeof clean.id !== 'string' || !clean.id.trim()) clean.id = `${key}-${now}-${index}`;
-    if (key === 'qaBank' && !clean.scope) clean.scope = typeof clean.domain === 'string' && clean.domain ? 'domain' : 'global';
     result.push(clean);
   });
   return result;
