@@ -31,6 +31,8 @@ export interface PersonalSiteCompatibility {
   modules: Record<CompatibilityModule, 'UNSEEN' | 'PASS' | 'PARTIAL' | 'FAIL'>;
   knownLimitations: string[];
   lastFailureCode?: string;
+  /** Explicit evidence that PERSONAL_VERIFIED was confirmed outside fixture-only runs. */
+  personalVerifiedAt?: number;
 }
 
 export function recordMappingVerification(mapping: PersonalSiteMapping, result: { verified: boolean; reason?: string; now?: number }): PersonalSiteMapping {
@@ -81,10 +83,18 @@ export function updateCompatibility(
   const values = Object.values(modules);
   const attempted = values.filter((value) => value !== 'UNSEEN');
   let status: PersonalCompatibilityStatus = attempted.length ? 'DETECTED' : 'UNSEEN';
-  if (attempted.some((value) => value === 'FAIL')) status = compatibility.status === 'PERSONAL_VERIFIED' ? 'DEGRADED' : 'PARTIAL';
-  else if (attempted.some((value) => value === 'PARTIAL')) status = 'PARTIAL';
-  else if (attempted.length >= 3 && attempted.every((value) => value === 'PASS')) status = 'PERSONAL_VERIFIED';
-  else if (attempted.length) status = 'PARTIAL';
+
+  if (attempted.some((value) => value === 'FAIL')) {
+    status = compatibility.status === 'PERSONAL_VERIFIED' || compatibility.status === 'DEGRADED' ? 'DEGRADED' : 'PARTIAL';
+  } else if (attempted.some((value) => value === 'PARTIAL')) {
+    status = 'PARTIAL';
+  } else if (compatibility.status === 'PERSONAL_VERIFIED') {
+    // A previously explicit real-flow verification stays verified while all newly observed modules pass.
+    status = 'PERSONAL_VERIFIED';
+  } else {
+    // Automated/fixture/runtime observations alone never claim PERSONAL_VERIFIED.
+    status = attempted.length ? 'PARTIAL' : 'UNSEEN';
+  }
 
   return {
     ...compatibility,
@@ -94,5 +104,28 @@ export function updateCompatibility(
     browserVersion: options.browserVersion || compatibility.browserVersion,
     urlScope: options.urlScope || compatibility.urlScope,
     lastFailureCode: result === 'FAIL' ? options.failureCode || compatibility.lastFailureCode : compatibility.lastFailureCode,
+  };
+}
+
+/**
+ * PERSONAL_VERIFIED is deliberately an explicit transition. Development fixtures and
+ * passive execution telemetry must not call this automatically.
+ */
+export function markPersonalVerified(
+  compatibility: PersonalSiteCompatibility,
+  options: { now?: number; browserVersion?: string; urlScope?: string } = {},
+): PersonalSiteCompatibility {
+  const attempted = Object.values(compatibility.modules).filter((value) => value !== 'UNSEEN');
+  if (attempted.length < 3 || attempted.some((value) => value !== 'PASS')) {
+    throw new Error('至少三个已验证模块全部 PASS 后才能标记 PERSONAL_VERIFIED');
+  }
+  const now = options.now ?? Date.now();
+  return {
+    ...compatibility,
+    status: 'PERSONAL_VERIFIED',
+    personalVerifiedAt: now,
+    lastVerifiedAt: now,
+    browserVersion: options.browserVersion || compatibility.browserVersion,
+    urlScope: options.urlScope || compatibility.urlScope,
   };
 }
