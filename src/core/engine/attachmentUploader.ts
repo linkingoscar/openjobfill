@@ -1,4 +1,5 @@
 import { getAllDocumentsAcrossIframes, isElementVisible, sleep } from '../../utils/dom';
+import { personalCompatibilityStorage } from '../storage/personalCompatibilityStorage';
 import { selectUniqueResumeTarget, verifyAttachmentUpload } from './attachmentVerification';
 import type { VerificationStatus } from '../pipeline/strictVerification';
 
@@ -58,6 +59,25 @@ export interface AttachmentUploadResult {
   requiresUserSelection?: boolean;
 }
 
+async function persistAttachmentCompatibility(result: AttachmentUploadResult): Promise<void> {
+  if (typeof window === 'undefined' || !window.location?.href) return;
+  const compatibilityResult = result.status === 'VERIFIED'
+    ? 'PASS'
+    : result.status === 'PARTIALLY_VERIFIED' || result.requiresUserSelection
+      ? 'PARTIAL'
+      : 'FAIL';
+  try {
+    await personalCompatibilityStorage.recordModuleResult(
+      window.location.href,
+      'attachment',
+      compatibilityResult,
+      compatibilityResult === 'FAIL' ? 'attachment_unverified' : undefined,
+    );
+  } catch (error) {
+    console.warn('[OpenJobFill] 附件兼容性结果未能持久化:', error);
+  }
+}
+
 /**
  * 把用户明确选择的文件注入指定控件，并立即执行页面读回。
  * 纯派发 drop/change 事件从不直接等于成功。
@@ -85,15 +105,19 @@ export async function uploadResumeToPageVerified(file: File): Promise<Attachment
 
   const selection = selectUniqueResumeTarget(elements);
   if (!selection.target) {
-    return {
+    const result: AttachmentUploadResult = {
       status: 'NOT_HANDLED',
       reason: selection.candidates.length ? '存在多个或语义不明确的上传区，请手动点选简历上传区域' : '未找到可用的简历上传区域',
       requiresUserSelection: selection.requiresUserSelection,
     };
+    await persistAttachmentCompatibility(result);
+    return result;
   }
 
   const result = await injectAttachmentVerified(selection.target.element, file);
-  return { ...result, targetLabel: selection.target.label };
+  const withTarget = { ...result, targetLabel: selection.target.label };
+  await persistAttachmentCompatibility(withTarget);
+  return withTarget;
 }
 
 /** 旧调用兼容：未验证或部分验证均返回 false，避免“假成功”。 */
