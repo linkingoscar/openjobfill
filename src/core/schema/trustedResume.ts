@@ -221,6 +221,10 @@ export function resolveVariant(master: ResumeV5, variant: ResumeV5): ResumeV5 {
     fieldMeta: { ...clone(master.fieldMeta), ...clone(variant.fieldMeta) },
   });
   for (const path of variant.variantOverrides || []) setResumeValue(resolved, path, clone(getResumeValue(variant, path)));
+  if (presentation.selectedLinkKeys?.length) {
+    const selected = new Set(presentation.selectedLinkKeys);
+    for (const path of PROFILE_LINK_PATHS) if (!selected.has(path)) setResumeValue(resolved, path, '');
+  }
   resolved.projects = applyIdOrdering(resolved.projects, ordering.projects);
   resolved.experiences = applyIdOrdering(resolved.experiences, ordering.experiences);
   return resolved;
