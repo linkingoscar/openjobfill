@@ -199,14 +199,18 @@ const handleSaveTaskMapping = async (task: any) => {
   setTimeout(() => { copyToastMessage.value = ''; }, 3500);
 };
 
-const notifyStepChange = (newUrl: string) => {
+const pendingChangedRoots = ref<HTMLElement[]>([]);
+
+const notifyStepChange = (newUrl: string, changedNodes: HTMLElement[] = []) => {
   if (isFilling.value) {
     formFillerEngine.cancelActiveRun('页面步骤已变化');
     void cancelPreview();
   }
+  pendingChangedRoots.value = changedNodes;
+  const canIncremental = !!lastPlan.value && newUrl === lastPlan.value.pageUrl && changedNodes.length > 0;
   stepNotification.value = {
     show: true,
-    text: '点击即可重新规划并填充当前页'
+    text: canIncremental ? '检测到新增字段，点击仅填写新增内容' : '点击即可重新规划并填充当前页',
   };
   setTimeout(() => {
     stepNotification.value.show = false;
@@ -333,6 +337,44 @@ const handleQuickFill = async () => {
     throw err;
   } finally {
     isFilling.value = false;
+  }
+};
+
+const handleIncrementalFill = async () => {
+  if (isFilling.value || !lastPlan.value) return;
+  isFilling.value = true;
+  operationError.value = '';
+  stepNotification.value.show = false;
+  try {
+    const activeResume = await resumeStorage.getActiveResume();
+    currentResume.value = activeResume;
+    selectedResumeId.value = activeResume.id;
+    const analyzed = await formFillerEngine.analyzeIncremental(activeResume, lastPlan.value, {
+      changedRoots: pendingChangedRoots.value.map((node) => node.parentElement || node),
+    });
+    previewPlan.value = analyzed;
+    currentAdapterName.value = analyzed.adapterName;
+    drawerTab.value = 'logs';
+    isDrawerOpen.value = true;
+  } catch (err: any) {
+    if (isFillRunAbortedError(err)) return;
+    operationError.value = err?.message || '增量识别失败，请重新规划当前页面';
+    await persistOperationError('analysis', operationError.value);
+    drawerTab.value = 'logs';
+    isDrawerOpen.value = true;
+  } finally {
+    isFilling.value = false;
+  }
+};
+
+const handleStepNotification = () => {
+  const canIncremental = !!lastPlan.value
+    && window.location.href === lastPlan.value.pageUrl
+    && pendingChangedRoots.value.length > 0;
+  if (canIncremental) {
+    void handleIncrementalFill();
+  } else {
+    void handleQuickFill();
   }
 };
 
@@ -620,6 +662,7 @@ const handleManualFill = async () => {
 // ── 填前预览确认（先扫描生成规划，用户核对后再执行写入）──
 const {
   previewPlan,
+  lastPlan,
   previewFillItems,
   previewNeedsUserItems,
   confirmFill,
@@ -639,6 +682,7 @@ defineExpose({
   handleQuickFill,
   handleManualFill,
   notifyStepChange,
+  isFilling: () => isFilling.value,
 });
 </script>
 
@@ -1240,12 +1284,12 @@ defineExpose({
     >
       <div 
         v-if="stepNotification.show"
-        @click="handleQuickFill"
+        @click="handleStepNotification"
         class="absolute bottom-full right-0 cursor-pointer w-[248px] max-w-[calc(100vw-24px)] bg-slate-900/95 text-white px-3 py-2.5 rounded-xl shadow-2xl border border-blue-500/40 backdrop-blur flex items-start gap-2.5 hover:bg-blue-900 transition mb-2"
         role="button"
         tabindex="0"
-        @keydown.enter.prevent="handleQuickFill"
-        @keydown.space.prevent="handleQuickFill"
+        @keydown.enter.prevent="handleStepNotification"
+        @keydown.space.prevent="handleStepNotification"
       >
         <Sparkles class="w-4 h-4 mt-0.5 text-amber-400 flex-shrink-0 animate-bounce" aria-hidden="true" />
         <span class="min-w-0 text-left">

@@ -195,6 +195,89 @@ export class FormFillerEngine {
   }
 
   /**
+   * Re-plan only fields introduced by a SPA mutation. The DOM scan may use
+   * mutation roots when available, while the known fingerprint set prevents
+   * already-filled controls from being mapped or written a second time.
+   */
+  async analyzeIncremental(
+    resume: StandardResume,
+    previous: AnalyzedPlan,
+    options: { runId?: string; changedRoots?: HTMLElement[] } = {},
+  ): Promise<AnalyzedPlan> {
+    const run = new FillRunContext({ runId: options.runId });
+    this.activeRuns.set(run.runId, run);
+    this.activeRunId = run.runId;
+    let completed = false;
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
+    const analysisStartedAt = Date.now();
+    SnapshotRecorder.start(currentUrl, typeof document !== 'undefined' ? document.title : '', run.runId);
+
+    try {
+      run.throwIfAborted();
+      const enhancer = getEnhancerForUrl(currentUrl, typeof document !== 'undefined' ? document : undefined);
+      const customRule = await ruleStorage.findMatchingRuleForUrl(currentUrl);
+      const customFieldRules = customRule ? customRule.fields : [];
+      const roots = (options.changedRoots || []).filter((root, index, all) =>
+        !!root && all.indexOf(root) === index,
+      );
+      const descriptors = roots.length > 0
+        ? roots.flatMap((root) => pageAnalyzer.analyzePage(root))
+        : pageAnalyzer.analyzePage(document);
+      const uniqueDescriptors = descriptors.filter((field, index, all) => {
+        const key = `${field.fingerprint || field.id}|${field.label}|${field.section?.type || ''}:${field.section?.index || 0}`;
+        return all.findIndex((candidate) =>
+          `${candidate.fingerprint || candidate.id}|${candidate.label}|${candidate.section?.type || ''}:${candidate.section?.index || 0}` === key,
+        ) === index;
+      });
+      const known = new Set(previous.plan.items.map((item) =>
+        `${item.field.fingerprint || item.field.id}|${item.field.label}|${item.field.section?.type || ''}:${item.field.section?.index || 0}`,
+      ));
+      const newDescriptors = uniqueDescriptors.filter((field) => {
+        const key = `${field.fingerprint || field.id}|${field.label}|${field.section?.type || ''}:${field.section?.index || 0}`;
+        return !known.has(key);
+      });
+      SnapshotRecorder.record('scan', {
+        incremental: true,
+        previousRunId: previous.runId,
+        totalCandidateCount: newDescriptors.length,
+        fields: compactFieldSnapshot(newDescriptors),
+      }, Date.now() - analysisStartedAt);
+
+      run.throwIfAborted();
+      const plan = planGenerator.generatePlan(newDescriptors, resume, enhancer, customFieldRules);
+      try {
+        await applyAIFallbackToPlan(plan, resume, run.signal);
+      } catch (err) {
+        if (run.signal.aborted) throw err;
+        console.warn('[OpenJobFill Pipeline] Incremental AI fallback warning:', err);
+      }
+      run.refreshPageFingerprint(typeof document !== 'undefined' ? document : undefined);
+      SnapshotRecorder.record('plan', {
+        incremental: true,
+        previousRunId: previous.runId,
+        ...compactPlanSnapshot(plan),
+      }, Date.now() - analysisStartedAt);
+      completed = true;
+      return {
+        plan,
+        adapterName: enhancer ? enhancer.name : '智能通用决策引擎 (增量管道)',
+        resumeId: resume.id,
+        resumeUpdatedAt: resume.updatedAt,
+        pageUrl: currentUrl,
+        runId: run.runId,
+        pageFingerprint: run.pageFingerprint,
+        remoteFrames: [],
+      };
+    } finally {
+      if (!completed) {
+        run.abort('增量分析已取消');
+        this.activeRuns.delete(run.runId);
+        if (this.activeRunId === run.runId) this.activeRunId = null;
+      }
+    }
+  }
+
+  /**
    * 阶段三：执行已生成的规划（写入 DOM + 写后读回验证）
    */
   async executePlan(analyzed: AnalyzedPlan): Promise<FillResult> {

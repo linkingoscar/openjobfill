@@ -430,5 +430,27 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
         window.history.replaceState({}, '', originalUrl);
       }
     });
+
+    it('增量规划只返回新增字段，不重复规划上一轮已处理字段', async () => {
+      document.body.innerHTML = `
+        <form>
+          <div class="form-item"><label>姓名</label><input name="name" type="text" /></div>
+        </form>
+      `;
+      const firstPlan = await formFillerEngine.analyze(MOCK_RESUME);
+      await formFillerEngine.executePlan(firstPlan);
+
+      const form = document.querySelector('form')!;
+      const item = document.createElement('div');
+      item.className = 'form-item';
+      item.innerHTML = '<label>电子邮箱</label><input name="email" type="email" />';
+      form.appendChild(item);
+
+      const incremental = await formFillerEngine.analyzeIncremental(MOCK_RESUME, firstPlan, {
+        changedRoots: [item],
+      });
+      expect(incremental.plan.items.some((entry) => entry.field.name === 'email')).toBe(true);
+      expect(incremental.plan.items.some((entry) => entry.field.name === 'name')).toBe(false);
+    });
   });
 });

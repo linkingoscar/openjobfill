@@ -17,6 +17,7 @@ export function useFillPreview(
   handleManualFill: () => Promise<void>,
 ) {
   const previewPlan = ref<AnalyzedPlan | null>(null);
+  const lastPlan = ref<AnalyzedPlan | null>(null);
 
   const getRemotePreviewItems = (action: 'FILL' | 'NEEDS_USER') =>
     (previewPlan.value?.remoteFrames || []).flatMap((frame) =>
@@ -44,6 +45,7 @@ export function useFillPreview(
     operationError.value = '';
     try {
       const result = await formFillerEngine.executePlan(previewPlan.value!);
+      lastPlan.value = previewPlan.value;
       fillResult.value = result;
       await persistFillHistory(result);
       previewPlan.value = null;
@@ -85,6 +87,7 @@ export function useFillPreview(
 
   return {
     previewPlan,
+    lastPlan,
     previewFillItems,
     previewNeedsUserItems,
     confirmFill,

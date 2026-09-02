@@ -21,7 +21,8 @@ export default defineUnlistedScript(() => {
   let hostEl: HTMLDivElement | null = null;
   let vm: {
     handleQuickFill?: () => Promise<{ fillCount?: number; needsUserCount?: number }>;
-    notifyStepChange?: (url: string) => void;
+    notifyStepChange?: (url: string, changedNodes?: HTMLElement[]) => void;
+    isFilling?: () => boolean;
   } | null = null;
   let stopQALearner: (() => void) | null = null;
   let stopStepTracking: (() => void) | null = null;
@@ -110,13 +111,22 @@ export default defineUnlistedScript(() => {
 
     let lastSignature = computeFormSignature();
     let signatureTimer: ReturnType<typeof setTimeout> | null = null;
-    const domStepObserver = new MutationObserver(() => {
+    const domStepObserver = new MutationObserver((mutations) => {
       if (signatureTimer) clearTimeout(signatureTimer);
       signatureTimer = setTimeout(() => {
         const newSig = computeFormSignature();
+        // 自己的动态增行/组件渲染也会触发 mutation；运行中只更新基线，
+        // 不把这些预期变化误当成外部步骤切换或增量任务。
         if (newSig && newSig !== lastSignature) {
+          const busy = !!vm?.isFilling?.();
           lastSignature = newSig;
-          vm?.notifyStepChange?.(window.location.href);
+          if (busy) return;
+          const changedNodes = mutations
+            .flatMap((mutation) => Array.from(mutation.addedNodes))
+            .map((node) => node.nodeType === 1 ? node as HTMLElement : node.parentElement)
+            .filter((node): node is HTMLElement => !!node)
+            .slice(0, 40);
+          vm?.notifyStepChange?.(window.location.href, changedNodes);
         }
       }, 500);
     });
