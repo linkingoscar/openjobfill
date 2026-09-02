@@ -88,6 +88,7 @@ export class PlanGenerator {
         source: input.source,
         driverType: input.driverType,
         requiresExplicitReview: policy.decision === 'FILL_REVIEW_REQUIRED',
+        learnedRuleMappingId: input.learnedRuleMappingId,
       };
       items.push(item);
       if (policy.decision === 'FILL_HIGH_CONFIDENCE') directlyHighConfidenceCount++;
@@ -132,6 +133,7 @@ export class PlanGenerator {
             targetValue: this.toFieldTargetValue(field, resume, resumeKey, value), confidence: 1,
             source: 'user_rule', reason: `命中用户自定义规则（${resolved.method || 'selector'}）: ${resolved.mapping.description || resolved.mapping.resumeKey}`,
             driverType: this.resolveDriverType(field), firstVisit: false,
+            learnedRuleMappingId: resolved.mapping.id,
           });
           if (item.action === 'FILL') matchedSemanticKeys.add(resumeKey);
           continue;
