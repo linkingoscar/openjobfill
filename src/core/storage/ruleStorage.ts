@@ -24,9 +24,7 @@ function isLiteralHostname(value: string): boolean {
   const hostname = value.replace(/^\*\./, '');
   if (hostname === 'localhost') return true;
   if (hostname.length === 0 || hostname.length > 253) return false;
-  return hostname.split('.').every((label) =>
-    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
-  );
+  return hostname.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 }
 
 function hostnameMatches(actual: string, expected: string): boolean {
@@ -37,85 +35,48 @@ function hostnameMatches(actual: string, expected: string): boolean {
 
 export function customRuleMatchesUrl(rule: CustomSiteRule, rawUrl: string): boolean {
   let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-
+  try { url = new URL(rawUrl); } catch { return false; }
   if (rule.site?.hostname) {
     if (!hostnameMatches(url.hostname, rule.site.hostname)) return false;
     const prefix = normalizePathPrefix(rule.site.pathPrefix);
     return !prefix || prefix === '/' || url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
   }
-
   const pattern = rule.domainPattern.trim();
   if (isLiteralHostname(pattern)) return hostnameMatches(url.hostname, pattern);
-  try {
-    // Legacy regex rules remain supported, but never receive query strings or hashes.
-    return new RegExp(pattern, 'i').test(`${url.hostname}${url.pathname}`);
-  } catch {
-    return false;
-  }
+  try { return new RegExp(pattern, 'i').test(`${url.hostname}${url.pathname}`); } catch { return false; }
 }
 
 const DEFAULT_PRESET_RULES: CustomSiteRule[] = [
   {
-    id: 'preset-zhipin',
-    name: 'BOSS直聘 (在线沟通/微简历)',
-    domainPattern: 'zhipin.com',
-    enabled: true,
+    id: 'preset-zhipin', name: 'BOSS直聘 (在线沟通/微简历)', domainPattern: 'zhipin.com', enabled: true,
     fields: [
       { id: 'f-zp-name', selector: 'input[name="name"], input[placeholder*="姓名"]', resumeKey: 'basics.name', description: '姓名' },
       { id: 'f-zp-phone', selector: 'input[name="phone"], input[placeholder*="手机"]', resumeKey: 'basics.phone', description: '手机' },
       { id: 'f-zp-email', selector: 'input[name="email"], input[placeholder*="邮箱"]', resumeKey: 'basics.email', description: '邮箱' },
-      { id: 'f-zp-role', selector: 'input[placeholder*="期望职位"]', resumeKey: 'basics.expectedRole', description: '期望职位' }
-    ],
-    updatedAt: new Date().toISOString()
+      { id: 'f-zp-role', selector: 'input[placeholder*="期望职位"]', resumeKey: 'basics.expectedRole', description: '期望职位' },
+    ], updatedAt: new Date().toISOString(),
   },
   {
-    id: 'preset-liepin',
-    name: '猎聘网 (Liepin)',
-    domainPattern: 'liepin.com',
-    enabled: true,
+    id: 'preset-liepin', name: '猎聘网 (Liepin)', domainPattern: 'liepin.com', enabled: true,
     fields: [
       { id: 'f-lp-name', selector: 'input[placeholder*="姓名"], input[name*="name"]', resumeKey: 'basics.name', description: '姓名' },
       { id: 'f-lp-phone', selector: 'input[placeholder*="手机"], input[name*="mobile"]', resumeKey: 'basics.phone', description: '手机号' },
-      { id: 'f-lp-email', selector: 'input[placeholder*="邮箱"], input[name*="email"]', resumeKey: 'basics.email', description: '邮箱' }
-    ],
-    updatedAt: new Date().toISOString()
-  }
+      { id: 'f-lp-email', selector: 'input[placeholder*="邮箱"], input[name*="email"]', resumeKey: 'basics.email', description: '邮箱' },
+    ], updatedAt: new Date().toISOString(),
+  },
 ];
 
 function isExtensionEnv(): boolean {
-  try {
-    return typeof chrome !== 'undefined' && !!chrome.runtime?.id && !!chrome.storage && !!chrome.storage.local;
-  } catch {
-    return false;
-  }
+  try { return typeof chrome !== 'undefined' && !!chrome.runtime?.id && !!chrome.storage && !!chrome.storage.local; } catch { return false; }
 }
 
 function hasBalancedSelectorDelimiters(selector: string): boolean {
-  const stack: string[] = [];
-  let quote = '';
-  let escaped = false;
+  const stack: string[] = []; let quote = ''; let escaped = false;
   for (const char of selector) {
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (char === quote) quote = '';
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; continue; }
     if (char === '[' || char === '(') stack.push(char);
     if (char === ']' || char === ')') {
       const expected = char === ']' ? '[' : '(';
@@ -128,69 +89,39 @@ function hasBalancedSelectorDelimiters(selector: string): boolean {
 export function validateCustomSiteRule(rule: CustomSiteRule, doc?: Document): string | null {
   if (!rule?.id || !rule.name?.trim()) return '规则名称不能为空';
   if (!rule.domainPattern?.trim()) return '域名匹配模式不能为空';
-
   if (rule.site) {
-    if (!normalizeHostname(rule.site.hostname) || !isLiteralHostname(rule.site.hostname)) {
-      return `站点 hostname 无效：${rule.site.hostname}`;
-    }
-    if (rule.site.pathPrefix && /[?#]/.test(rule.site.pathPrefix)) {
-      return '站点路径范围不能包含查询参数或 hash';
-    }
+    if (!normalizeHostname(rule.site.hostname) || !isLiteralHostname(rule.site.hostname)) return `站点 hostname 无效：${rule.site.hostname}`;
+    if (rule.site.pathPrefix && /[?#]/.test(rule.site.pathPrefix)) return '站点路径范围不能包含查询参数或 hash';
   }
-
-  try {
-    new RegExp(rule.domainPattern, 'i');
-  } catch {
-    return `域名匹配模式不是有效文本或正则：${rule.domainPattern}`;
-  }
-
-  if (!Array.isArray(rule.fields) || rule.fields.length === 0) {
-    return '至少需要配置一个字段映射';
-  }
-
+  try { new RegExp(rule.domainPattern, 'i'); } catch { return `域名匹配模式不是有效文本或正则：${rule.domainPattern}`; }
+  if (!Array.isArray(rule.fields) || rule.fields.length === 0) return '至少需要配置一个字段映射';
   const validationDocument = doc || (typeof document !== 'undefined' ? document : null);
   for (const [index, field] of rule.fields.entries()) {
     if (!field.selector?.trim()) return `第 ${index + 1} 个字段的 CSS 选择器不能为空`;
     if (!field.resumeKey?.trim()) return `第 ${index + 1} 个字段未选择简历属性`;
-    if (!hasBalancedSelectorDelimiters(field.selector)) {
-      return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`;
-    }
+    if (!hasBalancedSelectorDelimiters(field.selector)) return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`;
     if (validationDocument) {
-      try {
-        validationDocument.documentElement.matches(field.selector);
-      } catch {
-        return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`;
-      }
+      try { validationDocument.documentElement.matches(field.selector); }
+      catch { return `第 ${index + 1} 个字段的 CSS 选择器无效：${field.selector}`; }
     }
   }
-
   return null;
 }
 
-/** 将早期“一条规则只含一个 selector”的备份格式迁移为当前 fields[] 结构。 */
 export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSiteRule | null {
   if (!input || !input.id || !input.domainPattern) return null;
   const fields = Array.isArray(input.fields)
     ? input.fields
     : input.selector && input.resumeKey
-      ? [{
-          id: `field-${input.id}`,
-          selector: input.selector,
-          resumeKey: input.resumeKey,
-          description: input.description,
-        }]
+      ? [{ id: `field-${input.id}`, selector: input.selector, resumeKey: input.resumeKey, description: input.description }]
       : [];
-
   return {
     id: input.id,
     version: CURRENT_RULE_VERSION,
     name: input.name?.trim() || `${input.domainPattern} 自定义规则`,
     domainPattern: input.domainPattern,
     site: input.site?.hostname
-      ? {
-          hostname: normalizeHostname(input.site.hostname),
-          pathPrefix: normalizePathPrefix(input.site.pathPrefix),
-        }
+      ? { hostname: normalizeHostname(input.site.hostname), pathPrefix: normalizePathPrefix(input.site.pathPrefix) }
       : isLiteralHostname(input.domainPattern)
         ? { hostname: normalizeHostname(input.domainPattern.replace(/^\*\./, '')) }
         : undefined,
@@ -199,6 +130,10 @@ export function normalizeCustomSiteRule(input: LegacyCustomSiteRule): CustomSite
       ...field,
       status: field.status === 'STALE' ? 'STALE' : 'ACTIVE',
       occurrenceMode: field.occurrenceMode || 'NONE',
+      successCount: Number.isFinite(field.successCount) ? Math.max(0, Number(field.successCount)) : 0,
+      failureCount: Number.isFinite(field.failureCount) ? Math.max(0, Number(field.failureCount)) : 0,
+      lastVerifiedAt: Number.isFinite(field.lastVerifiedAt) ? Number(field.lastVerifiedAt) : undefined,
+      lastFailureReason: typeof field.lastFailureReason === 'string' ? field.lastFailureReason.slice(0, 120) : undefined,
     })),
     updatedAt: input.updatedAt,
   };
@@ -210,28 +145,17 @@ export const ruleStorage = {
       return new Promise((resolve) => {
         try {
           chrome.storage.local.get([RULES_STORAGE_KEY], (res) => {
-            if (chrome.runtime?.lastError || !res) {
-              resolve(this.getFromLocalStorage());
-              return;
-            }
+            if (chrome.runtime?.lastError || !res) { resolve(this.getFromLocalStorage()); return; }
             const rules = res[RULES_STORAGE_KEY] as LegacyCustomSiteRule[] | undefined;
             if (!rules || rules.length === 0) {
-              const defaults = DEFAULT_PRESET_RULES
-                .map(normalizeCustomSiteRule)
-                .filter((rule): rule is CustomSiteRule => !!rule);
-              void this.saveRules(defaults);
-              resolve(defaults);
-            } else {
-              resolve(rules.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule));
-            }
+              const defaults = DEFAULT_PRESET_RULES.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule);
+              void this.saveRules(defaults); resolve(defaults);
+            } else resolve(rules.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule));
           });
-        } catch {
-          resolve(this.getFromLocalStorage());
-        }
+        } catch { resolve(this.getFromLocalStorage()); }
       });
-    } else {
-      return this.getFromLocalStorage();
     }
+    return this.getFromLocalStorage();
   },
 
   getFromLocalStorage(): CustomSiteRule[] {
@@ -239,39 +163,35 @@ export const ruleStorage = {
     if (data) {
       try {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule);
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule);
       } catch {}
     }
-    const defaults = DEFAULT_PRESET_RULES
-      .map(normalizeCustomSiteRule)
-      .filter((rule): rule is CustomSiteRule => !!rule);
+    const defaults = DEFAULT_PRESET_RULES.map(normalizeCustomSiteRule).filter((rule): rule is CustomSiteRule => !!rule);
     localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(defaults));
     return defaults;
   },
 
   async saveRules(rules: CustomSiteRule[]): Promise<void> {
-    const normalizedRules = rules
-      .map((rule) => normalizeCustomSiteRule(rule))
-      .filter((rule): rule is CustomSiteRule => !!rule);
+    const normalizedRules = rules.map((rule) => normalizeCustomSiteRule(rule)).filter((rule): rule is CustomSiteRule => !!rule);
     for (const rule of normalizedRules) {
       const validationError = validateCustomSiteRule(rule);
       if (validationError) throw new Error(`${rule.name}：${validationError}`);
     }
-
     if (isExtensionEnv()) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         try {
-          chrome.storage.local.set({ [RULES_STORAGE_KEY]: normalizedRules }, () => resolve());
-        } catch {
-          localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules));
-          resolve();
+          chrome.storage.local.set({ [RULES_STORAGE_KEY]: normalizedRules }, () => {
+            const error = chrome.runtime?.lastError;
+            if (error) reject(new Error(error.message || '保存站点规则失败'));
+            else resolve();
+          });
+        } catch (error) {
+          try { localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules)); resolve(); }
+          catch { reject(error); }
         }
       });
-    } else {
-      localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules));
     }
+    localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(normalizedRules));
   },
 
   async saveCustomRule(rule: CustomSiteRule): Promise<void> {
@@ -279,41 +199,26 @@ export const ruleStorage = {
     if (!normalizedRule) throw new Error('规则格式不完整');
     const validationError = validateCustomSiteRule(normalizedRule);
     if (validationError) throw new Error(validationError);
-
     const rules = await this.getCustomRules();
-    const index = rules.findIndex((r) => r.id === normalizedRule.id);
+    const index = rules.findIndex((candidate) => candidate.id === normalizedRule.id);
     normalizedRule.updatedAt = new Date().toISOString();
-
-    if (index >= 0) {
-      rules[index] = normalizedRule;
-    } else {
-      rules.push(normalizedRule);
-    }
-
+    if (index >= 0) rules[index] = normalizedRule; else rules.push(normalizedRule);
     await this.saveRules(rules);
   },
 
   async deleteCustomRule(id: string): Promise<void> {
     const rules = await this.getCustomRules();
-    const filtered = rules.filter((r) => r.id !== id);
-    await this.saveRules(filtered);
+    await this.saveRules(rules.filter((rule) => rule.id !== id));
   },
 
-  async exportRulesToJson(): Promise<string> {
-    const rules = await this.getCustomRules();
-    return JSON.stringify(rules, null, 2);
-  },
+  async exportRulesToJson(): Promise<string> { return JSON.stringify(await this.getCustomRules(), null, 2); },
 
   async importRulesFromJson(jsonStr: string): Promise<number> {
     try {
       const imported = JSON.parse(jsonStr) as CustomSiteRule[];
-      if (!Array.isArray(imported)) {
-        throw new Error('导入的规则格式不正确，必须为规则数组');
-      }
-
+      if (!Array.isArray(imported)) throw new Error('导入的规则格式不正确，必须为规则数组');
       const current = await this.getCustomRules();
-      const map = new Map<string, CustomSiteRule>();
-      current.forEach((r) => map.set(r.id, r));
+      const map = new Map<string, CustomSiteRule>(); current.forEach((rule) => map.set(rule.id, rule));
       imported.forEach((rawRule, index) => {
         const rule = normalizeCustomSiteRule(rawRule);
         if (!rule) throw new Error(`第 ${index + 1} 条规则格式不完整`);
@@ -321,28 +226,17 @@ export const ruleStorage = {
         if (validationError) throw new Error(`第 ${index + 1} 条规则无效：${validationError}`);
         map.set(rule.id, rule);
       });
-
-      const merged = Array.from(map.values());
-      await this.saveRules(merged);
-
+      await this.saveRules(Array.from(map.values()));
       return imported.length;
-    } catch (err: any) {
-      throw new Error(`规则导入解析失败: ${err.message}`);
-    }
+    } catch (err: any) { throw new Error(`规则导入解析失败: ${err.message}`); }
   },
 
   async findMatchingRuleForUrl(url: string): Promise<CustomSiteRule | null> {
     const rules = await this.getCustomRules();
-    for (const rule of rules) {
-      if (!rule.enabled) continue;
-      if (customRuleMatchesUrl(rule, url)) return rule;
-    }
+    for (const rule of rules) if (rule.enabled && customRuleMatchesUrl(rule, url)) return rule;
     return null;
   },
 
-  /**
-   * 将当前网页的某个元素选择器与简历字段建立永久映射绑定
-   */
   async bindFieldToSite(
     url: string,
     selector: string,
@@ -351,49 +245,28 @@ export const ruleStorage = {
     evidence?: { fingerprint?: string; locator?: import('../../types/pipeline').FieldLocatorEvidence },
   ): Promise<CustomSiteRule> {
     let hostname = '';
-    try {
-      hostname = new URL(url).hostname;
-    } catch {
-      hostname = url;
-    }
-
+    try { hostname = new URL(url).hostname; } catch { hostname = url; }
     let rule = await this.findMatchingRuleForUrl(url);
     if (!rule) {
       rule = {
-        id: 'rule-' + Date.now(),
-        name: `${hostname} 专属自定义规则`,
-        version: CURRENT_RULE_VERSION,
-        domainPattern: hostname,
-        site: { hostname: normalizeHostname(hostname) },
-        enabled: true,
-        fields: [],
-        updatedAt: new Date().toISOString(),
+        id: 'rule-' + Date.now(), name: `${hostname} 专属自定义规则`, version: CURRENT_RULE_VERSION,
+        domainPattern: hostname, site: { hostname: normalizeHostname(hostname) }, enabled: true, fields: [], updatedAt: new Date().toISOString(),
       };
     }
-
-    // 选择器变化后，优先复活同一语义字段的 STALE 映射，避免越学越多重复规则。
-    const existingFieldIdx = rule.fields.findIndex(
-      (f) => f.selector === selector
-        || (f.resumeKey === resumeKey && f.status === 'STALE')
-        || (!!evidence?.fingerprint && f.fingerprint === evidence.fingerprint)
+    const existingFieldIdx = rule.fields.findIndex((field) =>
+      field.selector === selector
+      || (field.resumeKey === resumeKey && field.status === 'STALE')
+      || (!!evidence?.fingerprint && field.fingerprint === evidence.fingerprint)
     );
+    const existing = existingFieldIdx >= 0 ? rule.fields[existingFieldIdx] : undefined;
     const newField = {
-      id: existingFieldIdx >= 0 ? rule.fields[existingFieldIdx].id : 'f-' + Date.now(),
-      selector,
-      resumeKey,
-      description,
-      fingerprint: evidence?.fingerprint,
-      locator: evidence?.locator,
-      status: 'ACTIVE' as const,
-      occurrenceMode: 'NONE' as const,
+      id: existing?.id || 'f-' + Date.now(), selector, resumeKey, description,
+      fingerprint: evidence?.fingerprint, locator: evidence?.locator,
+      status: 'ACTIVE' as const, occurrenceMode: 'NONE' as const,
+      successCount: existing?.successCount || 0, failureCount: existing?.failureCount || 0,
+      lastVerifiedAt: existing?.lastVerifiedAt, lastFailureReason: undefined,
     };
-
-    if (existingFieldIdx >= 0) {
-      rule.fields[existingFieldIdx] = newField;
-    } else {
-      rule.fields.push(newField);
-    }
-
+    if (existingFieldIdx >= 0) rule.fields[existingFieldIdx] = newField; else rule.fields.push(newField);
     await this.saveCustomRule(rule);
     return rule;
   },
@@ -404,13 +277,33 @@ export const ruleStorage = {
     const rules = await this.getCustomRules();
     const rule = rules.find((candidate) => candidate.id === ruleId);
     if (!rule) return;
-    const staleIds = new Set(fieldIds);
-    let changed = false;
+    const staleIds = new Set(fieldIds); let changed = false;
     rule.fields = rule.fields.map((field) => {
       if (!staleIds.has(field.id) || field.status === 'STALE') return field;
       changed = true;
-      return { ...field, status: 'STALE' as const };
+      return { ...field, status: 'STALE' as const, failureCount: (field.failureCount || 0) + 1, lastFailureReason: 'selector_fingerprint_conflict' };
     });
     if (changed) await this.saveCustomRule(rule);
+  },
+
+  /** Feed strict read-back verification back into learned mappings without storing field values. */
+  async recordFieldVerification(ruleId: string, fieldId: string, verified: boolean, reason?: string, now = Date.now()): Promise<void> {
+    const rules = await this.getCustomRules();
+    const rule = rules.find((candidate) => candidate.id === ruleId);
+    if (!rule) return;
+    const index = rule.fields.findIndex((field) => field.id === fieldId);
+    if (index < 0) return;
+    const field = rule.fields[index];
+    const successCount = field.successCount || 0;
+    const failureCount = field.failureCount || 0;
+    rule.fields[index] = verified
+      ? { ...field, status: 'ACTIVE', successCount: successCount + 1, lastVerifiedAt: now, lastFailureReason: undefined }
+      : {
+          ...field,
+          status: failureCount + 1 >= 2 ? 'STALE' : field.status,
+          failureCount: failureCount + 1,
+          lastFailureReason: (reason || 'verification_mismatch').slice(0, 120),
+        };
+    await this.saveCustomRule(rule);
   },
 };
