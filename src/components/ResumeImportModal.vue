@@ -21,7 +21,7 @@ const aiSettings = ref<AISettings | null>(null);
 const useAIEnhancement = ref(false);
 const documentConsent = ref(false);
 const importer = useResumeImport();
-const { isParsing, parsedResume, errorMessage, enhancementNotice } = importer;
+const { isParsing, parsedResume, errorMessage, enhancementNotice, aiChanges, canUseLocalResult } = importer;
 const aiConfigLabel = computed(() => {
   const settings = aiSettings.value;
   return settings?.enabled ? `${settings.provider === 'ollama' ? 'Ollama' : '云端 API'} · ${settings.model || '未配置模型'}` : 'AI 尚未启用';
@@ -198,7 +198,7 @@ const handleConfirmImport = () => {
             <p class="text-slate-500">PDF：本地文本 + 最多前 4 页页面图；Word：本地提取的 Markdown/文本。AI 失败时自动保留本地解析结果。</p>
             <label v-if="useAIEnhancement" class="flex items-start gap-2 p-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 cursor-pointer">
               <input v-model="documentConsent" type="checkbox" class="mt-0.5 w-4 h-4 accent-violet-600" />
-              <span>我确认本次会把该 PDF/Word 的完整提取文本，以及 PDF 页面图发送到 {{ aiConfigLabel }}。</span>
+              <span>我确认本次会把提取文本（最多 60,000 字符）及 PDF 前 4 页图片发送到 {{ aiConfigLabel }}。PDF 页面图需要视觉模型；结果须人工核对。</span>
             </label>
           </div>
           <div
@@ -313,6 +313,12 @@ const handleConfirmImport = () => {
           :class="enhancementNotice.startsWith('AI 补强未完成') ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'"
         >
           {{ enhancementNotice }}
+          <div v-if="aiChanges" class="mt-2 space-y-1">
+            <p class="font-semibold">{{ canUseLocalResult ? '与本地预览相比' : '本次 AI 结果' }}：新增 {{ aiChanges.added }} 项可填字段，调整 {{ aiChanges.changed }} 项。</p>
+            <p v-if="aiChanges.labels.length">需核对：{{ aiChanges.labels.join('、') }}</p>
+            <p>按预览中的字段和经历序号对比，顺序变化也可能计入调整；这些数字不是准确率。请核对下方结果后再导入。</p>
+            <button v-if="canUseLocalResult" type="button" @click="importer.useLocalResult()" class="mt-2 px-3 py-1.5 rounded-lg bg-white border font-semibold focus-visible:ring-2 focus-visible:ring-blue-500">仅使用本地解析结果</button>
+          </div>
         </div>
 
         <!-- Loading State -->
@@ -324,6 +330,8 @@ const handleConfirmImport = () => {
         >
           <div class="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p class="text-xs font-bold text-slate-700">正在分析简历结构并提取模块字段...</p>
+          <button type="button" @click="resetImport" class="text-blue-700 underline focus-visible:ring-2 focus-visible:ring-blue-500">停止等待并重新选择</button>
+          <p class="text-xs text-slate-500">停止后不再采用返回结果；已发送的模型请求可能仍在服务方执行。</p>
         </div>
 
         <!-- Error Message -->
@@ -334,7 +342,7 @@ const handleConfirmImport = () => {
           class="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-red-700 text-xs"
         >
           <AlertCircle class="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-          <span>{{ errorMessage }}</span>
+          <span>{{ errorMessage }}。可以重新选择文件、改用粘贴文本，或到设置中检查模型后再试。</span>
         </div>
 
         <ResumeImportPreview v-if="parsedResume" :parsed-resume="parsedResume" @reset="resetImport" />

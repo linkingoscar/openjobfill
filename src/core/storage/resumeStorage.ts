@@ -298,7 +298,8 @@ class ResumeStorage {
       await new Promise<void>((resolve, reject) => {
         chrome.runtime.sendMessage({
           type: RESUME_STORAGE_MESSAGE_TYPES.UPDATE_FIELDS,
-          payload: { id, updates },
+          // Chrome JSON 消息会丢弃 undefined；null 是字段删除标记，不是简历值。
+          payload: { id, updates: Object.fromEntries(Object.entries(updates).map(([key, value]) => [key, value === undefined ? null : value])) },
         }, (response?: { success?: boolean; error?: string }) => {
           const error = chrome.runtime?.lastError;
           if (error) reject(new Error(`更新简历失败：${error.message || 'background 不可用'}`));
@@ -326,7 +327,8 @@ class ResumeStorage {
         if (!existing || typeof existing !== 'object' || Array.isArray(existing)) target[part] = {};
         target = target[part] as Record<string, unknown>;
       }
-      target[parts[parts.length - 1]] = value;
+      if (value === null || value === undefined) delete target[parts[parts.length - 1]];
+      else target[parts[parts.length - 1]] = value;
     }
     await this.saveResumeDirect(next);
   }

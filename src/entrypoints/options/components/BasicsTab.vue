@@ -12,10 +12,24 @@ if (!props.resume.basics.currentLocation) {
 if (!props.resume.basics.nativePlace) {
   props.resume.basics.nativePlace = { city: '' };
 }
+const updateWorkingYears = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const value = input.valueAsNumber;
+  props.resume.basics.workingYears = Number.isFinite(value) && value >= 0 ? value : undefined;
+};
 </script>
 
 <template>
   <div class="grid grid-cols-3 gap-4 text-xs font-sans">
+    <div class="col-span-3 text-slate-500 rounded-lg bg-blue-50 p-3">未确认的信息可以留空，不会自动当作“否”或“0”。请核对旧档案中的国家、工龄，并在教育背景中确认学习形式。</div>
+    <div>
+      <label for="basics-country" class="block font-semibold text-slate-700 mb-1">国家 / 地区</label>
+      <input id="basics-country" v-model="resume.basics.country" placeholder="未填写；如：中国 / United States" class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <div>
+      <label for="basics-working-years" class="block font-semibold text-slate-700 mb-1">工作年限</label>
+      <input id="basics-working-years" :value="resume.basics.workingYears" @input="updateWorkingYears" type="number" min="0" step="0.5" placeholder="未确认请留空；0 表示零年经验" class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500" />
+    </div>
     <div>
       <label for="basics-name" class="block font-semibold text-slate-700 mb-1">姓名</label>
       <input

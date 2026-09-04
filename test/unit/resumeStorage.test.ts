@@ -149,6 +149,13 @@ describe('ResumeStorage 首装初始化', () => {
     expect(storage.data['openjobfill_resume_resume-default']).toEqual(expect.objectContaining({
       basics: expect.objectContaining({ name: '管理页用户', email: 'content@example.com' }),
     }));
+    await resumeStorage.updateResumeFields('resume-default', { 'basics.workingYears': 0 });
+    expect((await resumeStorage.getActiveResume()).basics.workingYears).toBe(0);
+    await resumeStorage.updateResumeFields('resume-default', { 'basics.workingYears': undefined });
+    expect((await resumeStorage.getActiveResume()).basics.workingYears).toBeUndefined();
+    expect((globalThis as any).chrome.runtime.sendMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payload: { id: 'resume-default', updates: { 'basics.workingYears': null } } }), expect.any(Function),
+    );
   });
 
   it('localStorage 中的空数组也应自动恢复默认简历', async () => {

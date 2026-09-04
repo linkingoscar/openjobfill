@@ -72,17 +72,17 @@ const emit = defineEmits<{
               <!-- Score Bar -->
               <div class="pt-1">
                 <div class="flex items-center justify-between text-xs mb-1">
-                  <span class="font-semibold text-slate-700">简历与岗位综合匹配度</span>
+                  <span class="font-semibold text-slate-700">关键词覆盖率</span>
                   <span 
                     :class="[
                       'font-extrabold text-sm',
-                      (jdAnalysis?.matchScore || 0) >= 80 ? 'text-emerald-600' : (jdAnalysis?.matchScore || 0) >= 60 ? 'text-amber-600' : 'text-rose-600'
+                      jdAnalysis?.matchScore == null ? 'text-slate-500' : jdAnalysis.matchScore >= 80 ? 'text-emerald-600' : jdAnalysis.matchScore >= 60 ? 'text-amber-600' : 'text-rose-600'
                     ]"
                   >
-                    {{ jdAnalysis?.matchScore || 0 }}%
+                    {{ jdAnalysis?.matchScore == null ? '无法评估' : `${jdAnalysis.matchScore}%` }}
                   </span>
                 </div>
-                <div class="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
+                <div v-if="jdAnalysis?.matchScore != null" class="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
                   <div 
                     class="h-full transition-all duration-500 rounded-full"
                     :class="(jdAnalysis?.matchScore || 0) >= 80 ? 'bg-emerald-500' : (jdAnalysis?.matchScore || 0) >= 60 ? 'bg-amber-500' : 'bg-rose-500'"
@@ -90,6 +90,7 @@ const emit = defineEmits<{
                   ></div>
                 </div>
               </div>
+              <p class="text-xs text-slate-500">仅比较页面词典关键词，不使用 AI，不代表综合匹配度、初筛通过率或录用概率。</p>
             </div>
 
             <!-- Matched Keywords -->
@@ -132,18 +133,18 @@ const emit = defineEmits<{
                   <span>{{ kw }}</span>
                   <Copy class="w-2.5 h-2.5 opacity-60" />
                 </button>
-                <span v-if="!jdAnalysis?.missingKeywords?.length" class="text-emerald-600 text-xs font-medium">
-                  🎉 太棒了，简历已覆盖当前 JD 提及的所有关键技术！
+                <span v-if="jdAnalysis?.matchScore != null && !jdAnalysis.missingKeywords.length" class="text-emerald-600 text-xs font-medium">
+                  简历已覆盖本次识别到的关键词，仍需人工核对岗位其他要求。
                 </span>
               </div>
-              <p class="text-xs text-slate-400">💡 提示：点击缺失标签可快速复制，建议在自我介绍或回答中补充以提高 ATS 筛选率。</p>
+              <p class="text-xs text-slate-400">点击缺失标签可复制；仅补充真实经历，不要为了提高覆盖率添加不具备的技能。</p>
             </div>
 
             <!-- Diagnostic Tips -->
             <div class="p-3 bg-blue-50/60 border border-blue-100 rounded-xl space-y-1.5">
               <div class="text-xs font-bold text-blue-900 flex items-center gap-1">
                 <Lightbulb class="w-3.5 h-3.5 text-blue-600" />
-                <span>智能诊断与优化建议</span>
+                <span>分析依据与核对提示</span>
               </div>
               <ul class="text-xs text-blue-800 space-y-1 list-disc list-inside">
                 <li v-for="(tip, idx) in jdAnalysis?.diagnosticTips" :key="idx">

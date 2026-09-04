@@ -10,11 +10,10 @@ const addEducation = () => {
   props.educations.push({
     id: 'edu-' + Date.now(),
     schoolName: '',
-    degree: '本科',
+    degree: '',
     major: '',
     startDate: '',
     endDate: '',
-    isFullTime: true,
   });
 };
 
@@ -78,6 +77,7 @@ const removeEducation = (index: number) => {
           v-model="edu.degree"
           class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
+          <option value="">未填写</option>
           <option value="专科">专科</option>
           <option value="本科">本科</option>
           <option value="硕士">硕士</option>
@@ -117,6 +117,15 @@ const removeEducation = (index: number) => {
           type="text"
           class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+      </div>
+
+      <div>
+        <label :for="`edu-${idx}-fulltime`" class="block font-medium text-slate-700 mb-1">是否全日制</label>
+        <select :id="`edu-${idx}-fulltime`" v-model="edu.isFullTime" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500">
+          <option :value="undefined">未填写 / 未确认</option>
+          <option :value="true">全日制</option>
+          <option :value="false">非全日制</option>
+        </select>
       </div>
 
       <div>

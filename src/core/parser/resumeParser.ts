@@ -52,7 +52,6 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
       nativePlace: { province: '', city: '' },
       birthPlace: { province: '', city: '' },
       currentLocation: { province: '', city: '' },
-      workingYears: 0,
       jobStatus: '',
       expectedRole: '',
       selfEvaluation: '',
@@ -285,16 +284,11 @@ export function parseResumeFromText(rawText: string, resumeTitle = '解析导入
   }
   if (resume.experiences.length > 0) {
     resume.experiences.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
-    
-    // 计算全职工作年限 (仅针对明确识别为“全职”的经历，绝不盲推)
-    const fulltimeExp = resume.experiences.filter(e => e.jobType === '全职');
-    const startYears = fulltimeExp.map(e => parseInt(e.startDate?.slice(0, 4) || '0')).filter(y => y > 1990);
-    if (startYears.length > 0) {
-      const earliestYear = Math.min(...startYears);
-      const currentYear = new Date().getFullYear();
-      resume.basics.workingYears = Math.max(0, currentYear - earliestYear);
-    }
   }
+  // 时间段可能含重叠、间隔或实习，不把推测的累计年限当作用户声明。
+  const years = text.match(/工作年限[：:\s]*(\d+(?:\.\d+)?)\s*年/)
+    || text.match(/(\d+(?:\.\d+)?)\s*年(?:全职)?工作经验/);
+  if (years) resume.basics.workingYears = Number(years[1]);
   if (resume.projects.length > 0) {
     resume.projects.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
   }
@@ -375,7 +369,7 @@ function parseEducationSection(lines: string[]): EducationExperience[] {
         startDate: normalizeDateString(inline[3]),
         endDate: /至今|目前|现在|present/i.test(inline[4]) ? '至今' : normalizeDateString(inline[4]),
         major: inline[5].trim(),
-        isFullTime: !/非全日制/.test(inline[6] || ''),
+        isFullTime: inline[6] ? !/非全日制/.test(inline[6]) : undefined,
       };
       continue;
     }
@@ -434,12 +428,12 @@ function fillDefaultEdu(item: Partial<EducationExperience>): EducationExperience
   return {
     id: item.id || 'edu-' + Math.random().toString(36).slice(2, 8),
     schoolName: item.schoolName || '',
-    degree: item.degree || '本科',
+    degree: item.degree || '',
     major: item.major || '',
     startDate: item.startDate || '',
     endDate: item.endDate || '',
     gpa: item.gpa || '',
-    isFullTime: item.isFullTime ?? true,
+    isFullTime: item.isFullTime,
     courses: item.courses || '',
   };
 }

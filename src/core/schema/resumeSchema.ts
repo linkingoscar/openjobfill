@@ -173,7 +173,7 @@ const ARRAY_FIELDS: Record<string, Record<string, FieldKind>> = {
 };
 
 const ARRAY_DEFAULTS: Record<string, UnknownRecord> = {
-  educations: { schoolName: '', degree: '其他', major: '', startDate: '', endDate: '' },
+  educations: { schoolName: '', degree: '', major: '', startDate: '', endDate: '' },
   experiences: { company: '', title: '', startDate: '', endDate: '', description: '' },
   projects: { projectName: '', role: '', startDate: '', endDate: '', description: '', responsibility: '' },
   languages: { language: '' }, skills: { name: '' }, certificates: { name: '' },

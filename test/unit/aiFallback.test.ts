@@ -330,8 +330,21 @@ describe('applyAIFallbackToPlan: pipeline 运行路径', () => {
     expect(plan.items[0].action).toBe('FILL');
     expect(plan.items[0].targetValue).toBe('海淀区');
     expect(plan.items[0].reason).toBe('AI 匹配');
+    expect(plan.aiFeedback).toContain('新增 1 项');
+    expect(plan.aiFeedback).toContain('仍需核对');
     expect(plan.highConfidenceCount).toBe(1);
     expect(plan.needsUserCount).toBe(0);
+  });
+
+  it('AI 调用失败时保留本地计划并告知继续操作方式', async () => {
+    document.body.innerHTML = `<label>期望城市<input name="city" placeholder="城市" /></label>`;
+    const el = document.querySelector<HTMLElement>('input')!;
+    const plan = makeNeedsUserPlan([{ el, label: '期望城市' }]);
+    stubAIError('服务暂不可用');
+    expect(await applyAIFallbackToPlan(plan, MOCK_RESUME)).toEqual({ appliedCount: 0 });
+    expect(plan.items[0].action).toBe('NEEDS_USER');
+    expect(plan.aiFeedback).toContain('本地识别结果已保留');
+    expect(plan.aiFeedback).toContain('剪贴板或手动绑定');
   });
 
   it('AI 把紧急联系人映射到本人姓名时被安全拦截，保持 NEEDS_USER', async () => {

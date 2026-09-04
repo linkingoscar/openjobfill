@@ -306,6 +306,7 @@ export async function applyAIFallbackToPlan(
 ): Promise<{ appliedCount: number }> {
   throwIfAborted(signal);
   const settings = await getAISettings();
+  plan.aiFeedback = undefined;
   if (!settings.enabled) return { appliedCount: 0 };
 
   // 只处理「需要人工但疑似可映射」的字段，开放性问题等无标准答案的自然映射不到
@@ -315,12 +316,18 @@ export async function applyAIFallbackToPlan(
       isFillableElement(item.field.element) &&
       hasFieldHint(item.field.element)
   );
-  if (candidates.length === 0) return { appliedCount: 0 };
+  if (candidates.length === 0) {
+    plan.aiFeedback = 'AI 已启用；本页没有需要交给模型的候选字段，本次未调用模型。';
+    return { appliedCount: 0 };
+  }
 
   const options = buildResumeKeyOptions(resume);
-  if (options.length === 0) return { appliedCount: 0 };
+  if (options.length === 0) {
+    plan.aiFeedback = '简历暂无可供映射的资料，本次未调用 AI。请先补全简历，或使用手动填写。';
+    return { appliedCount: 0 };
+  }
 
-  const fields = candidates.map((item, i) => ({
+  const fields = candidates.slice(0, 25).map((item, i) => ({
     index: i,
     label: item.field.label,
     placeholder: item.field.placeholder,
@@ -330,7 +337,11 @@ export async function applyAIFallbackToPlan(
   }));
 
   const mapping = await requestFieldMapping(settings, fields, options, signal, runId);
-  if (!mapping) return { appliedCount: 0 };
+  if (!mapping) {
+    throwIfAborted(signal);
+    plan.aiFeedback = 'AI 映射未完成，本地识别结果已保留。可以先确认本地项，剩余项用剪贴板或手动绑定；也可检查模型设置后重新识别。';
+    return { appliedCount: 0 };
+  }
 
   let appliedCount = 0;
 
@@ -359,6 +370,8 @@ export async function applyAIFallbackToPlan(
     plan.needsUserCount = plan.items.filter((i) => i.action === 'NEEDS_USER').length;
     plan.skipCount = plan.items.filter((i) => i.action === 'SKIP').length;
   }
+
+  plan.aiFeedback = `AI（${settings.model}）本次分析了 ${fields.length} 个候选，新增 ${appliedCount} 项可填写映射；下方带“AI 建议”的项目仍需核对。${candidates.length > fields.length ? '其余候选未发送，请手动核对。' : ''}${appliedCount === 0 ? '未获得有效新增映射，可使用剪贴板或手动绑定。' : ''}`;
 
   return { appliedCount };
 }

@@ -7,7 +7,8 @@ defineProps<{
   isFilling: boolean;
   hasPreview: boolean;
   fillResult: FillResult | null;
-  previewFillItems: Array<{ id: string; field: { label: string }; targetValue?: unknown }>;
+  aiFeedback?: string;
+  previewFillItems: Array<{ id: string; field: { label: string }; targetValue?: unknown; reason?: string }>;
   previewNeedsUserItems: Array<{ id: string; field: { label: string } }>;
   previewWorkflowItems: Array<{ groupKey: string; summary: string }>;
 }>();
@@ -32,6 +33,7 @@ const emit = defineEmits<{
           </div>
 
           <div class="p-4 flex-1 overflow-y-auto space-y-3">
+            <p v-if="aiFeedback && !isFilling" role="status" class="p-3 rounded-xl bg-violet-50 border border-violet-200 text-xs text-violet-900">{{ aiFeedback }}</p>
             <div
               v-if="operationError && !isFilling"
               role="alert"
@@ -85,7 +87,7 @@ const emit = defineEmits<{
                   :key="item.id"
                   class="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 flex items-center justify-between text-xs"
                 >
-                  <span class="font-medium text-slate-700 truncate">{{ item.field.label }}</span>
+                  <span class="font-medium text-slate-700 truncate">{{ item.field.label }}<small v-if="item.reason === 'AI 匹配'" class="ml-1 text-violet-700">AI 建议</small></span>
                   <span class="text-emerald-700 truncate max-w-[110px]" :title="String(item.targetValue ?? '')">
                     {{ item.targetValue }}
                   </span>

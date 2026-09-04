@@ -93,6 +93,8 @@ export interface FillPlanItem {
  * 整个页面的填表规划大纲
  */
 export interface FillPlan {
+  /** 本次本地页面 AI 映射的用户可见反馈，不含接口 Key 或字段值。 */
+  aiFeedback?: string;
   items: FillPlanItem[];
   highConfidenceCount: number;
   needsUserCount: number;

@@ -65,7 +65,7 @@ export function extractPlatformProfile(doc: Document = document, url = doc.locat
     const schoolName = text(item, '.school-name, .school, [class*="school"]');
     if (!schoolName) return;
     const degreeText = text(item, '.degree, .level, [class*="degree"]');
-    const degree: EducationExperience['degree'] = degreeText.includes('博') ? '博士' : degreeText.includes('硕') ? '硕士' : degreeText.includes('专') ? '专科' : degreeText.includes('本') ? '本科' : '其他';
+    const degree: EducationExperience['degree'] = degreeText.includes('博') ? '博士' : degreeText.includes('硕') ? '硕士' : degreeText.includes('专') ? '专科' : degreeText.includes('本') ? '本科' : degreeText ? '其他' : '';
     const [startDate, endDate] = splitPeriod(text(item, '.time, .period, [class*="time"]'));
     educations.push({
       id: `platform-edu-${Date.now()}-${index}`,

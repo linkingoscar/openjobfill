@@ -15,6 +15,7 @@ export function mergeAnalyzedPlans(base: AnalyzedPlan, incremental: AnalyzedPlan
   return {
     ...incremental,
     plan: {
+      aiFeedback: incremental.plan.aiFeedback,
       items, totalFieldsCount: items.length,
       highConfidenceCount: items.filter((item) => item.action === 'FILL').length,
       needsUserCount: items.filter((item) => item.action === 'NEEDS_USER').length,

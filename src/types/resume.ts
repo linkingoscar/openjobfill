@@ -13,7 +13,7 @@ export interface LocationInfo {
 export interface EducationExperience {
   id: string;
   schoolName: string;
-  degree: '专科' | '本科' | '硕士' | '博士' | '其他';
+  degree: '' | '专科' | '本科' | '硕士' | '博士' | '其他';
   degreeEn?: 'Associate' | 'Bachelor' | 'Master' | 'Doctorate' | 'Other';
   major: string;
   majorCategory?: string; // 如：工学、理学、经济学等
@@ -171,7 +171,7 @@ export interface ResumeBasics {
   disabilityStatus?: string; // 残障状态
   
   // 求职意向
-  workingYears: number; // 工作年限 (0 为应届生)
+  workingYears?: number; // 未填写为未知；明确填写 0 才表示零年经验
   jobStatus?: '在职-考虑机会' | '离职-随时到岗' | '应届毕业生' | '在校生找实习' | '';
   expectedRole?: string; // 期望岗位
   expectedCity?: string; // 期望城市

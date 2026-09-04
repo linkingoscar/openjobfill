@@ -369,7 +369,7 @@ const fillSession = useFillSession({
   persistError: persistOperationError,
 });
 const {
-  isFilling, fillResult, operationError, stepNotification,
+  isFilling, fillResult, operationError, stepNotification, aiFeedback,
   previewPlan, previewFillItems, previewNeedsUserItems, previewWorkflowItems, confirmFill,
 } = fillSession;
 const cancelPreview = () => fillSession.cancel();
@@ -637,6 +637,7 @@ defineExpose({
           :is-filling="isFilling"
           :has-preview="!!previewPlan"
           :fill-result="fillResult"
+          :ai-feedback="aiFeedback"
           :preview-fill-items="previewFillItems"
           :preview-needs-user-items="previewNeedsUserItems"
           :preview-workflow-items="previewWorkflowItems"

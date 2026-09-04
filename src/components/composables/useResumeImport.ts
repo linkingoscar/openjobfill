@@ -44,6 +44,13 @@ export function useResumeImport() {
     errorMessage: computed(() => error.value),
     parsedResume: computed(() => outcome.value?.resume || null),
     enhancementNotice: computed(() => outcome.value?.notice || ''),
+    aiChanges: computed(() => outcome.value?.aiChanges),
+    canUseLocalResult: computed(() => !!outcome.value?.localResume),
+    useLocalResult: () => {
+      if (!outcome.value?.localResume) return;
+      outcome.value = { ...outcome.value, resume: outcome.value.localResume,
+        localResume: undefined, aiChanges: undefined, notice: '已切回本地解析结果，未采用 AI 的调整。请核对后导入。' };
+    },
     reset,
     reportError: (message: string) => { error.value = message; },
     importDocument: (file: File, options: DocumentImportOptions) => run((signal) => importResumeDocument(file, options, signal)),

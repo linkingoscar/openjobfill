@@ -65,6 +65,17 @@ async function waitForStoredFill(page, timeoutMs = 15000) {
   throw new Error('等待填表执行快照超时');
 }
 
+async function waitForStoredResume(page, matches, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const resume = await page.evaluate(async () =>
+      (await chrome.storage.local.get('openjobfill_resume_resume-default'))['openjobfill_resume_resume-default']);
+    if (matches(resume)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('等待简历实际保存状态超时');
+}
+
 async function main() {
   if (!fs.existsSync(path.join(extensionPath, 'manifest.json'))) {
     throw new Error('缺少 .output/chrome-mv3，请先运行 pnpm build');
@@ -75,7 +86,8 @@ async function main() {
   let context;
   try {
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: false,
+      headless: true,
+      channel: 'chromium',
       args: [
         '--disable-extensions-except=' + extensionPath,
         '--load-extension=' + extensionPath,
@@ -107,9 +119,9 @@ async function main() {
     const options = await openOptions(context, extensionId);
     await options.getByRole('button', { name: /智能解析导入/ }).click();
     await options.getByLabel('使用已配置模型补强 PDF / Word 解析').check();
-    await options.getByText(/完整提取文本，以及 PDF 页面图/).waitFor({ state: 'visible' });
+    await options.getByText(/提取文本（最多 60,000 字符）及 PDF 前 4 页图片/).waitFor({ state: 'visible' });
     assert.equal(await options.locator('#resume-file-input').isDisabled(), true, '未确认数据发送时文件入口必须禁用');
-    await options.getByLabel(/我确认本次会把该 PDF\/Word/).check();
+    await options.getByLabel(/我确认本次会把提取文本/).check();
     assert.equal(await options.locator('#resume-file-input').isEnabled(), true, '确认后才允许选择待补强文档');
     await options.getByRole('tab', { name: 'AI 图片识别' }).click();
     await options.getByText('视觉模型配置：AI 尚未启用').waitFor({ state: 'visible' });
@@ -146,7 +158,8 @@ async function main() {
     // 关闭并重新打开浏览器上下文，验证数据不依赖当前页面内存。
     await context.close();
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: false,
+      headless: true,
+      channel: 'chromium',
       args: [
         '--disable-extensions-except=' + extensionPath,
         '--load-extension=' + extensionPath,
@@ -220,11 +233,88 @@ async function main() {
     await reopenedPage.waitForFunction(() => document.querySelector('input[name="candidateName"]')?.value === 'Smoke Persistence Candidate');
     assert.equal(await reopenedHost.getByRole('textbox', { name: '搜索简历字段' }).inputValue(), '姓名', '点填不能覆盖扩展自己的搜索框');
 
-    console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + deterministic replay + clipboard focus');
+    // 真实编辑/消息序列化/保存路径：未知不能变成0，清空已有0也必须真正删除。
+    await reopenedOptions.setViewportSize({ width: 1366, height: 900 });
+    assert.equal(await reopenedOptions.getByLabel('国家 / 地区', { exact: true }).inputValue(), '');
+    const yearsInput = reopenedOptions.getByLabel('工作年限', { exact: true });
+    assert.equal(await yearsInput.inputValue(), '');
+    await yearsInput.fill('0');
+    await waitForStoredResume(reopenedOptions, (resume) => resume?.basics.workingYears === 0);
+    await yearsInput.fill('');
+    await waitForStoredResume(reopenedOptions, (resume) => resume && resume.basics.workingYears === undefined);
+    await reopenedOptions.getByRole('tab', { name: '网申常用信息', exact: true }).click();
+    await reopenedOptions.getByRole('button', { name: '添加技能', exact: true }).click();
+    await reopenedOptions.getByLabel('技能名称 1', { exact: true }).fill('Rust');
+    await reopenedOptions.getByLabel('熟练度 1', { exact: true }).selectOption('熟练');
+    await waitForStoredResume(reopenedOptions, (resume) => resume?.skills[0]?.name === 'Rust' && resume.skills[0].level === '熟练');
+    await reopenedOptions.reload();
+    await reopenedOptions.getByRole('tab', { name: '网申常用信息', exact: true }).click();
+    assert.equal(await reopenedOptions.getByLabel('技能名称 1', { exact: true }).inputValue(), 'Rust');
+    const artifactDir = path.join(repoRoot, 'output', 'playwright');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    await reopenedOptions.screenshot({ path: path.join(artifactDir, 'skills-editor.png') });
+    await reopenedOptions.getByRole('button', { name: '删除技能 1：Rust', exact: true }).click();
+    await waitForStoredResume(reopenedOptions, (resume) => resume?.skills.length === 0);
+
+    await reopenedOptions.getByRole('tab', { name: '投递看板', exact: true }).click();
+    await reopenedOptions.getByRole('button', { name: '手动添加投递', exact: true }).click();
+    await reopenedOptions.getByPlaceholder('例如：字节跳动 (ByteDance)', { exact: true }).fill('Smoke Company');
+    await reopenedOptions.getByPlaceholder('例如：前端开发工程师 - 抖音架构', { exact: true }).fill('Offline Role');
+    await reopenedOptions.getByRole('button', { name: '保存记录', exact: true }).click();
+    await reopenedOptions.getByRole('tab', { name: '偏好设置', exact: true }).click();
+    const downloaded = reopenedOptions.waitForEvent('download');
+    await reopenedOptions.getByRole('button', { name: '导出全部本地数据', exact: true }).click();
+    const download = await downloaded;
+    const backup = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+    assert.equal(backup.data.jobApplications[0].jobUrl, '', '正常导出允许无网址投递');
+    backup.data.resumes[0].basics.name = 'Replacement Candidate';
+    const upload = () => reopenedOptions.getByLabel('选择本地备份文件', { exact: true }).setInputFiles({
+      name: 'synthetic-old-backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await reopenedOptions.getByRole('button', { name: '完全覆盖恢复', exact: true }).click();
+    await upload();
+    await reopenedOptions.getByRole('heading', { name: '恢复前预览：覆盖' }).waitFor();
+    await reopenedOptions.screenshot({ path: path.join(artifactDir, 'backup-preview.png') });
+    const storedName = () => reopenedOptions.evaluate(async () => (await chrome.storage.local.get('openjobfill_resume_resume-default'))['openjobfill_resume_resume-default']?.basics.name);
+    assert.equal(await storedName(), 'Smoke Persistence Candidate', '仅预览不得恢复');
+    await reopenedOptions.getByRole('button', { name: '取消恢复', exact: true }).click();
+    assert.equal(await storedName(), 'Smoke Persistence Candidate', '取消不得写入备份');
+    await reopenedOptions.getByRole('button', { name: '完全覆盖恢复', exact: true }).click();
+    await upload();
+    await reopenedOptions.getByRole('button', { name: '确认覆盖并保留恢复点', exact: true }).click();
+    await waitForStoredResume(reopenedOptions, (resume) => resume?.basics.name === 'Replacement Candidate');
+    await reopenedOptions.getByRole('button', { name: '恢复覆盖前的数据', exact: true }).click();
+    await reopenedOptions.getByRole('button', { name: '确认恢复', exact: true }).click();
+    await waitForStoredResume(reopenedOptions, (resume) => resume?.basics.name === 'Smoke Persistence Candidate');
+    await reopenedOptions.screenshot({ path: path.join(artifactDir, 'backup-recovered.png') });
+
+    await reopenedPage.reload();
+    await reopenedPage.locator('#openjobfill-extension-host').getByRole('button', { name: '面板', exact: true }).click();
+    await reopenedPage.locator('#openjobfill-extension-host').getByRole('tab', { name: '岗位匹配', exact: true }).click();
+    await reopenedPage.locator('#openjobfill-extension-host').getByText('无法评估', { exact: true }).waitFor();
+
+    console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + replay + clipboard + unknown values + skills + backup preview/recovery + keyword feedback');
+  } catch (error) {
+    const optionsPage = context?.pages().find((page) => page.url().includes('/options.html'));
+    if (optionsPage && !optionsPage.isClosed()) {
+      const artifactDir = path.join(repoRoot, 'output', 'playwright');
+      fs.mkdirSync(artifactDir, { recursive: true });
+      await optionsPage.screenshot({ path: path.join(artifactDir, 'smoke-failure.png') }).catch(() => {});
+      console.error('Synthetic options state:', await optionsPage.evaluate(async () => ({
+        selectedTab: document.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
+        text: document.querySelector('main')?.textContent?.slice(0, 1500),
+        storedSkills: (await chrome.storage.local.get('openjobfill_resume_resume-default'))['openjobfill_resume_resume-default']?.skills,
+      })).catch(() => null));
+    }
+    throw error;
   } finally {
     await context?.close().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
-    fs.rmSync(profilePath, { recursive: true, force: true });
+    const resolvedProfile = path.resolve(profilePath);
+    const relativeProfile = path.relative(path.resolve(os.tmpdir()), resolvedProfile);
+    if (!relativeProfile.startsWith('..') && !path.isAbsolute(relativeProfile) && path.basename(resolvedProfile).startsWith('openjobfill-smoke-')) {
+      fs.rmSync(resolvedProfile, { recursive: true, force: true });
+    }
   }
 }
 

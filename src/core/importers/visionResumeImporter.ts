@@ -53,7 +53,7 @@ function degree(value: unknown): StandardResume['educations'][number]['degree'] 
   if (/硕士|master|mba/.test(text)) return '硕士';
   if (/本科|学士|bachelor/.test(text)) return '本科';
   if (/专科|大专|associate/.test(text)) return '专科';
-  return '其他';
+  return text ? '其他' : '';
 }
 
 function extractJSONObject(response: string): Record<string, any> {

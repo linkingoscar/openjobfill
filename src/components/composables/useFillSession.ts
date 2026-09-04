@@ -162,6 +162,7 @@ export function useFillSession(options: FillSessionOptions) {
   return {
     isFilling: computed(() => phase.value !== 'idle'),
     previewPlan: computed(() => preview.value),
+    aiFeedback: computed(() => preview.value?.plan.aiFeedback || (result.value ? lastPlan.value?.plan.aiFeedback : undefined)),
     fillResult: computed(() => result.value),
     operationError: computed(() => error.value),
     stepNotification: computed(() => notification.value),

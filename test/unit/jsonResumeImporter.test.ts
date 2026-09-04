@@ -26,8 +26,15 @@ describe('JSON Resume importer', () => {
     expect(resume.skills.map((item) => item.name)).toEqual(['Vue', 'TypeScript']);
   });
 
+  it('JSON 未声明的学历、工龄、国家和学习形式保持未知', () => {
+    const resume = importJsonResume({ basics: { name: 'Alex' }, education: [{ institution: 'Example University' }] });
+    expect(resume.basics.workingYears).toBeUndefined();
+    expect(resume.basics.country).toBe('');
+    expect(resume.educations[0].degree).toBe('');
+    expect(resume.educations[0].isFullTime).toBeUndefined();
+  });
+
   it('对看起来完整但格式不支持的 JSON 给出错误，不静默当纯文本', () => {
     expect(() => importResumeText('{"foo":"bar"}', 'test')).toThrow(/未识别/);
   });
 });
-

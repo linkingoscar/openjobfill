@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Trash2, CheckCircle2, ShieldCheck, Download, UploadCloud, Database, RefreshCw, AlertCircle, Bot, PlugZap } from 'lucide-vue-next';
-import { backupManager } from '@/core/storage/backupManager';
+import { Plus, Trash2, CheckCircle2, ShieldCheck, Bot, PlugZap } from 'lucide-vue-next';
+import BackupSettings from './BackupSettings.vue';
 import { getAISettings, saveAISettings } from '@/core/storage/aiSettingsStorage';
 import type { AIProviderType } from '@/types/ai';
 import { AI_PROVIDER_PRESETS, type AIProviderPresetId } from '@/core/ai/providerPresets';
 
 defineProps<{
+  beforeRestore?: () => Promise<void>;
   customDomains: string[];
   domainSaveSuccess: boolean;
 }>();
@@ -19,11 +20,6 @@ const emit = defineEmits<{
 }>();
 
 const newDomainInput = ref('');
-const isExporting = ref(false);
-const isImporting = ref(false);
-const pendingImportMode = ref<'merge' | 'overwrite'>('merge');
-const fileInputRef = ref<HTMLInputElement | null>(null);
-
 // ── AI 兜底配置（本地优先：默认关闭，纯本地规则即可用；配置后启用 AI 增强）──
 const aiEnabled = ref(false);
 const aiProvider = ref<AIProviderType>('ollama');
@@ -84,8 +80,10 @@ const testAI = async () => {
         options: [{ resumeKey: 'basics.name', label: '姓名' }],
       },
     });
-    if (resp?.success) {
-      emit('show-toast', 'success', '连接成功，AI 兜底可用');
+    if (resp?.success && resp.mapping?.['0'] === 'basics.name') {
+      emit('show-toast', 'success', '连接成功，示例字段映射有效；图片/PDF 的视觉能力需要单独确认');
+    } else if (resp?.success) {
+      emit('show-toast', 'info', '接口已响应，但没有返回有效的示例映射。请检查模型名称和输出格式');
     } else {
       emit('show-toast', 'error', `连接失败: ${resp?.error || '未知错误'}`);
     }
@@ -105,113 +103,11 @@ const handleAdd = () => {
   newDomainInput.value = '';
 };
 
-const handleExportAll = async () => {
-  isExporting.value = true;
-  try {
-    const jsonStr = await backupManager.exportFullBackup();
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    a.href = url;
-    a.download = `OpenJobFill_FullBackup_${dateStr}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    emit('show-toast', 'success', '全量本地备份导出成功！');
-  } catch (err: any) {
-    emit('show-toast', 'error', `导出失败: ${err.message}`);
-  } finally {
-    isExporting.value = false;
-  }
-};
-
-const triggerFileInput = (mode: 'merge' | 'overwrite') => {
-  pendingImportMode.value = mode;
-  fileInputRef.value?.click();
-};
-
-const handleImportFile = async (e: Event) => {
-  const input = e.target as HTMLInputElement;
-  if (!input.files || input.files.length === 0) return;
-  const file = input.files[0];
-  const mode = pendingImportMode.value;
-  isImporting.value = true;
-
-  try {
-    const text = await file.text();
-    const result = await backupManager.importFullBackup(text, mode);
-    emit('data-restored');
-    const modeLabel = mode === 'overwrite' ? '完全覆盖恢复' : '合并导入';
-    emit(
-      'show-toast',
-      'success',
-      `备份${modeLabel}成功！已还原 ${result.resumes} 份简历、${result.rules} 条规则、${result.domains} 个域名、${result.applications} 条投递记录`
-    );
-  } catch (err: any) {
-    emit('show-toast', 'error', `导入失败: ${err.message}`);
-  } finally {
-    isImporting.value = false;
-    input.value = '';
-  }
-};
 </script>
 
 <template>
   <div class="space-y-6 font-sans text-xs">
-    <!-- 1. 全量数据离线备份与迁移 (纯本地零云端) -->
-    <section aria-labelledby="backup-heading" class="p-5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
-      <div class="flex items-center gap-2">
-        <Database class="w-4 h-4 text-blue-600" />
-        <h3 id="backup-heading" class="text-sm font-bold text-slate-800">
-          全量本地数据备份与跨设备迁移 (纯本地安全离线)
-        </h3>
-      </div>
-      <p class="text-slate-600 leading-relaxed">
-        所有数据仅存储在本地浏览器，不上传云端。你可以一键将全部数据打包导出为 JSON 备份文件，或在其他设备上恢复。<br>
-        <span class="text-amber-700 font-medium">⚠️ 导出的备份文件包含个人档案与求职敏感信息，请妥善保管。</span>
-      </p>
-
-      <div class="flex items-center gap-3 pt-1">
-        <button
-          type="button"
-          @click="handleExportAll"
-          :disabled="isExporting"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center gap-2 shadow-sm shadow-blue-500/20 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-500"
-        >
-          <Download class="w-4 h-4" />
-          <span>{{ isExporting ? '正在打包导出...' : '导出全部本地数据' }}</span>
-        </button>
-
-        <button
-          type="button"
-          @click="triggerFileInput('merge')"
-          :disabled="isImporting"
-          class="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-50 text-slate-700 font-bold rounded-xl transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-blue-500"
-        >
-          <UploadCloud class="w-4 h-4 text-blue-600" />
-          <span>{{ isImporting ? '正在处理...' : '合并导入备份' }}</span>
-        </button>
-
-        <button
-          type="button"
-          @click="triggerFileInput('overwrite')"
-          :disabled="isImporting"
-          class="px-4 py-2 bg-white border border-amber-200 hover:bg-amber-50 disabled:opacity-50 text-amber-800 font-bold rounded-xl transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-amber-500"
-        >
-          <RefreshCw class="w-4 h-4 text-amber-600" />
-          <span>{{ isImporting ? '正在处理...' : '完全覆盖恢复' }}</span>
-        </button>
-
-        <input
-          ref="fileInputRef"
-          type="file"
-          accept=".json"
-          class="hidden"
-          @change="handleImportFile"
-        />
-      </div>
-    </section>
+    <BackupSettings :before-restore="beforeRestore" @data-restored="emit('data-restored')" @show-toast="(type, text) => emit('show-toast', type, text)" />
 
     <!-- AI 智能兜底（可选 · 本地优先） -->
     <section aria-labelledby="ai-heading" class="p-5 bg-violet-50 border border-violet-200/80 rounded-2xl space-y-3">
@@ -227,7 +123,7 @@ const handleImportFile = async (e: Event) => {
       </div>
 
       <p class="text-slate-600 leading-relaxed">
-        默认关闭 —— 纯本地规则引擎即可正常使用。开启后，填表兜底只发送字段标签；只有当你在导入窗口主动选择“AI 图片识别”并逐次确认时，才会发送完整简历图片。
+        默认关闭，本地规则仍可正常填表。字段兜底发送页面字段描述和允许的简历字段名称，不发送简历字段值。文档/图片增强需逐次确认，才会向所选接口发送提取文本（最多 60,000 字符）、PDF 前 4 页图片或所选简历图片。
         推荐本地 Ollama（零成本、数据不出机）；也可使用自带 Key 的云端接口。
       </p>
 
@@ -251,7 +147,7 @@ const handleImportFile = async (e: Event) => {
         </div>
 
         <div v-if="aiProvider === 'openai-compatible'">
-          <label class="block text-xs font-medium text-slate-600 mb-1">API Key（仅存本地浏览器，不上传）</label>
+          <label class="block text-xs font-medium text-slate-600 mb-1">API Key（本地保存，调用所选接口时用于鉴权）</label>
           <input v-model="aiApiKey" type="password" placeholder="sk-..." autocomplete="off" class="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500" />
         </div>
 
@@ -266,7 +162,7 @@ const handleImportFile = async (e: Event) => {
         </div>
 
         <p class="text-xs text-slate-500 leading-relaxed border-t border-violet-200/60 pt-2">
-          💡 本地 Ollama：先运行 <code class="bg-white px-1 py-0.5 rounded font-mono">ollama run {{ aiModel || 'qwen2.5:7b' }}</code>。图片简历识别需填写支持视觉的模型（如 Gemma 3、LLaVA）；普通文本模型只能用于字段映射。
+          💡 本地 Ollama：先运行 <code class="bg-white px-1 py-0.5 rounded font-mono">ollama run {{ aiModel || 'qwen2.5:7b' }}</code>。图片识别和 PDF 页面图补强需要视觉模型；文本模型可用于字段映射、Word/文本结构化。AI 结果仍需人工核对，不会自动投递。文档增强失败会保留可用的本地结果，之后可修改资料、改用文本或更换模型重试。
         </p>
       </div>
     </section>

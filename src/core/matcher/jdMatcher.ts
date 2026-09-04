@@ -2,7 +2,8 @@ import type { StandardResume } from '../../types/resume';
 
 export interface JDAnalysisResult {
   jobTitle: string;
-  matchScore: number; // 0 - 100
+  pageUrl: string;
+  matchScore: number | null; // 关键词覆盖率；null 表示没有可用依据
   matchedKeywords: string[];
   missingKeywords: string[];
   allDetectedJDKeywords: string[];
@@ -159,28 +160,21 @@ export function analyzeJDMatch(resume: StandardResume): JDAnalysisResult {
     }
   }
 
-  // 计算匹配得分 (0-100)
-  let matchScore = 80; // 基础分
-  if (jdKeywords.length > 0) {
-    const ratio = matchedKeywords.length / jdKeywords.length;
-    matchScore = Math.min(100, Math.max(30, Math.round(ratio * 70 + 30)));
-  }
+  const matchScore = jdKeywords.length > 0
+    ? Math.round(matchedKeywords.length / jdKeywords.length * 100)
+    : null;
 
   // 生成诊断优化建议
   const diagnosticTips: string[] = [];
   if (missingKeywords.length > 0) {
-    diagnosticTips.push(`当前岗位看重【${missingKeywords.slice(0, 4).join('、')}】等技能，建议在自我评价或问答中适当体现。`);
+    diagnosticTips.push(`页面提及【${missingKeywords.slice(0, 4).join('、')}】，简历中未找到对应关键词；仅在你确实具备相关经历时补充。`);
   }
-  if (matchScore >= 85) {
-    diagnosticTips.push('🎯 简历技能与岗位要求高度契合，通过 ATS 初筛几率很高！');
-  } else if (matchScore >= 65) {
-    diagnosticTips.push('💡 基础技能较为匹配，补充缺失的核心关键词可显著提升排名。');
-  } else {
-    diagnosticTips.push('⚠️ 核心技术栈重合度较低，建议切换更对口的简历版本或针对性补充项目。');
-  }
+  if (matchScore === null) diagnosticTips.push('无法评估：当前页面未识别到可用关键词，请打开完整岗位描述后重新分析。非技术岗位可能不在当前词典范围内。');
+  else diagnosticTips.push(`简历覆盖了页面识别关键词中的 ${matchedKeywords.length}/${jdKeywords.length} 项。此结果仅作文字核对，不代表岗位适合程度或录用概率。`);
 
   return {
     jobTitle,
+    pageUrl: window.location.href,
     matchScore,
     matchedKeywords,
     missingKeywords,

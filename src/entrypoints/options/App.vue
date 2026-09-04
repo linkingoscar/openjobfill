@@ -283,6 +283,7 @@ const showImportModal = ref(false);
 
 const handleResumeImported = async (imported: StandardResume) => {
   try {
+    await flushPendingResumeSave();
     showImportModal.value = false;
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = undefined;
@@ -304,6 +305,7 @@ const handleResumeImported = async (imported: StandardResume) => {
 };
 
 const handleCreateNewResume = async () => {
+  await flushPendingResumeSave();
   const newResume: StandardResume = {
     ...JSON.parse(JSON.stringify(DEFAULT_RESUME)),
     id: 'resume-' + Date.now(),
@@ -671,6 +673,7 @@ const handleImportJson = (e: Event) => {
           v-if="activeTab === 'settings'"
         >
           <SettingsTab
+            :before-restore="flushPendingResumeSave"
             :custom-domains="customDomains"
             :domain-save-success="domainSaveSuccess"
             @add-domain="handleAddDomain"

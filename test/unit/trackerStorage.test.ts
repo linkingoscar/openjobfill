@@ -120,8 +120,8 @@ describe('投递看板数据契约', () => {
   it('申请成功草稿可恢复，并在 TTL 到期后自动清除', async () => {
     const job = { companyName: '示例公司', jobTitle: '工程师', jobUrl: 'https://jobs.example.com/1' };
     const draft = await applicationDraftStorage.create(job, 10_000);
-    expect((await applicationDraftStorage.get())?.clientRequestId).toBe(draft.clientRequestId);
+    expect((await applicationDraftStorage.get(job.jobUrl))?.clientRequestId).toBe(draft.clientRequestId);
     await applicationDraftStorage.create(job, -1);
-    expect(await applicationDraftStorage.get()).toBeNull();
+    expect(await applicationDraftStorage.get(job.jobUrl)).toBeNull();
   });
 });

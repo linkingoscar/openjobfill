@@ -11,6 +11,50 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
     localStorage.clear();
   });
 
+  it.each(['merge', 'overwrite'] as const)('无网址记录可原样恢复，当前空网址也不阻断其他备份：%s', async (mode) => {
+    await trackerStorage.saveApplication({ id: 'no-url', companyName: '线下招聘', jobTitle: '工程师', appliedDate: '2026-09-04', status: 'applied', jobUrl: '' });
+    const json = await backupManager.exportFullBackup();
+    await backupManager.importFullBackup(json, mode);
+    expect((await trackerStorage.getAllApplications()).find((a) => a.id === 'no-url')?.jobUrl).toBe('');
+    const other = JSON.parse(json);
+    other.data.jobApplications[0] = { ...other.data.jobApplications[0], id: 'online', clientRequestId: 'online-request', jobUrl: 'https://jobs.example.com/2' };
+    await backupManager.importFullBackup(JSON.stringify(other), mode);
+    expect((await trackerStorage.getAllApplications()).some((a) => a.id === 'online')).toBe(true);
+    other.data.jobApplications[0].jobUrl = 42;
+    expect(() => backupManager.previewBackup(JSON.stringify(other))).toThrow('jobUrl');
+  });
+
+  it('预览不写入；覆盖后跨调用恢复旧数据和原激活简历', async () => {
+    await resumeStorage.saveResume({ ...EMPTY_RESUME, id: 'original', title: '需要保留' });
+    await resumeStorage.setActiveResumeId('original');
+    await saveCustomDomains(['original.example.com']);
+    const original = await backupManager.exportFullBackup();
+    const incoming = JSON.parse(original);
+    incoming.data.resumes = [{ ...EMPTY_RESUME, id: 'replacement' }];
+    incoming.data.customDomains = ['replacement.example.com'];
+    const summary = backupManager.previewBackup(JSON.stringify(incoming));
+    expect(summary).toMatchObject({ resumes: 1, domains: 1, isFullBackup: true });
+    expect(summary.exportedAt).toBe(incoming.exportedAt);
+    expect(await getCustomDomains()).toEqual(['original.example.com']);
+    await backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite');
+    expect((await resumeStorage.getAllResumes()).map((r) => r.id)).toEqual(['replacement']);
+    expect(await backupManager.getRecoveryPointSummary()).toMatchObject({ domains: 1 });
+    await backupManager.restoreRecoveryPoint();
+    expect((await resumeStorage.getAllResumes()).some((r) => r.id === 'original')).toBe(true);
+    expect((await resumeStorage.getActiveResume()).id).toBe('original');
+    expect(await getCustomDomains()).toEqual(['original.example.com']);
+  });
+
+  it('恢复点无法保存时不得开始覆盖', async () => {
+    const incoming = JSON.parse(await backupManager.exportFullBackup());
+    const replace = vi.spyOn(resumeStorage, 'replaceAllResumes');
+    const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    try {
+      await expect(backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite')).rejects.toThrow('quota');
+      expect(replace).not.toHaveBeenCalled();
+    } finally { write.mockRestore(); replace.mockRestore(); }
+  });
+
   it('exportFullBackup 应该生成包含所有存储模块数据的完整 JSON 备份', async () => {
     // 准备测试数据
     const testResume = {

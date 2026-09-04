@@ -33,6 +33,41 @@ interface BackupModules {
 interface ParsedBackup {
   data: BackupModules;
   isFullBackup: boolean;
+  exportedAt: string | null;
+}
+
+export interface BackupSummary {
+  exportedAt: string | null;
+  isFullBackup: boolean;
+  resumes: number;
+  rules: number;
+  applications: number;
+  domains: number;
+}
+
+const RECOVERY_KEY = 'openjobfill_backup_recovery_point';
+interface RecoveryPoint { json: string; activeResumeId: string | null }
+
+async function readRecoveryPoint(): Promise<RecoveryPoint | null> {
+  const value = typeof chrome !== 'undefined' && chrome.runtime?.id && chrome.storage?.local
+    ? (await chrome.storage.local.get(RECOVERY_KEY))[RECOVERY_KEY]
+    : JSON.parse(localStorage.getItem(RECOVERY_KEY) || 'null');
+  if (!value) return null;
+  if (typeof value.json !== 'string') throw new Error('本地恢复点无效，请使用导出的备份文件');
+  parseBackup(value.json);
+  return { json: value.json, activeResumeId: typeof value.activeResumeId === 'string' ? value.activeResumeId : null };
+}
+
+async function saveRecoveryPoint(point: RecoveryPoint): Promise<void> {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.id && chrome.storage?.local) {
+    await chrome.storage.local.set({ [RECOVERY_KEY]: point });
+  } else localStorage.setItem(RECOVERY_KEY, JSON.stringify(point));
+}
+
+function summarizeBackup(parsed: ParsedBackup): BackupSummary {
+  return { exportedAt: parsed.exportedAt, isFullBackup: parsed.isFullBackup,
+    resumes: parsed.data.resumes.length, rules: parsed.data.customRules.length,
+    applications: parsed.data.jobApplications.length, domains: parsed.data.customDomains.length };
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -175,7 +210,10 @@ function normalizeBackupApplication(value: unknown, index: number): JobApplicati
   const companyName = asNonEmptyString(value.companyName, `第 ${index + 1} 条投递记录的 companyName`);
   const jobTitle = asNonEmptyString(value.jobTitle, `第 ${index + 1} 条投递记录的 jobTitle`);
   const appliedDate = asNonEmptyString(value.appliedDate, `第 ${index + 1} 条投递记录的 appliedDate`);
-  const jobUrl = asNonEmptyString(value.jobUrl, `第 ${index + 1} 条投递记录的 jobUrl`);
+  if (value.jobUrl !== undefined && typeof value.jobUrl !== 'string') {
+    throw new Error(`第 ${index + 1} 条投递记录的 jobUrl 必须是字符串`);
+  }
+  const jobUrl = value.jobUrl ?? '';
   const status = asNonEmptyString(value.status, `第 ${index + 1} 条投递记录的 status`) as ApplicationStatus;
   if (!APPLICATION_STATUSES.includes(status)) {
     throw new Error(`第 ${index + 1} 条投递记录的 status 无效：${status}`);
@@ -229,6 +267,7 @@ function parseBackup(jsonStr: string): ParsedBackup {
     return {
       data: { resumes: normalizeBackupResumes(parsed), customRules: [], customDomains: [], jobApplications: [] },
       isFullBackup: false,
+      exportedAt: null,
     };
   }
 
@@ -252,6 +291,7 @@ function parseBackup(jsonStr: string): ParsedBackup {
       jobApplications: normalizeBackupApplications(migrated.data.jobApplications),
     },
     isFullBackup: true,
+    exportedAt: typeof parsed.exportedAt === 'string' && Number.isFinite(Date.parse(parsed.exportedAt)) ? parsed.exportedAt : null,
   };
 }
 
@@ -287,12 +327,17 @@ async function restoreModules(
 
 async function restoreWithRollback(incoming: ParsedBackup, mode: 'merge' | 'overwrite'): Promise<void> {
   // 导出并解析当前状态，既作为回滚快照，也确保回滚数据本身经过同一套校验。
-  const previous = parseBackup(await backupManager.exportFullBackup());
+  const previousJson = await backupManager.exportFullBackup();
+  const previous = parseBackup(previousJson);
+  const activeResumeId = (await resumeStorage.getActiveResume()).id;
+  // 恢复点写入失败（例如配额不足）时不允许开始覆盖。只保留最近一次覆盖前状态。
+  if (mode === 'overwrite') await saveRecoveryPoint({ json: previousJson, activeResumeId });
   try {
     await restoreModules(incoming.data, mode, incoming.isFullBackup ? 'all' : 'resumes-only');
   } catch (error) {
     try {
       await restoreModules(previous.data, 'overwrite', 'all');
+      if (activeResumeId) await resumeStorage.setActiveResumeId(activeResumeId);
     } catch (rollbackError) {
       const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
       throw new Error(`备份恢复失败，且回滚未完成：${rollbackMessage}`);
@@ -303,6 +348,24 @@ async function restoreWithRollback(incoming: ParsedBackup, mode: 'merge' | 'over
 }
 
 export const backupManager = {
+  /** 仅解析和预览，不修改任何数据。 */
+  previewBackup(jsonStr: string): BackupSummary {
+    return summarizeBackup(parseBackup(jsonStr));
+  },
+
+  async getRecoveryPointSummary(): Promise<BackupSummary | null> {
+    const point = await readRecoveryPoint();
+    return point ? this.previewBackup(point.json) : null;
+  },
+
+  async restoreRecoveryPoint(): Promise<void> {
+    const point = await readRecoveryPoint();
+    if (!point) throw new Error('尚无覆盖前恢复点');
+    await this.importFullBackup(point.json, 'overwrite');
+    if (point.activeResumeId && parseBackup(point.json).data.resumes.some((r) => r.id === point.activeResumeId)) {
+      await resumeStorage.setActiveResumeId(point.activeResumeId);
+    }
+  },
   /** 导出全部本地数据为 JSON 字符串。 */
   async exportFullBackup(): Promise<string> {
     const resumes = await resumeStorage.getAllResumes();

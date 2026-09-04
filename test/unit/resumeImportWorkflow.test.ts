@@ -45,6 +45,9 @@ describe('resume import workflow boundaries', () => {
     const result = await importResumeDocument(file, { enhance: true, consent: true });
     expect(result.resume.basics.name).toBe('李四');
     expect(result.resume.basics.phone).toBe('13800138000');
+    expect(result.aiChanges?.changed).toBeGreaterThan(0);
+    expect(result.aiChanges?.labels).toContain('姓名');
+    expect(result.localResume?.basics.name).toBe('张三');
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'AI_PARSE_RESUME_DOCUMENT',
       payload: expect.objectContaining({ confirmedExternalProcessing: true, imageDataUrls: ['data:image/png;base64,YQ=='] }),
@@ -65,6 +68,20 @@ describe('resume import workflow boundaries', () => {
       expect(sendMessage).not.toHaveBeenCalled();
       expect(importer.parsedResume.value).toBeNull();
       expect(importer.isParsing.value).toBe(false);
+    } finally { scope.stop(); }
+  });
+
+  it('lets the user discard AI adjustments while keeping the local preview', async () => {
+    sendMessage.mockResolvedValue({ success: true, resume: importResumeText('李四', 'AI') });
+    const scope = effectScope();
+    try {
+      const importer = scope.run(() => useResumeImport())!;
+      await importer.importDocument(file, { enhance: true, consent: true });
+      expect(importer.parsedResume.value?.basics.name).toBe('李四');
+      importer.useLocalResult();
+      expect(importer.parsedResume.value?.basics.name).toBe('张三');
+      expect(importer.canUseLocalResult.value).toBe(false);
+      expect(importer.aiChanges.value).toBeUndefined();
     } finally { scope.stop(); }
   });
 

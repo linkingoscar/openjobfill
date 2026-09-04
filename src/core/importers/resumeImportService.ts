@@ -4,12 +4,28 @@ import { mergeResumeImports } from './visionResumeImporter';
 import { prepareResumeImage } from './resumeImagePreparation';
 import { getAISettings } from '../storage/aiSettingsStorage';
 import type { StandardResume } from '../../types/resume';
+import { enumerateResumeFields } from '../schema/resumeFieldRegistry';
 
 export interface ResumeImportOutcome {
   resume: StandardResume;
   text: string;
   fileName: string;
   notice: string;
+  localResume?: StandardResume;
+  aiChanges?: { added: number; changed: number; labels: string[] };
+}
+
+function describeAIChanges(local: StandardResume | null, merged: StandardResume) {
+  const before = new Map(local ? enumerateResumeFields(local).map((field) => [field.path, field.value]) : []);
+  const result = { added: 0, changed: 0, labels: [] as string[] };
+  for (const field of enumerateResumeFields(merged)) {
+    if (!field.definition.fillable) continue;
+    if (!before.has(field.path)) result.added++;
+    else if (before.get(field.path) !== field.value) result.changed++;
+    else continue;
+    result.labels.push(field.label);
+  }
+  return result;
 }
 
 export interface DocumentImportOptions {
@@ -38,7 +54,7 @@ export async function importResumeDocument(
   const localResume = text?.trim() ? importResumeText(text, file.name.replace(/\.[^/.]+$/, '')) : null;
   if (!options.enhance) {
     if (!localResume) throw new Error('未能在文件中提取到有效文本，请确认该 PDF 不是纯图片扫描件');
-    return { resume: localResume, text, fileName: file.name, notice: '' };
+    return { resume: localResume, text, fileName: file.name, notice: '本次仅使用本地解析，未调用 AI；请核对识别结果。' };
   }
 
   try {
@@ -54,8 +70,10 @@ export async function importResumeDocument(
     checkCancelled(signal);
     if (!response?.success || !response.resume) throw new Error(response?.error || 'AI 没有返回简历数据');
     const aiResume = response.resume as StandardResume;
+    const resume = localResume ? mergeResumeImports(localResume, aiResume) : aiResume;
     return {
-      resume: localResume ? mergeResumeImports(localResume, aiResume) : aiResume,
+      resume, localResume: localResume || undefined,
+      aiChanges: describeAIChanges(localResume, resume),
       text, fileName: file.name,
       notice: isPdf ? `AI 已结合本地文本和 PDF 页面图补强（最多前 ${Math.min(4, imageDataUrls.length)} 页）`
         : 'AI 已结合 Word/文本的本地提取内容补强结构化结果',
@@ -65,7 +83,7 @@ export async function importResumeDocument(
     if (!localResume) throw error;
     return {
       resume: localResume, text, fileName: file.name,
-      notice: `AI 补强未完成，已保留本地解析结果：${error instanceof Error ? error.message : '未知错误'}`,
+      notice: `AI 补强未完成，已保留本地解析结果：${error instanceof Error ? error.message : '未知错误'}。你可以直接核对并导入，或更换模型后重新上传；扫描 PDF 请使用视觉模型。`,
     };
   }
 }
@@ -83,7 +101,8 @@ export async function importResumeImage(file: File, consent: boolean, signal?: A
   });
   checkCancelled(signal);
   if (!response?.success || !response.resume) throw new Error(response?.error || '视觉模型没有返回简历数据');
-  return { resume: response.resume as StandardResume, text: '', fileName: file.name, notice: '' };
+  const resume = response.resume as StandardResume;
+  return { resume, text: '', fileName: file.name, notice: '本次结果来自 AI 图片识别，没有本地文本结果可对照。请逐项核对，尤其是联系方式、日期、学历和经历。', aiChanges: describeAIChanges(null, resume) };
 }
 
 export function importPastedResume(text: string): ResumeImportOutcome {

@@ -1,7 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { parseResumeFromText } from '@/core/parser/resumeParser';
+import { parseResumePayload } from '@/core/schema/resumeSchema';
+import { buildResumeKeyOptions } from '@/core/ai/fieldMapper';
 
 describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () => {
+  it('未声明的工龄、国家和学习形式保持未知，不能进入 AI 可填候选', () => {
+    const parsed = parseResumeFromText('林示例\n教育背景\n2020.09 - 2024.06 示例大学 计算机科学与技术 本科\n工作经历\n2024.07 - 2026.08 示例科技有限公司 前端工程师');
+    const resume = parseResumePayload(parsed).resume;
+    expect(resume.educations).toHaveLength(1);
+    expect(resume.basics.workingYears).toBeUndefined();
+    expect(resume.basics.country).toBe('');
+    expect(resume.educations[0].isFullTime).toBeUndefined();
+    const keys = buildResumeKeyOptions(resume).map((item) => item.resumeKey);
+    expect(keys).not.toContain('basics.workingYears');
+    expect(keys).not.toContain('basics.country');
+    expect(keys).not.toContain('educations.0.isFullTime');
+  });
+
+  it('明确的零年经验与非全日制仍然是有效答案', () => {
+    const parsed = parseResumeFromText('林示例\n工作年限：0年\n教育背景\n本科 - 示例大学 - 2020.09 - 2024.06 - 软件工程 - 非全日制');
+    expect(parsed.basics.workingYears).toBe(0);
+    expect(parsed.educations[0].isFullTime).toBe(false);
+    expect(buildResumeKeyOptions(parsed).map((item) => item.resumeKey)).toContain('basics.workingYears');
+  });
   it('标准中文简历应该能精准提取所有模块字段', () => {
     const rawResumeText = `
       王小明

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { StandardResume, FamilyMember, CertificateItem, LanguageProficiency } from '@/types/resume';
+import SkillsEditor from './SkillsEditor.vue';
 import { Plus, Trash2, MapPin, DollarSign, Award, Users, Trophy, BookOpen, Landmark } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -83,6 +84,7 @@ const removeCampusExperience = (index: number) => props.resume.campusExperiences
 
 <template>
   <div class="space-y-6 text-xs font-sans text-slate-700">
+    <SkillsEditor :skills="resume.skills" />
     <!-- 1. 户籍与身体健康 (国企/银行/事业单位高频) -->
     <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
       <div class="flex items-center gap-2 font-bold text-slate-800 text-sm border-b border-slate-200 pb-2">

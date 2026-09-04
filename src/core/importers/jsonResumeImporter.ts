@@ -17,7 +17,7 @@ function normalizeDegree(value: unknown): StandardResume['educations'][number]['
   if (/硕士|master|mba/.test(text)) return '硕士';
   if (/专科|大专|associate|college/.test(text)) return '专科';
   if (/本科|学士|bachelor/.test(text)) return '本科';
-  return '其他';
+  return text.trim() ? '其他' : '';
 }
 
 function joinedText(summary: unknown, highlights: unknown): string {
