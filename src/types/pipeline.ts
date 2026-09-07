@@ -22,7 +22,7 @@ export type FieldType =
   | 'unknown';
 
 export interface FieldSectionInfo {
-  type: 'basic' | 'education' | 'experience' | 'project' | 'family' | 'qa' | 'unknown';
+  type: 'basic' | 'education' | 'experience' | 'project' | 'family' | 'award' | 'qa' | 'unknown';
   index: number; // 0-based card index
   rawTitle?: string;
 }
@@ -214,6 +214,7 @@ export interface PlatformEnhancer {
     experience?: PlatformRepeaterConfig;
     project?: PlatformRepeaterConfig;
     family?: PlatformRepeaterConfig;
+    award?: PlatformRepeaterConfig;
   };
 
   /** Explicit repeatable-card workflows. No submit/next action is permitted. */

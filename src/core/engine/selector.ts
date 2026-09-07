@@ -170,7 +170,13 @@ async function trySelectCustomOptionOnce(
   }
 
   // 3. 如果包含内部输入框（可搜索下拉框），尝试输入搜索文本以加速定位
-  const inputChild = triggerEl.querySelector<HTMLInputElement>('input');
+  const inputChild = isInputElement(triggerEl) ? triggerEl : triggerEl.querySelector<HTMLInputElement>('input');
+  const originalQuery = inputChild?.value || '';
+  const restoreUncommittedQuery = () => {
+    if (inputChild && !inputChild.readOnly && inputChild.value === targetText && !signal?.aborted) {
+      setNativeValue(inputChild, originalQuery);
+    }
+  };
   if (inputChild && isInputElement(inputChild) && !inputChild.readOnly) {
     simulateClick(inputChild);
     setNativeValue(inputChild, targetText);
@@ -185,6 +191,7 @@ async function trySelectCustomOptionOnce(
   // 4. 动态等待 Portal 选项列表渲染挂载到 DOM (优先在 trigger 关联作用域查找)
   let candidateElements = await waitForDropdownCandidates(triggerEl, 1200, signal);
   if (candidateElements.length === 0) {
+    restoreUncommittedQuery();
     return false;
   }
 
@@ -241,6 +248,7 @@ async function trySelectCustomOptionOnce(
     return true;
   }
 
+  restoreUncommittedQuery();
   return false;
 }
 

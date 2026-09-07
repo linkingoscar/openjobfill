@@ -77,7 +77,7 @@ const emit = defineEmits<{
                   另有 {{ previewNeedsUserItems.length }} 项需要你手动补充
                 </span>
                 <span v-if="previewWorkflowItems.length > 0" class="block mt-1 text-indigo-700">
-                  确认后还会执行 {{ previewWorkflowItems.length }} 个重复区块流程；只允许编辑、保存和新增，不会提交申请或进入下一步
+                  确认后会按简历条数补足以下 {{ previewWorkflowItems.length }} 类经历，并逐条填写
                 </span>
               </div>
 

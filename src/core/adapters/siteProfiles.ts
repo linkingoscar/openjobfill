@@ -43,6 +43,7 @@ function workflow(
     experience: ['新增工作经历', '添加工作经历', '新增实习经历', '添加实习经历'],
     project: ['新增项目经历', '添加项目经历'],
     family: ['新增家庭成员', '添加家庭成员'],
+    award: ['新增获奖经历', '添加获奖经历'],
   };
   return {
     sectionKey,

@@ -340,12 +340,13 @@ function extractDateRange(text: string): { startDate: string; endDate: string } 
 /** 解析教育背景分块 */
 function parseEducationSection(lines: string[]): EducationExperience[] {
   const educations: EducationExperience[] = [];
-  const schoolKeywords = ['大学', '学院', '学校', 'University', 'College', 'Institute'];
-  const degreeKeywords: { name: '专科' | '本科' | '硕士' | '博士'; words: string[] }[] = [
+  const schoolKeywords = ['大学', '学院', '学校', '中学', 'University', 'College', 'Institute'];
+  const degreeKeywords: { name: EducationExperience['degree']; words: string[] }[] = [
     { name: '博士', words: ['博士', 'PhD', 'Doctor'] },
     { name: '硕士', words: ['硕士', '研究生', 'Master'] },
     { name: '本科', words: ['本科', '学士', 'Bachelor'] },
     { name: '专科', words: ['大专', '专科', 'Associate'] },
+    { name: '高中', words: ['高中', 'High School'] },
   ];
 
   let currentEdu: Partial<EducationExperience> | null = null;
@@ -364,7 +365,7 @@ function parseEducationSection(lines: string[]): EducationExperience[] {
         degree: /博士/.test(degreeText) ? '博士'
           : /硕士|研究生/.test(degreeText) ? '硕士'
             : /本科|学士/.test(degreeText) ? '本科'
-              : /专科|大专/.test(degreeText) ? '专科' : '其他',
+              : /专科|大专/.test(degreeText) ? '专科' : /高中/.test(degreeText) ? '高中' : '其他',
         schoolName: inline[2].trim(),
         startDate: normalizeDateString(inline[3]),
         endDate: /至今|目前|现在|present/i.test(inline[4]) ? '至今' : normalizeDateString(inline[4]),

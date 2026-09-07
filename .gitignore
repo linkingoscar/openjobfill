@@ -19,6 +19,12 @@ pnpm-debug.log*
 .workbuddy/
 output/
 
+# Personal resume inputs and exported diagnostics
+openjobfill-diagnostics-*.json
+openjobfill-replay-package-*.json
+校招投递信息库*.docx
+codex-clipboard-*.png
+
 # Environment & Secrets
 .env
 .env.local

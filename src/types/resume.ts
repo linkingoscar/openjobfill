@@ -13,7 +13,7 @@ export interface LocationInfo {
 export interface EducationExperience {
   id: string;
   schoolName: string;
-  degree: '' | '专科' | '本科' | '硕士' | '博士' | '其他';
+  degree: '' | '高中' | '专科' | '本科' | '硕士' | '博士' | '其他';
   degreeEn?: 'Associate' | 'Bachelor' | 'Master' | 'Doctorate' | 'Other';
   major: string;
   majorCategory?: string; // 如：工学、理学、经济学等

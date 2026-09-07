@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>多段经历自动添加与填写测试</title>
+<style>
+  body { font: 15px/1.5 system-ui; color: #24334c; padding: 24px; background: #f5f7fa; }
+  h1 { font-size: 24px; } h2 { font-size: 18px; }
+  form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  section { min-width: 0; } .heading { display:flex; align-items:center; justify-content:space-between; }
+  a { color: #065bda; cursor:pointer; } .entry { margin-bottom: 12px; padding: 12px; background:white; border:1px solid #d8dee7; border-radius:8px; }
+  .remove { font-size:12px; color:#966; display:block; text-align:right; }
+  label { display:block; margin:6px 0; } input { box-sizing:border-box; width:100%; padding:8px; border:1px solid #ccd4df; border-radius:5px; }
+</style>
+<h1>多段经历自动添加与填写测试</h1>
+<p>匿名测试数据：3 段教育、2 段实习、7 个项目、8 项获奖。每栏初始只有一条。</p>
+<form></form>
+<script>
+  window.addCounts = { education: 0, experience: 0, project: 0, award: 0 };
+  const specs = {
+    education: ['教育经历', '学校名称', '专业名称'],
+    experience: ['实习经历', '公司名称', '职位名称'],
+    project: ['项目经历', '项目名称', '项目角色'],
+    award: ['获奖经历', '奖项名称', '获奖时间'],
+  };
+  function render(key, count) {
+    const root = document.createElement('section'); root.id = key;
+    const [title, first, second] = specs[key];
+    root.innerHTML = `<div class="heading"><h2>${title}</h2><a role="button"><span>＋</span> 添加</a></div><div class="entries">${Array.from({length:count}, () =>
+      `<div class="entry"><span class="remove">删除本条</span><label>${first}<input placeholder="${first}"></label><label>${second}<input ${key === 'award' ? 'type="month"' : ''} placeholder="${second}"></label></div>`).join('')}</div>`;
+    root.querySelector('a').addEventListener('click', () => { window.addCounts[key]++; setTimeout(() => render(key, count + 1), 40); });
+    const previous = document.getElementById(key);
+    if (previous) previous.replaceWith(root); else document.querySelector('form').appendChild(root);
+  }
+  for (const key of Object.keys(specs)) render(key, 1);
+</script>
+</html>

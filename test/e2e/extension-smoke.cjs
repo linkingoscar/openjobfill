@@ -293,7 +293,38 @@ async function main() {
     await reopenedPage.locator('#openjobfill-extension-host').getByRole('tab', { name: '岗位匹配', exact: true }).click();
     await reopenedPage.locator('#openjobfill-extension-host').getByText('无法评估', { exact: true }).waitFor();
 
-    console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + replay + clipboard + unknown values + skills + backup preview/recovery + keyword feedback');
+    // Exercise the actual extension against bare +添加 buttons and SPA root
+    // replacement, including more records than the previous six-click limit.
+    await reopenedOptions.evaluate(async () => {
+      const key = 'openjobfill_resume_resume-default';
+      const resume = (await chrome.storage.local.get(key))[key];
+      resume.updatedAt = Date.now();
+      resume.educations = Array.from({ length: 3 }, (_, i) => ({ id: `edu-${i}`, schoolName: `学校${i + 1}`, degree: '本科', major: `专业${i + 1}`, startDate: '', endDate: '' }));
+      resume.experiences = Array.from({ length: 2 }, (_, i) => ({ id: `exp-${i}`, company: `公司${i + 1}`, title: `岗位${i + 1}`, startDate: '', endDate: '' }));
+      resume.projects = Array.from({ length: 7 }, (_, i) => ({ id: `project-${i}`, projectName: `项目${i + 1}`, role: `角色${i + 1}`, startDate: '', endDate: '' }));
+      resume.awards = Array.from({ length: 8 }, (_, i) => ({ id: `award-${i}`, name: `奖项${i + 1}`, issueDate: `2025-${String(i + 1).padStart(2, '0')}` }));
+      await chrome.storage.local.set({ [key]: resume });
+    });
+    const repeatedPage = await context.newPage();
+    await repeatedPage.setViewportSize({ width: 1440, height: 1000 });
+    await repeatedPage.goto(`${url}/test/fixtures/repeated-experiences.html`);
+    const repeatedHost = repeatedPage.locator('#openjobfill-extension-host');
+    await repeatedHost.locator('button[aria-label^="一键自动填写当前页面"]').click();
+    const repeatConfirm = repeatedHost.getByRole('button', { name: /^确认填写/ });
+    await repeatConfirm.waitFor({ timeout: 15000 });
+    assert.deepEqual(await repeatedPage.evaluate(() => window.addCounts), { education: 0, experience: 0, project: 0, award: 0 }, '预览不得提前添加');
+    await repeatConfirm.click();
+    await repeatedPage.waitForFunction(() => document.querySelectorAll('#award .entry input')[15]?.value === '2025-08', undefined, { timeout: 30000 });
+    for (const [key, count, first, second] of [['education', 3, '学校', '专业'], ['experience', 2, '公司', '岗位'], ['project', 7, '项目', '角色'], ['award', 8, '奖项', null]]) {
+      const actual = await repeatedPage.locator(`#${key} .entry input`).evaluateAll(inputs => inputs.map(input => input.value));
+      const expected = Array.from({ length: count }, (_, i) => [`${first}${i + 1}`, second ? `${second}${i + 1}` : `2025-${String(i + 1).padStart(2, '0')}`]).flat();
+      assert.deepEqual(actual, expected, `${key} 必须按记录索引逐条填写`);
+    }
+    assert.deepEqual(await repeatedPage.evaluate(() => window.addCounts), { education: 2, experience: 1, project: 6, award: 7 });
+    await repeatedHost.getByText('成功填入 40 项（已高亮）', { exact: true }).waitFor({ timeout: 15000 });
+    await repeatedPage.screenshot({ path: path.join(artifactDir, 'repeated-experiences.png'), fullPage: true });
+    await repeatedPage.close();
+    console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + replay + clipboard + unknown values + skills + backup preview/recovery + keyword feedback + automatic repeated experiences');
   } catch (error) {
     const optionsPage = context?.pages().find((page) => page.url().includes('/options.html'));
     if (optionsPage && !optionsPage.isClosed()) {

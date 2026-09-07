@@ -74,6 +74,24 @@ describe('受控重复区块状态机', () => {
     expect(submitted).toBe(false);
   });
 
+  it('达到条数上限仍有剩余经历时，不得报告全部完成', async () => {
+    document.body.innerHTML = '<section data-section="education"><button type="button" class="add">新增经历</button></section>';
+    const root = document.querySelector<HTMLElement>('[data-section="education"]')!;
+    root.prepend(card(0));
+    root.querySelector('.add')!.addEventListener('click', () => root.prepend(card(root.querySelectorAll('.record-card').length)));
+    const filled: number[] = [];
+    const result = await new RepeatableSectionWorkflowRunner().run({ ...CONFIG, maxRecords: 2 }, 3, async index => {
+      filled.push(index);
+      return { canAdvance: true };
+    });
+    expect(filled).toEqual([0, 1]);
+    expect(result.success).toBe(false);
+    expect(result.completedRecords).toBe(2);
+    expect(result.failureReason).toContain('仍有 1 条');
+    expect(result.steps.at(-1)?.state).toBe('BLOCKED');
+    expect(result.steps.some(step => step.state === 'COMPLETE')).toBe(false);
+  });
+
   it('站点画像命中 submit 内层元素时也不得绕过安全门禁', async () => {
     document.body.innerHTML = `
       <section data-section="education">

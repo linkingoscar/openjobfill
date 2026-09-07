@@ -78,6 +78,7 @@ const removeEducation = (index: number) => {
           class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">未填写</option>
+          <option value="高中">高中</option>
           <option value="专科">专科</option>
           <option value="本科">本科</option>
           <option value="硕士">硕士</option>

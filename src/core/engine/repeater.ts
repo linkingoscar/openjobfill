@@ -2,104 +2,59 @@ import { sleep, getAllDocumentsAcrossIframes, isElementVisible } from '../../uti
 import { simulateClick } from './dispatcher';
 import type { SectionRepeaterRule } from '../../types/adapter';
 import { throwIfAborted } from '../pipeline/runContext';
+import { findRepeatableSections, findSectionAddControl, isSafeAddControl } from './repeatableSections';
 
-/**
- * 动态列表自动增行与索引分发器 (基于显式规则)
- * 当用户的经历条目（如 2 段教育经历）多于页面初始行数时，自动点击 "+ 添加经历" 按钮
- */
-export async function ensureSectionRows(
-  rule: SectionRepeaterRule,
-  requiredCount: number,
-  signal?: AbortSignal,
-): Promise<HTMLElement[]> {
-  if (requiredCount <= 0) return [];
-
-  const container = getAllDocumentsAcrossIframes()
-    .map((doc) => doc.querySelector<HTMLElement>(rule.containerSelector))
-    .find((candidate): candidate is HTMLElement => !!candidate);
-  if (!container) return [];
-
-  let currentItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(
-    isElementVisible
-  );
-
-  // 如果现有行数少于所需条目数，循环点击添加按钮
-  let attempts = 0;
-  while (currentItems.length < requiredCount && attempts < 5) {
+async function waitForAddedCard(count: () => number, previousCount: number, signal?: AbortSignal): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1800) {
     throwIfAborted(signal);
-    const addBtn = container.querySelector<HTMLElement>(rule.addButtonSelector) ||
-      (container.ownerDocument || document).querySelector<HTMLElement>(rule.addButtonSelector);
-
-    if (addBtn && isElementVisible(addBtn)) {
-      const previousCount = currentItems.length;
-      simulateClick(addBtn);
-      const waitStartedAt = Date.now();
-      while (Date.now() - waitStartedAt < 1200) {
-        await sleep(80, signal);
-        throwIfAborted(signal);
-        const nextItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(isElementVisible);
-        if (nextItems.length > previousCount) break;
-      }
-    } else {
-      break;
-    }
-
-    currentItems = Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(
-      isElementVisible
-    );
-    attempts++;
+    if (count() > previousCount) return true;
+    await sleep(80, signal);
   }
-
-  return currentItems;
+  return count() > previousCount;
 }
 
-/**
- * 通用启发式经历增行器 (基于语义按钮查找)
- * 扫描页面中包含指定关键词（如“添加教育”、“新增工作”、“添加经历”、“Add Education”）的按钮并按需点击
- */
-export async function autoExpandHeuristicSections(
-  sectionTitleKeywords: string[],
-  requiredCount: number,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  if (requiredCount <= 1) return false;
-
-  const buttons = getAllDocumentsAcrossIframes().flatMap((doc) =>
-    Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
-  );
-  const findAddButtons = () => buttons.filter(btn => {
-    if (!isElementVisible(btn)) return false;
-    const text = (btn.textContent || '').trim().toLowerCase();
-    if (text.length > 30) return false;
-    const hasAdd = /添加|新增|增加|\+|add|create/i.test(text);
-    const hasSection = sectionTitleKeywords.some(k => text.includes(k.toLowerCase()));
-    return hasAdd && (hasSection || sectionTitleKeywords.length === 0);
-  });
-
-  const matchAddButtons = findAddButtons();
-
-  if (matchAddButtons.length > 0) {
-    let clickedCount = 0;
-    // 点击并等待每行渲染
-    for (let i = 1; i < requiredCount && i <= 6; i++) {
-      throwIfAborted(signal);
-      const liveButtons = getAllDocumentsAcrossIframes().flatMap((doc) =>
-        Array.from(doc.querySelectorAll<HTMLElement>('button, a, .btn, [role="button"], span, div'))
-      ).filter((btn) => {
-        if (!isElementVisible(btn)) return false;
-        const text = (btn.textContent || '').trim().toLowerCase();
-        return text.length <= 30 && /添加|新增|增加|\+|add|create/i.test(text) && sectionTitleKeywords.some((k) => text.includes(k.toLowerCase()));
-      });
-      const targetBtn = liveButtons[0] || matchAddButtons[0];
-      if (!targetBtn || !isElementVisible(targetBtn)) break;
-      simulateClick(targetBtn);
-      await sleep(450, signal);
-      clickedCount++;
-    }
-    // 等待 SPA 响应式框架 (Vue / React) 批量虚拟 DOM 更新
-    await sleep(200, signal);
-    return clickedCount > 0;
+/** Add exactly the missing records, rebinding after every SPA render. */
+export async function ensureSectionRows(rule: SectionRepeaterRule, requiredCount: number, signal?: AbortSignal): Promise<HTMLElement[]> {
+  if (!Number.isInteger(requiredCount) || requiredCount <= 0) return [];
+  const read = () => {
+    const containers = getAllDocumentsAcrossIframes()
+      .flatMap(doc => Array.from(doc.querySelectorAll<HTMLElement>(rule.containerSelector)))
+      .filter(isElementVisible);
+    const container = containers.length === 1 ? containers[0] : null;
+    return { container, items: container ? Array.from(container.querySelectorAll<HTMLElement>(rule.itemSelector)).filter(isElementVisible) : [] };
+  };
+  let current = read();
+  while (current.container && current.items.length < requiredCount) {
+    throwIfAborted(signal);
+    const add = current.container.querySelector<HTMLElement>(rule.addButtonSelector);
+    if (!add || !isSafeAddControl(add)) break;
+    const previousCount = current.items.length;
+    simulateClick(add);
+    // A click is not proof of a new record. Do not click again after no progress.
+    if (!await waitForAddedCard(() => read().items.length, previousCount, signal)) break;
+    current = read();
   }
+  return read().items;
+}
 
-  return false;
+/** Match bare “+ 添加” by its section heading, then verify each new card. */
+export async function autoExpandHeuristicSections(sectionTitleKeywords: readonly string[], requiredCount: number, signal?: AbortSignal): Promise<boolean> {
+  if (!Number.isInteger(requiredCount) || requiredCount <= 0) return false;
+  const read = () => {
+    const sections = findRepeatableSections(sectionTitleKeywords);
+    return sections.length === 1 ? sections[0] : null;
+  };
+  let current = read();
+  const initialCount = current?.cards.length || 0;
+  while (current && current.cards.length < requiredCount) {
+    throwIfAborted(signal);
+    const add = findSectionAddControl(current.root);
+    if (!add) break;
+    const previousCount = current.cards.length;
+    simulateClick(add);
+    if (!await waitForAddedCard(() => read()?.cards.length || 0, previousCount, signal)) break;
+    current = read();
+  }
+  return (read()?.cards.length || 0) > initialCount;
 }

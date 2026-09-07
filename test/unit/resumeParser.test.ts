@@ -170,11 +170,11 @@ __个人信息__
 
 姓名：测试姓名
 性别：女
-籍贯：辽宁辽阳
-出生地：辽宁辽阳
-现居住地：辽宁沈阳
-四六级成绩：CET4：477          CET6：492
-硕士绩点：92\\.18
+籍贯：浙江杭州
+出生地：浙江杭州
+现居住地：浙江杭州
+四六级成绩：CET4：510          CET6：520
+硕士绩点：86\\.50
 家庭成员及主要社会关系：
 姓名
 与本人关系
@@ -184,7 +184,7 @@ __个人信息__
 测试母亲
 母女
 某单位职员
-辽宁省辽阳市
+浙江省杭州市
 13700000001
 
 __联系方式__
@@ -192,46 +192,46 @@ __联系方式__
 邮箱：[test@example\\.com](mailto:test@example.com)
 
 __教育经历__
-硕士\\-测试大学\\-2024\\.09\\-2027\\.06\\-国际商务\\-统招全日制
-主要课程：计量经济学、战略管理。
-本科\\-示例大学\\-2020\\.09\\-2024\\.06\\-市场营销\\-统招全日制
+硕士\\-测试大学\\-2019\\.09\\-2022\\.06\\-计算机科学\\-统招全日制
+主要课程：离散数学、程序设计。
+本科\\-示例大学\\-2015\\.09\\-2019\\.06\\-信息管理\\-统招全日制
 
 __实习经历__
 __示例公司__
 人力资源实习生
-2024\\.06\\-2024\\.09
+2019\\.06\\-2019\\.09
 1\\. 分类记录候选人基本信息、求职意向及匹配情况。
 
 __项目经历__
 __1\\. 用户研究项目__
-- __项目起止时间__：2025\\.03—2025年内
+- __项目起止时间__：2020\\.03—2020年内
 - __项目角色__：项目成员
 - __项目描述__：完成用户访谈与资料分析。
 - __个人职责__：整理访谈信息并输出报告。
 
 __2\\. 流程优化项目__
-- __项目起止时间__：2024\\.03—2024\\.09
+- __项目起止时间__：2019\\.03—2019\\.09
 - __项目角色__：负责人
 - __项目描述__：优化业务流程。
 
 __3\\. 测试大学研究生会  学术部部长__
-2024\\.10—2026\\.07
+2019\\.10—2021\\.07
 负责学术活动组织。
 
 __学术成果__
-论文题目：Responsible AI Disclosure and Trust
+论文题目：A Synthetic Study of Campus Services
 会议/期刊：示例学术会议
 作者顺序：第二作者
 
 __奖项荣誉__
 1\\. 全国大学生创新大赛铜奖
-获奖时间：2025\\.08
+获奖时间：2020\\.08
 奖项级别：国家级
 
 __学生干部经历__
-__测试大学2024级国际商务班__
+__测试大学2019级计算机科学班__
 班长
-2024\\.09—至今
+2019\\.09—至今
 负责班级日常管理。
 
 __证书及专业技能__
@@ -245,28 +245,28 @@ __证书及专业技能__
     expect(resume.basics.name).toBe('测试姓名');
     expect(resume.basics.phone).toBe('15600000002');
     expect(resume.basics.email).toBe('test@example.com');
-    expect(resume.basics.birthPlace?.city).toBe('辽宁辽阳');
+    expect(resume.basics.birthPlace?.city).toBe('浙江杭州');
     expect(resume.basics.expectedRole).toBe('');
     expect(resume.basics.hobbies).toBe('羽毛球');
 
     expect(resume.educations).toHaveLength(2);
     expect(resume.educations[0]).toMatchObject({
-      schoolName: '测试大学', degree: '硕士', startDate: '2024-09', endDate: '2027-06', gpa: '92.18',
+      schoolName: '测试大学', degree: '硕士', startDate: '2019-09', endDate: '2022-06', gpa: '86.50',
     });
-    expect(resume.educations[0].courses).toContain('计量经济学');
+    expect(resume.educations[0].courses).toContain('离散数学');
     expect(resume.experiences).toHaveLength(1);
     expect(resume.experiences[0].description).toContain('求职意向及匹配情况');
 
     expect(resume.projects).toHaveLength(2);
-    expect(resume.projects[0]).toMatchObject({ projectName: '用户研究项目', startDate: '2025-03', endDate: '2025' });
-    expect(resume.projects.map(project => project.projectName)).not.toContain('10—2026.07');
+    expect(resume.projects[0]).toMatchObject({ projectName: '用户研究项目', startDate: '2020-03', endDate: '2020' });
+    expect(resume.projects.map(project => project.projectName)).not.toContain('10—2021.07');
 
     expect(resume.languages.map(item => [item.certificateName, item.score])).toEqual([
-      ['CET-4', '477'],
-      ['CET-6', '492'],
+      ['CET-4', '510'],
+      ['CET-6', '520'],
     ]);
     expect(resume.familyMembers).toHaveLength(1);
-    expect(resume.familyMembers[0]).toMatchObject({ relation: '母亲', hukouLocation: '辽宁省辽阳市' });
+    expect(resume.familyMembers[0]).toMatchObject({ relation: '母亲', hukouLocation: '浙江省杭州市' });
     expect(resume.awards).toHaveLength(1);
     expect(resume.academicAchievements).toHaveLength(1);
     expect(resume.campusExperiences).toHaveLength(1);
@@ -277,27 +277,27 @@ __证书及专业技能__
     const pdfLayoutText = `
 测试姓名
 联系电话：15600000002 邮箱：test@example.com 意向岗位：产品运营、产品经理
-出生日期：2001.09.06 籍贯：辽宁沈阳 政治面貌：中共党员
+出生日期：1999.02.03 籍贯：浙江杭州 政治面貌：中共党员
 教育背景
-2024.09—2027.07 测试大学 国际商务与管理｜应用经济学硕士
-专业排名：平均成绩 92.18/100，专业排名 1
-核心课程：经济学研究方法论、计量经济学
-2020.09—2024.07 示例大学 国际商务｜管理学学士
+2019.09—2022.07 测试大学 软件工程｜计算机技术硕士
+专业排名：平均成绩 86.50/100，专业排名 1
+核心课程：算法设计、离散数学
+2015.09—2019.07 示例大学 计算机科学｜管理学学士
 实习经历
-2025.07—2025.09 某市政府 政府见习
+2020.07—2020.09 示例技术公司 行政实习生
 •负责基层台账维护与群众接待。
-2024.06—2024.09 示例公司 人力资源部实习生
+2019.06—2019.09 示例公司 人力资源部实习生
 •负责简历筛选与招聘流程跟进。
 学生工作经历
-2024.10—2026.07 测试大学研究生会 学术科创部部长
+2019.10—2021.07 测试大学研究生会 学术科创部部长
 •负责校级学术活动组织。
-2024.10—2026.07 测试大学党委组织部 部门助理、宣讲员
+2019.10—2021.07 测试大学党委组织部 部门助理、宣讲员
 •负责材料整理与理论宣讲。
 科研项目经历
-2025.03—2026.02 全国调研课题 项目成员
+2020.03—2021.02 全国调研课题 项目成员
 •承担实地走访、资料收集和报告撰写。
 社会实践经历
-2025.08—2025.11 “助农项目”|“品牌赋能项目” 项目成员
+2020.08—2020.11 “社区服务项目”|“校园导航项目” 项目成员
 •参与直播展示与农产品推广。
 •协调宣传、调研和文创小组交付。
 荣誉奖项与技能
@@ -314,17 +314,17 @@ __证书及专业技能__
       email: 'test@example.com',
       expectedRole: '产品运营、产品经理',
     });
-    expect(resume.basics.nativePlace?.city).toBe('辽宁沈阳');
+    expect(resume.basics.nativePlace?.city).toBe('浙江杭州');
     expect(resume.educations[0]).toMatchObject({
-      schoolName: '测试大学', degree: '硕士', major: '国际商务与管理/应用经济学', gpa: '92.18/100',
+      schoolName: '测试大学', degree: '硕士', major: '软件工程/计算机技术', gpa: '86.50/100',
     });
     expect(resume.experiences).toHaveLength(2);
-    expect(resume.experiences[0]).toMatchObject({ company: '某市政府', title: '政府见习', jobType: '实习' });
+    expect(resume.experiences[0]).toMatchObject({ company: '示例技术公司', title: '行政实习生', jobType: '实习' });
     expect(resume.campusExperiences).toHaveLength(2);
     expect(resume.projects).toHaveLength(3);
     expect(resume.projects.map(project => project.projectName)).toEqual([
-      '“助农项目”',
-      '“品牌赋能项目”',
+      '“社区服务项目”',
+      '“校园导航项目”',
       '全国调研课题',
     ]);
     expect(resume.awards).toHaveLength(3);

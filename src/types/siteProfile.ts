@@ -6,7 +6,7 @@ export type SiteProfileVerificationStatus =
   | 'FIXTURE_VERIFIED'
   | 'SITE_VERIFIED';
 
-export type RepeatableSectionKey = 'education' | 'experience' | 'project' | 'family';
+export type RepeatableSectionKey = 'education' | 'experience' | 'project' | 'family' | 'award';
 export type RepeatableWorkflowMode = 'parallel' | 'save-before-next' | 'single-card';
 export type SiteProfileControlKind =
   | 'input'

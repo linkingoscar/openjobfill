@@ -9,6 +9,8 @@ import { deriveLanguageSummary } from '../derivation/profileDeriver';
 import { inspectFieldSafety } from './fieldSafety';
 import type { CustomFieldMapping } from '../../types/rule';
 import { resolveCustomRuleMappings } from './customRuleMatcher';
+import { REPEATABLE_SECTIONS } from '../engine/repeatableSections';
+import type { RepeatableSectionKey } from '../../types/siteProfile';
 
 const CONTEXT_EXCLUSION_RULES: Record<string, string[]> = {
   'basics.name': ['紧急联系人', '证明人', '推荐人', '担保人', '家属', '父亲', '母亲', '配偶', '亲属', 'emergency', 'reference', 'referral'],
@@ -34,6 +36,10 @@ export function hasUsableValue(val: any): boolean {
     return val.trim().length > 0;
   }
   return true;
+}
+
+function matchedKey(field: FieldDescriptor, resumeKey: string): string {
+  return `${field.section?.type || 'basic'}:${field.section?.index || 0}:${resumeKey}`;
 }
 
 export class PlanGenerator {
@@ -158,7 +164,7 @@ export class PlanGenerator {
             driverType: this.resolveDriverType(field),
           });
           highConfidenceCount++;
-          matchedSemanticKeys.add(customResumeKey);
+          matchedSemanticKeys.add(matchedKey(field, customResumeKey));
           continue;
         }
       }
@@ -186,7 +192,7 @@ export class PlanGenerator {
                 driverType: this.resolveDriverType(field),
               });
               highConfidenceCount++;
-              matchedSemanticKeys.add(targetKey);
+              matchedSemanticKeys.add(matchedKey(field, targetKey));
               platformMatched = true;
               break;
             }
@@ -233,8 +239,8 @@ export class PlanGenerator {
           driverType: this.resolveDriverType(field),
         });
         highConfidenceCount++;
-        matchedSemanticKeys.add(semanticMatch.resumeKey);
-        for (const relatedKey of semanticMatch.relatedKeys || []) matchedSemanticKeys.add(relatedKey);
+        matchedSemanticKeys.add(matchedKey(field, semanticMatch.resumeKey));
+        for (const relatedKey of semanticMatch.relatedKeys || []) matchedSemanticKeys.add(matchedKey(field, relatedKey));
         continue;
       }
 
@@ -372,24 +378,20 @@ export class PlanGenerator {
     let highestScore = 0;
 
     const queryText = field.label || field.placeholder || field.name || field.ariaLabel;
+    // A date fragment or placeholder carries no identity. In particular “年”
+    // must never substring-match “出生年月” and receive the entire birth date.
+    if (/^(年|月|日|请选择|选择|请输入|yyyy|mm|dd)$/i.test(queryText.trim())) return null;
+    const group = REPEATABLE_SECTIONS[field.section?.type as RepeatableSectionKey]?.resumeKey;
 
     for (const item of RESUME_DICTIONARY) {
       let targetResumeKey = item.resumeKey;
 
-      // 如果字段属于多段经历卡片且序号 > 0，将 .0. 动态替换为检测到的序号
-      if (field.section && field.section.index > 0) {
-        if (field.section.type === 'education' && targetResumeKey.startsWith('educations.')) {
-          targetResumeKey = targetResumeKey.replace('educations.0.', `educations.${field.section.index}.`);
-        } else if (field.section.type === 'experience' && targetResumeKey.startsWith('experiences.')) {
-          targetResumeKey = targetResumeKey.replace('experiences.0.', `experiences.${field.section.index}.`);
-        } else if (field.section.type === 'project' && targetResumeKey.startsWith('projects.')) {
-          targetResumeKey = targetResumeKey.replace('projects.0.', `projects.${field.section.index}.`);
-        } else if (field.section.type === 'family' && targetResumeKey.startsWith('familyMembers.')) {
-          targetResumeKey = targetResumeKey.replace('familyMembers.0.', `familyMembers.${field.section.index}.`);
-        }
+      // A recognised card owns one resume record. Do not fall through to the
+      // next record merely because a key was used by another field.
+      if (group && targetResumeKey.startsWith(`${group}.`)) {
+        targetResumeKey = targetResumeKey.replace(/\.\d+\./, `.${field.section!.index}.`);
       }
-
-      if (alreadyMatchedKeys.has(targetResumeKey)) {
+      if (alreadyMatchedKeys.has(matchedKey(field, targetResumeKey))) {
         continue;
       }
 

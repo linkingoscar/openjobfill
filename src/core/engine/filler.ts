@@ -23,6 +23,7 @@ import { createPageFingerprint, FillRunContext, throwIfAborted } from '../pipeli
 import type { SectionPreparationPlan } from './sectionEngine';
 import { repeatableSectionWorkflowRunner } from './sectionWorkflow';
 import type { RepeatableSectionKey } from '../../types/siteProfile';
+import { REPEATABLE_SECTIONS } from './repeatableSections';
 
 /** analyze 阶段的产物：一份尚未执行的填表规划，可预览、可确认后再执行 */
 export interface AnalyzedPlan {
@@ -44,10 +45,7 @@ export interface AnalyzedPlan {
 }
 
 function getSectionRecordCount(resume: StandardResume, section: RepeatableSectionKey): number {
-  if (section === 'education') return resume.educations?.length || 0;
-  if (section === 'experience') return resume.experiences?.length || 0;
-  if (section === 'project') return resume.projects?.length || 0;
-  return resume.familyMembers?.length || 0;
+  return resume[REPEATABLE_SECTIONS[section].resumeKey]?.length || 0;
 }
 
 function mergeExecutionResult(target: PipelineExecutionResult, incoming: PipelineExecutionResult): void {
@@ -523,6 +521,16 @@ export class FormFillerEngine {
         pageUrl: run.pageUrl,
       });
       const executedPlanItems = [...basePlan.items];
+
+      for (const capacity of sectionEngine.getLastDiagnostics().filter(item => item.status === 'failed'
+        && preparation.actions.some(action => action.groupKey === item.groupKey))) {
+        const label = REPEATABLE_SECTIONS[capacity.groupKey].label;
+        const missing = capacity.desiredCount - capacity.finalCount;
+        const reason = `${label}需要 ${capacity.desiredCount} 条，页面现有 ${capacity.finalCount} 条，仍缺 ${missing} 条；添加按钮未生效、不可用或已达到页面限制`;
+        executionResult.failedCount++;
+        executionResult.logs.push({ field: capacity.groupKey, label, value: '', status: 'failed', message: reason, failureCode: 'verification_mismatch' });
+        executionResult.remainingTasks.push({ id: `capacity-${capacity.groupKey}-${run.runId}`, label, type: 'unknown', required: false, reason });
+      }
 
       if (resume) {
         const customRule = await ruleStorage.findMatchingRuleForUrl(analyzed.pageUrl);

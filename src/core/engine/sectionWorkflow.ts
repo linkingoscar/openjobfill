@@ -280,6 +280,9 @@ export class RepeatableSectionWorkflowRunner {
       }
     }
 
+    if (completedRecords < recordCount) {
+      return blocked(completedRecords, `已处理 ${completedRecords} 条记录，仍有 ${recordCount - completedRecords} 条超过当前区块流程上限，需继续处理`);
+    }
     step({ state: 'COMPLETE', recordIndex: Math.max(0, maxRecords - 1), success: true });
     env.trace('section-result', { section: config.sectionKey, success: true, completedRecords });
     return { success: true, completedRecords, steps };

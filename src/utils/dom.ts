@@ -61,6 +61,34 @@ const FORM_CONTROL_SELECTOR =
 const FIELD_CONTAINER_SELECTOR =
   '.el-form-item, .ant-form-item, .form-item, .form-group, [class*="form-item"], [class*="FormItem"], [class*="item-wrapper"], tr';
 
+/** Text supplied by the page, excluding our own status badges and tooltips. */
+export function getPageText(el: Element | null | undefined): string {
+  if (!el) return '';
+  if (el.matches('.openjobfill-field-badge')) return '';
+  if (!el.querySelector('.openjobfill-field-badge')) return el.textContent?.trim() || '';
+  const copy = el.cloneNode(true) as Element;
+  copy.querySelectorAll('.openjobfill-field-badge').forEach(badge => badge.remove());
+  return copy.textContent?.trim() || '';
+}
+
+function findNestedFieldLabel(el: HTMLElement): HTMLElement | null {
+  let current: HTMLElement | null = el;
+  // Stop at a branch containing another field. This supports wrapper-heavy
+  // components without borrowing the label from an adjacent column or section.
+  for (let depth = 0; current?.parentElement && depth < 7; depth++, current = current.parentElement) {
+    const previous = current.previousElementSibling as HTMLElement | null;
+    if (previous && !previous.matches(FORM_CONTROL_SELECTOR) && !previous.querySelector(FORM_CONTROL_SELECTOR)) {
+      const text = getPageText(previous);
+      if (text && text.length <= 60 && previous.matches('label, [class*="label"], [class*="title"], [class*="Label"], [class*="Title"]')) {
+        return previous;
+      }
+    }
+    const siblings = Array.from(current.parentElement.querySelectorAll<HTMLElement>(FORM_CONTROL_SELECTOR));
+    if (siblings.some(control => control !== el && !el.contains(control) && !control.contains(el))) break;
+  }
+  return null;
+}
+
 function hasRequiredMarker(text: string | null | undefined): boolean {
   return !!text && (text.includes('*') || text.includes('必填'));
 }
@@ -101,9 +129,12 @@ export function isFieldRequired(el: HTMLElement, labelText = ''): boolean {
     ? doc.querySelector(`label[for="${CSS.escape(el.id)}"]`)
     : null;
   const ancestorLabel = el.closest('label');
-  if (hasRequiredMarker(explicitLabel?.textContent) || hasRequiredMarker(ancestorLabel?.textContent)) {
+  if (hasRequiredMarker(getPageText(explicitLabel)) || hasRequiredMarker(getPageText(ancestorLabel))) {
     return true;
   }
+
+  const nestedLabel = findNestedFieldLabel(el);
+  if (nestedLabel) return hasRequiredMarker(getPageText(nestedLabel));
 
   const container = el.closest(FIELD_CONTAINER_SELECTOR) as HTMLElement | null;
   if (!container) return hasRequiredMarker(labelText);
@@ -313,16 +344,21 @@ export function findAssociatedLabelText(inputEl: HTMLElement): string {
   // 1. 如果有明确的 id，查找 label[for="id"]
   if (inputEl.id) {
     const label = doc.querySelector(`label[for="${CSS.escape(inputEl.id)}"]`);
-    if (label && label.textContent) {
-      return label.textContent.trim();
+    if (getPageText(label)) {
+      return getPageText(label);
     }
   }
 
   // 2. 查找祖先 label
   const parentLabel = inputEl.closest('label');
-  if (parentLabel && parentLabel.textContent) {
-    return parentLabel.textContent.trim();
+  if (getPageText(parentLabel)) {
+    return getPageText(parentLabel);
   }
+
+  const ariaLabel = inputEl.getAttribute('aria-label');
+  if (ariaLabel?.trim()) return ariaLabel.trim();
+  const nestedLabel = findNestedFieldLabel(inputEl);
+  if (nestedLabel) return getPageText(nestedLabel);
 
   // 3. 查找常见表单行容器
   const formItem = inputEl.closest(
@@ -332,15 +368,15 @@ export function findAssociatedLabelText(inputEl: HTMLElement): string {
     const label = formItem.querySelector(
       'label, .el-form-item__label, .ant-form-item-label, .form-label, [class*="label"], [class*="title"], td:first-child'
     );
-    if (label && label.textContent) {
-      return label.textContent.trim();
+    if (getPageText(label)) {
+      return getPageText(label);
     }
   }
 
   // 4. 查找前一个兄弟节点或其内部文本
   let prev = inputEl.previousElementSibling as HTMLElement | null;
   while (prev) {
-    const text = prev.textContent?.trim();
+    const text = getPageText(prev);
     if (text && text.length <= 40) {
       return text;
     }
@@ -350,9 +386,6 @@ export function findAssociatedLabelText(inputEl: HTMLElement): string {
   // 5. 查找 placeholder, aria-label, name, title
   const placeholder = inputEl.getAttribute('placeholder');
   if (placeholder) return placeholder.trim();
-
-  const ariaLabel = inputEl.getAttribute('aria-label');
-  if (ariaLabel) return ariaLabel.trim();
 
   const name = inputEl.getAttribute('name');
   if (name) return name.trim();

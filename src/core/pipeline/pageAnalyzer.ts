@@ -8,10 +8,13 @@ import {
   isSelectElement,
   isFieldRequired,
   getAllOpenRoots,
+  getPageText,
 } from '../../utils/dom';
 import { createElementFingerprint } from './runContext';
 import { inspectFieldSafety } from './fieldSafety';
 import { buildFieldLocator } from './fieldLocator';
+import { findRepeatableSections, REPEATABLE_SECTIONS } from '../engine/repeatableSections';
+import type { RepeatableSectionKey } from '../../types/siteProfile';
 
 const CONTROL_TRIGGER_SELECTORS = [
   '.el-select', '.el-select__wrapper', '.el-autocomplete', '.el-cascader', '.el-cascader__wrapper', '.el-date-editor',
@@ -188,6 +191,13 @@ export class PageAnalyzer {
       } catch {}
     }
 
+    const repeatableCards = [...new Set(allCandidateElements.map(element => element.ownerDocument))].flatMap(doc =>
+      (Object.keys(REPEATABLE_SECTIONS) as RepeatableSectionKey[]).flatMap(type =>
+        findRepeatableSections(REPEATABLE_SECTIONS[type].keywords, [doc]).flatMap(section =>
+          section.cards.map((card, index) => ({ card, info: { type, index, rawTitle: REPEATABLE_SECTIONS[type].label } })),
+        ),
+      ),
+    );
     let fieldCounter = 0;
     for (const el of allCandidateElements) {
       // 避免重复扫描或扫描已被包裹在自定义组件内部的冗余原生 input
@@ -209,7 +219,7 @@ export class PageAnalyzer {
       const readOnly = (el as HTMLInputElement).readOnly || el.getAttribute('readonly') !== null;
       const currentValue = this.readCurrentValue(el, type);
       const options = this.extractOptions(el, type);
-      const section = this.detectSectionInfo(el);
+      const section = repeatableCards.find(entry => entry.card === el || entry.card.contains(el))?.info || this.detectSectionInfo(el);
       const contextText = this.extractContextText(el);
       const sectionTitle = section.rawTitle || section.type;
 
@@ -481,6 +491,12 @@ export class PageAnalyzer {
       ) {
         return 'date';
       }
+      // Moka's SD controls use CSS-module class names, not the historical
+      // .moka-select aliases. Their editable input is a dropdown trigger.
+      if (el.matches('[class*="sd-Input-has-addon-"]')
+        && /^(请选择|年|月)$|学校|专业|国家\/地区/.test(el.placeholder)) {
+        return 'select';
+      }
       return 'text';
     }
     return 'unknown';
@@ -559,10 +575,10 @@ export class PageAnalyzer {
       }
     }
 
-    // 向上查找通用标题区域
-    const genericSection = el.closest('fieldset, .section, [class*="section"], [class*="block"], .ant-card, .el-card');
-    if (genericSection) {
-      const headerText = (genericSection.querySelector('h1, h2, h3, h4, .title, [class*="title"], legend')?.textContent || '').toLowerCase();
+    // Count only sections of the same semantic type, not unrelated sibling divs.
+    const sectionSelector = 'fieldset, section, .section, [class*="section"], [class*="block"], .ant-card, .el-card';
+    const headerOf = (section: Element) => getPageText(section.querySelector('h1, h2, h3, h4, .title, [class*="title"], legend')).toLowerCase();
+    const typeOf = (headerText: string): FieldSectionInfo['type'] => {
       let type: FieldSectionInfo['type'] = 'unknown';
       if (/教育|学历|就读|学习经历|education/i.test(headerText)) type = 'education';
       else if (/工作|实习|工作经历|任职|experience|work/i.test(headerText)) type = 'experience';
@@ -570,12 +586,18 @@ export class PageAnalyzer {
       else if (/家庭|亲属|紧急联系|family|contact/i.test(headerText)) type = 'family';
       else if (/问答|开放|essay|question/i.test(headerText)) type = 'qa';
       else if (/基本信息|个人信息|basic/i.test(headerText)) type = 'basic';
-
+      return type;
+    };
+    let genericSection = el.closest(sectionSelector);
+    while (genericSection) {
+      const headerText = headerOf(genericSection);
+      const type = typeOf(headerText);
       if (type !== 'unknown' && genericSection.parentElement) {
-        const allSame = Array.from(genericSection.parentElement.children).filter((c) => c.tagName === genericSection.tagName);
+        const allSame = Array.from(genericSection.parentElement.children).filter((c) => c.matches(sectionSelector) && typeOf(headerOf(c)) === type);
         const idx = allSame.indexOf(genericSection);
         return { type, index: Math.max(0, idx), rawTitle: headerText };
       }
+      genericSection = genericSection.parentElement?.closest(sectionSelector) || null;
     }
 
     return { type: 'basic', index: 0 };
@@ -589,8 +611,9 @@ export class PageAnalyzer {
     ];
 
     for (const ancestor of candidates) {
-      if (ancestor && ancestor.textContent) {
-        return ancestor.textContent.trim().toLowerCase();
+      const text = getPageText(ancestor);
+      if (text) {
+        return text.toLowerCase();
       }
     }
 

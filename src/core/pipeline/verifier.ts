@@ -58,6 +58,7 @@ export class Verifier {
         const selected = el.options[el.selectedIndex];
         return selected ? selected.text.trim() : el.value;
       }
+      if (isInputElement(el)) return el.value;
       // 自定义下拉框：提取当前展示的文本
       const selectedItem = el.querySelector(
         '.el-select__selected-item, .ant-select-selection-item, .semi-select-selection-text, [class*="selected"], [class*="value"]'
@@ -111,6 +112,25 @@ export class Verifier {
       return false;
     }
 
+    if (driverType === 'date') {
+      const parts = (value: unknown): number[] | null => {
+        const text = String(value).trim().replace(/[年月日/.]/g, '-').replace(/-$/, '');
+        if (!/^\d{4}(?:-\d{1,2}){0,2}$/.test(text)) return null;
+        const result = text.split('-').map(Number);
+        if (result[0] < 1900 || result[0] > 2200) return null;
+        if (result.length > 1 && (result[1] < 1 || result[1] > 12)) return null;
+        if (result.length > 2) {
+          const date = new Date(Date.UTC(result[0], result[1] - 1, result[2]));
+          if (date.getUTCMonth() !== result[1] - 1 || date.getUTCDate() !== result[2]) return null;
+        }
+        return result;
+      };
+      const actualParts = parts(actual);
+      const expectedParts = parts(expected);
+      return !!actualParts && !!expectedParts && actualParts.length >= expectedParts.length
+        && expectedParts.every((part, index) => actualParts[index] === part);
+    }
+
     if (driverType === 'date-range' && typeof actual === 'object' && typeof expected === 'object') {
       return this.isSemanticEquivalent(actual.startDate || '', expected.startDate || '', 'date') &&
         this.isSemanticEquivalent(actual.endDate || '', expected.endDate || '', 'date');
@@ -160,15 +180,6 @@ export class Verifier {
       const locAct = locationResolver.normalizeLocation(strActual);
       const locExp = locationResolver.normalizeLocation(strExpected);
       if (locAct.city && locExp.city && locAct.city === locExp.city) {
-        return true;
-      }
-    }
-
-    // 6. 日期等价性 (如 "2023-09" vs "2023年09月" vs "2023/09")
-    if (driverType === 'date') {
-      const numActual = strActual.replace(/[^\d]/g, '');
-      const numExpected = strExpected.replace(/[^\d]/g, '');
-      if (numActual && numExpected && (numActual.startsWith(numExpected) || numExpected.startsWith(numActual))) {
         return true;
       }
     }
