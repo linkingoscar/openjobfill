@@ -110,12 +110,14 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
   });
 
   it('面对空文本、乱码或破坏性输入时，应能优雅降级 (Graceful Fallback) 而不崩溃', () => {
-    expect(() => parseResumeFromText('')).not.toThrow();
     const emptyResume = parseResumeFromText('');
     expect(emptyResume.basics.name).toBe('');
     expect(emptyResume.educations).toEqual([]);
 
-    expect(() => parseResumeFromText('~~~$$$### 123456 !!! ???')).not.toThrow();
+    const garbageResume = parseResumeFromText('~~~$$$### 123456 !!! ???');
+    expect(garbageResume.basics.name).toBe('');
+    expect(garbageResume.basics.phone).toBe('');
+    expect(garbageResume.educations).toEqual([]);
   });
 
   it('技能熟练度仅在原文明确写明时才提取，未写明时保持空值拒绝盲猜', () => {

@@ -57,7 +57,7 @@ describe('AhoCorasickMatcher (AC 自动机多模式匹配引擎)', () => {
     expect(matchedKeywords2).toContain('R');
   });
 
-  it('面对超长文本（10,000+ 字符）应能在毫秒级严格 O(N) 线性时间内完成检索', () => {
+  it('长文本重复命中应完整，不把单次机器耗时当复杂度证明', () => {
     const keywords = ['Docker', 'Kubernetes', 'CI/CD', 'GraphQL', 'Microservices', 'Webpack', 'Vite', 'Kafka', 'Flink', 'Spark'];
     matcher.insertBatch(keywords);
     matcher.build();
@@ -66,12 +66,12 @@ describe('AhoCorasickMatcher (AC 自动机多模式匹配引擎)', () => {
     const baseBlock = 'We are looking for a senior architect with Docker, Kubernetes and Microservices experience. Continuous learning in Vite and CI/CD pipelines is preferred. ';
     const giantText = baseBlock.repeat(800); // 约 110,000 字符
 
-    const start = performance.now();
     const results = matcher.search(giantText);
-    const duration = performance.now() - start;
 
-    expect(results.length).toBeGreaterThan(1000);
-    // 验证严格 O(N) 性能，10 万字检索应在 50ms 以内完成
-    expect(duration).toBeLessThan(100);
+    expect(results).toHaveLength(4000);
+    for (const keyword of ['Docker', 'Kubernetes', 'Microservices', 'Vite', 'CI/CD']) {
+      expect(results.filter(result => result.keyword === keyword)).toHaveLength(800);
+    }
+    expect(results.some(result => result.keyword === 'GraphQL')).toBe(false);
   });
 });
