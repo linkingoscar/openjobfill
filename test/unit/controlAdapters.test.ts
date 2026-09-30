@@ -160,7 +160,7 @@ describe('Adapter 注册与运行契约（非真实网站验收）', () => {
     });
   });
 
-  it('51Job 三层联动应逐层选择地区并按最终渲染路径验证', async () => {
+  it('51Job 静态候选的路由与路径读回契约（异步层级另测）', async () => {
     document.body.innerHTML = `
       <form class="application-form">
         <label>现居地区</label>
@@ -273,7 +273,7 @@ describe('Adapter 注册与运行契约（非真实网站验收）', () => {
     expect(result.logs[0].attempts?.[0]).toMatchObject({ adapterId: 'BankCommPopPanel', outcome: 'success' });
   });
 
-  it('My97 日期应使用受限 MAIN-world TYPE 并通过页面值回读', async () => {
+  it('My97 消息桥接路由契约（模拟响应，不代表实际日历验收）', async () => {
     document.body.innerHTML = '<form class="application-form"><label>出生日期</label><input class="Wdate"></form>';
     const input = document.querySelector<HTMLInputElement>('.Wdate')!;
     const sendMessage = vi.fn(async (message: { type: string; payload?: { value?: string } }) => {

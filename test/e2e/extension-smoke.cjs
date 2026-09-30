@@ -11,7 +11,8 @@ const extensionPath = path.join(repoRoot, '.output', 'chrome-mv3');
 function startStaticServer() {
   const server = http.createServer((request, response) => {
     const requestPath = decodeURIComponent((request.url || '/').split('?')[0]);
-    const candidate = path.resolve(repoRoot, `.${requestPath}`);
+    const fixturePath = requestPath.startsWith('/apply/') ? `/test/fixtures/${path.basename(requestPath)}` : requestPath;
+    const candidate = path.resolve(repoRoot, `.${fixturePath}`);
     if (candidate !== repoRoot && !candidate.startsWith(`${repoRoot}${path.sep}`)) {
       response.writeHead(403);
       response.end('Forbidden');

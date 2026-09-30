@@ -8,9 +8,10 @@ module.exports = async function verifyControlBehavior(context, options, url, art
   resume.updatedAt=Date.now(); await chrome.storage.local.set({[key]:resume});
  });
  for(const mode of ['vue','cancel','rerender','invalid','radio','checkbox','calendar','debounced','cancel-main']) {
+  console.log(`control scenario: ${mode}`);
   const startedAt = await options.evaluate(() => Date.now());
   const page=await context.newPage(); await page.setViewportSize({width:1366,height:1000});
-  await page.goto(`${url}/test/fixtures/text-date-behavior.html?case=${mode}`);
+  await page.goto(`${url}/apply/text-date-behavior.html?case=${mode}`);
   const host=page.locator('#openjobfill-extension-host');
   await host.locator('button[aria-label^="一键自动填写当前页面"]').click();
   const confirm=host.getByRole('button',{name:/^确认填写/});await confirm.waitFor({timeout:15000});await confirm.click();
@@ -27,6 +28,7 @@ module.exports = async function verifyControlBehavior(context, options, url, art
    assert.ok(results.length>0,`${mode} must complete execution`);
    assert.ok(results.every(result=>result.filledCount===0 && result.verifiedCount===0),`${mode} must not claim a verified fill: ${JSON.stringify(results)}`);
   }
+  console.log(`control passed: ${mode}`);
   await page.close();
  }
  console.log('control behavior passed: real Vue model, text, radio, checkbox, native date, cancellation, rerender and validation');

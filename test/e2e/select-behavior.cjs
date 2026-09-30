@@ -9,6 +9,7 @@ module.exports = async function verifySelectBehavior(context, options, url, arti
   {name:'cascader-columns',expected:'其他/其他',location:{province:'其他',city:'其他'}},
  ];
  for(const scenario of scenarios) {
+  console.log(`select scenario: ${scenario.name}`);
   await options.evaluate(async ({location,name})=>{
    const key='openjobfill_resume_resume-default';const resume=(await chrome.storage.local.get(key))[key];
    resume.educations=[{id:'synthetic-school',schoolName:name==='legacy-select2'?'清华大学':'测试大学',degree:'本科',major:'软件工程',startDate:'2024-09',endDate:'2027-06'}];
@@ -17,7 +18,7 @@ module.exports = async function verifySelectBehavior(context, options, url, arti
   },scenario);
   const startedAt=await options.evaluate(()=>Date.now());
   const page=await context.newPage();await page.setViewportSize({width:1366,height:1000});
-  await page.goto(`${url}/test/fixtures/select-behavior.html?case=${scenario.name}`);
+  await page.goto(`${url}/apply/select-behavior.html?case=${scenario.name}`);
   await page.evaluate(({name})=>{
    document.querySelector('#case-picker').remove();
    const label=document.querySelector('#fixture label');
@@ -33,6 +34,7 @@ module.exports = async function verifySelectBehavior(context, options, url, arti
   else assert.equal(state.committed,scenario.expected,`${scenario.name} committed state: ${JSON.stringify(state)}`);
 
   assert.ok(results.some(result=>result.verifiedCount>0),`${scenario.name} must pass production readback: ${JSON.stringify(results)}`);
+  console.log(`select passed: ${scenario.name}`);
   await page.close();
  }
  console.log('select behavior passed: portals, hidden/disabled entries, async search, dynamic association, legacy Select2 and cascader child loading');
