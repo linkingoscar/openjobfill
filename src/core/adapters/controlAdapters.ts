@@ -404,7 +404,7 @@ function selectedText(root: HTMLElement): string {
     '[class*="sd-Input-display-value"]',
     '[class*="selected-value"]', '[class*="selectedValue"]', '[class*="selection-item"]',
   ].join(','));
-  if (selected?.textContent?.trim()) return selected.textContent.trim();
+  if (selected) return selected.textContent?.trim() || '';
   const input = firstWritable(root);
   if (input && (isInputElement(input) || isTextAreaElement(input))) return input.value;
   return root.textContent?.trim() || '';

@@ -34,7 +34,7 @@ const resume: StandardResume = {
   qaBank: [],
 };
 
-describe('58 个复杂控件 Adapter Runtime', () => {
+describe('Adapter 注册与运行契约（非真实网站验收）', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
@@ -101,29 +101,30 @@ describe('58 个复杂控件 Adapter Runtime', () => {
     });
   });
 
-  it('Moka 搜索下拉应输入检索词、选择候选项并走专属验证', async () => {
+  it.each([true, false])('搜索下拉以提交状态验证成功，不能把检索词当选中值（提交=%s）', async (commits) => {
     document.body.innerHTML = `
-      <form class="application-form">
-        <label>毕业院校</label>
-        <div class="mokahr-search-dropdown"><input role="combobox" name="school"></div>
-      </form>
-      <div class="mokahr-dropdown-option">北京大学</div>`;
-    let optionClicked = false;
-    document.querySelector('.mokahr-dropdown-option')!.addEventListener('click', () => { optionClicked = true; });
-    const withEducation: StandardResume = {
-      ...resume,
-      educations: [{ id: 'edu-1', schoolName: '北京大学', degree: '', major: '', startDate: '', endDate: '' }],
-    };
-
-    const plan = planGenerator.generatePlan(pageAnalyzer.analyzePage(document), withEducation);
-    const result = await pipelineExecutor.executePlan(plan, {
-      runId: 'run-moka-search',
-      pageUrl: 'https://app.mokahr.com/application/1',
+      <form class="application-form"><label>毕业院校</label>
+        <div class="mokahr-search-dropdown" aria-controls="school-options">
+          <span class="selected-value"></span><input role="combobox" name="school">
+        </div>
+      </form><div id="school-options"><div class="mokahr-dropdown-option">北京大学</div></div>`;
+    const input = document.querySelector('input')!;
+    let committedSchoolId: string | null = null;
+    document.querySelector('.mokahr-dropdown-option')!.addEventListener('click', () => {
+      if (!commits) return;
+      committedSchoolId = 'pku'; input.value = '';
+      document.querySelector('.selected-value')!.textContent = '北京大学';
     });
-
-    expect(optionClicked).toBe(true);
-    expect(result.failedCount).toBe(0);
-    expect(result.logs[0].attempts?.[0]).toMatchObject({ adapterId: 'MokahrSearchDropdown', outcome: 'success' });
+    const withEducation: StandardResume = {
+      ...resume, educations: [{ id: 'edu-1', schoolName: '北京大学', degree: '', major: '', startDate: '', endDate: '' }],
+    };
+    const result = await pipelineExecutor.executePlan(planGenerator.generatePlan(pageAnalyzer.analyzePage(document), withEducation), {
+      runId: 'run-moka-search', pageUrl: 'https://app.mokahr.com/application/1',
+    });
+    expect(committedSchoolId).toBe(commits ? 'pku' : null);
+    expect(result.filledCount).toBe(commits ? 1 : 0);
+    expect(result.verifiedCount).toBe(commits ? 1 : 0);
+    expect(result.failedCount).toBe(commits ? 0 : 1);
   });
 
   it('MAIN world 桥只能通过一次性授权发送固定动作与结构定位器', async () => {

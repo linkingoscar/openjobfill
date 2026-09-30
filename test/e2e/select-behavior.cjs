@@ -1,3 +1,4 @@
+const { waitForCompletedRun } = require('./browser-assertions.cjs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 module.exports = async function verifySelectBehavior(context, options, url, artifactDir) {
@@ -25,12 +26,12 @@ module.exports = async function verifySelectBehavior(context, options, url, arti
   const host=page.locator('#openjobfill-extension-host');
   await host.locator('button[aria-label^="一键自动填写当前页面"]').click();
   const confirm=host.getByRole('button',{name:/^确认填写/});await confirm.waitFor({timeout:15000});await confirm.click();
-  await options.waitForFunction(async(startedAt)=>((await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[]).some(session=>session.createdAt>=startedAt && session.pageUrl.includes('/select-behavior.html') && session.summary && session.records.some(record=>record.stage==='execution-result')),startedAt,{timeout:20000});
+  const results=await waitForCompletedRun(options,startedAt,'/select-behavior.html');
   await page.screenshot({path:path.join(artifactDir,`select-${scenario.name}.png`),fullPage:true});
   const state=await page.evaluate(()=>window.selectBehaviorFixture.state);
   if(scenario.expected==='native')assert.equal(await page.locator('#audited-control').inputValue(),'target');
   else assert.equal(state.committed,scenario.expected,`${scenario.name} committed state: ${JSON.stringify(state)}`);
-  const results=await options.evaluate(async(startedAt)=>((await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[]).filter(session=>session.createdAt>=startedAt && session.pageUrl.includes('/select-behavior.html')).flatMap(session=>session.records.filter(record=>record.stage==='execution-result').map(record=>record.payload)),startedAt);
+
   assert.ok(results.some(result=>result.verifiedCount>0),`${scenario.name} must pass production readback: ${JSON.stringify(results)}`);
   await page.close();
  }

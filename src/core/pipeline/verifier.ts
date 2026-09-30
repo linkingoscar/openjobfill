@@ -69,8 +69,8 @@ export class Verifier {
       const selectedItem = el.querySelector(
         '.el-select__selected-item, .ant-select-selection-item, .semi-select-selection-text, .select2-chosen, [class*="selected"], [class*="value"]'
       );
-      if (selectedItem && selectedItem.textContent) {
-        return selectedItem.textContent.trim();
+      if (selectedItem) {
+        return selectedItem.textContent?.trim() || '';
       }
       return el.textContent?.trim() || '';
     }

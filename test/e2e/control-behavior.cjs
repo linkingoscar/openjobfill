@@ -1,3 +1,4 @@
+const { waitForCompletedRun } = require('./browser-assertions.cjs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 module.exports = async function verifyControlBehavior(context, options, url, artifactDir) {
@@ -13,14 +14,7 @@ module.exports = async function verifyControlBehavior(context, options, url, art
   const host=page.locator('#openjobfill-extension-host');
   await host.locator('button[aria-label^="一键自动填写当前页面"]').click();
   const confirm=host.getByRole('button',{name:/^确认填写/});await confirm.waitFor({timeout:15000});await confirm.click();
-  await options.waitForFunction(async (startedAt) => {
-    const sessions=(await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[];
-    return sessions.some(session=>session.createdAt>=startedAt && session.pageUrl.includes('/text-date-behavior.html') && session.summary && session.records.some(record=>record.stage==='execution-result'));
-  }, startedAt, {timeout:20000});
-  const results=await options.evaluate(async(startedAt)=>{
-    const sessions=(await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[];
-    return sessions.filter(session=>session.createdAt>=startedAt && session.pageUrl.includes('/text-date-behavior.html')).flatMap(session=>session.records.filter(record=>record.stage==='execution-result').map(record=>record.payload));
-  },startedAt);
+  const results=await waitForCompletedRun(options,startedAt,'/text-date-behavior.html');
   await page.screenshot({path:path.join(artifactDir,`controls-${mode}.png`),fullPage:true});
   if(mode==='vue') {
    const model=JSON.parse(await page.locator('#model').textContent());
