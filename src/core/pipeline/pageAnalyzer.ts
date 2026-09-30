@@ -1,7 +1,8 @@
 import type { FieldDescriptor, FieldType, FieldSectionInfo } from '../../types/pipeline';
 import type { SiteProfileControlKind } from '../../types/siteProfile';
 import {
-  findAssociatedLabelText, 
+  findAssociatedLabelText,
+  findSplitDateGroup,
   getElementWindow, 
   isInputElement, 
   isTextAreaElement, 
@@ -214,7 +215,8 @@ export class PageAnalyzer {
       const placeholder = el.getAttribute('placeholder') || '';
       const name = el.getAttribute('name') || '';
       const ariaLabel = el.getAttribute('aria-label') || '';
-      const required = this.detectRequired(el, label);
+      const dateGroup = findSplitDateGroup(el);
+      const required = this.detectRequired(el, label) || !!dateGroup?.required;
       const disabled = (el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true';
       const readOnly = (el as HTMLInputElement).readOnly || el.getAttribute('readonly') !== null;
       const currentValue = this.readCurrentValue(el, type);
@@ -238,6 +240,7 @@ export class PageAnalyzer {
         options,
         section,
         contextText,
+        unresolvedDateGroup: dateGroup?.label,
         fingerprint: createElementFingerprint(el, sectionTitle, section.index),
         locator: buildFieldLocator(el, section, label),
         safety: inspectFieldSafety(el, label, contextText),

@@ -1,6 +1,6 @@
+import { getSafeEntityVariants } from '../matcher/aliasDictionary';
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
-import { locationResolver } from '../resolvers/locationResolver';
 import { isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 
 export class Verifier {
@@ -106,11 +106,21 @@ export class Verifier {
   /**
    * 校验读回的值与期望值是否具备“语义等价性” (Domain-Aware Equivalence)
    */
-  isSemanticEquivalent(actual: any, expected: any, driverType: DriverType): boolean {
+  isSemanticEquivalent(actual: any, expected: any, driverType: DriverType, semanticKey?: string): boolean {
     if (actual === expected) return true;
-    if (actual === undefined || actual === null || expected === undefined || expected === null) {
-      return false;
+    if (actual == null || expected == null) return false;
+    const normalizedText = (value: unknown) => String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+    if (/phone/i.test(semanticKey || '')) {
+      const phone = (value: unknown) => {
+        const raw = normalizedText(value);
+        if (!/^[+\d\s().-]+$/.test(raw)) return '';
+        const digits = raw.replace(/\D/g, '');
+        return digits.length === 13 && digits.startsWith('86') ? digits.slice(2) : digits;
+      };
+      return !!phone(expected) && phone(actual) === phone(expected);
     }
+    if (/email/i.test(semanticKey || '')) return normalizedText(actual).toLowerCase() === normalizedText(expected).toLowerCase();
+    if (/idCardNumber|passport/i.test(semanticKey || '')) return normalizedText(actual).toUpperCase() === normalizedText(expected).toUpperCase();
 
     if (driverType === 'date') {
       const parts = (value: unknown): number[] | null => {
@@ -136,21 +146,27 @@ export class Verifier {
         this.isSemanticEquivalent(actual.endDate || '', expected.endDate || '', 'date');
     }
 
-    // 1. Boolean 场景 (Checkbox / Radio)
+    // Unknown boolean strings must never become true by truthiness.
     if (typeof expected === 'boolean' || typeof actual === 'boolean') {
-      const expBool = typeof expected === 'boolean' ? expected : !['否', 'false', '0', 'no'].includes(String(expected).toLowerCase().trim());
-      const actBool = typeof actual === 'boolean' ? actual : !['否', 'false', '0', 'no', ''].includes(String(actual).toLowerCase().trim());
-      return expBool === actBool;
+      const booleanValue = (value: unknown): boolean | null => {
+        if (typeof value === 'boolean') return value;
+        const text = normalizedText(value).toLowerCase();
+        if (['true', '1', 'yes', '是', '同意'].includes(text)) return true;
+        if (['false', '0', 'no', '否', '不同意'].includes(text)) return false;
+        return null;
+      };
+      return booleanValue(actual) !== null && booleanValue(actual) === booleanValue(expected);
     }
-
-    const strActual = String(actual).toLowerCase().replace(/[\s:：*_\-\(\)（）\[\]【】/]/g, '');
-    const strExpected = String(expected).toLowerCase().replace(/[\s:：*_\-\(\)（）\[\]【】/]/g, '');
-
-    if (!strActual && !strExpected) return true;
-    if (!strActual || !strExpected) return false;
-
-    // 2. 完全一致
+    const strActual = normalizedText(actual);
+    const strExpected = normalizedText(expected);
     if (strActual === strExpected) return true;
+    if (!strActual || !strExpected) return false;
+    const entityKind = /schoolName$/.test(semanticKey || '') ? 'school' : /\.major$/.test(semanticKey || '') ? 'major' : null;
+    if (entityKind) {
+      const a = getSafeEntityVariants(strActual, entityKind);
+      const e = getSafeEntityVariants(strExpected, entityKind);
+      return a.some(value => e.includes(value));
+    }
 
     // 3. 政治面貌排斥保护 (正式党员与预备党员严禁混为一谈)
     if (
@@ -166,27 +182,29 @@ export class Verifier {
     }
 
     // 5. Select 标准域 Canonical 判定
-    if (driverType === 'select' || driverType === 'cascader') {
+    if ((driverType === 'select' || driverType === 'cascader' || driverType === 'radio')
+      && (!semanticKey || /degree|gender|politicalStatus|maritalStatus|jobType|availability|languageLevel|jobStatus|ethnicity/i.test(semanticKey))) {
       const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
       for (const d of domains) {
-        const canAct = optionResolver.toCanonical(d, strActual);
-        const canExp = optionResolver.toCanonical(d, strExpected);
+        const canAct = optionResolver.toCanonical(d, strActual, true);
+        const canExp = optionResolver.toCanonical(d, strExpected, true);
         if (canAct && canExp && canAct === canExp) {
           return true;
         }
       }
-
-      // Location 判定
-      const locAct = locationResolver.normalizeLocation(strActual);
-      const locExp = locationResolver.normalizeLocation(strExpected);
-      if (locAct.city && locExp.city && locAct.city === locExp.city) {
-        return true;
-      }
     }
 
-    // 7. 通用包含关系
-    if (strActual.includes(strExpected) || strExpected.includes(strActual)) {
-      return true;
+    if (driverType === 'cascader') {
+      const path = (value: string) => value.split(/[\s/＞>→\-]+/).filter(Boolean).map(part => part.length >= 3 ? part.replace(/[省市区县]$/, '') : part);
+      const a = path(strActual); const e = path(strExpected);
+      if (a.length === e.length && a.length > 1 && a.every((part, index) => part === e[index])) return true;
+    }
+
+    // A single administrative suffix is a safe display alias only for a location
+    // field (legacy callers without semantic keys retain this narrow alias).
+    if (!semanticKey || /Location|Place|province|city|district/i.test(semanticKey)) {
+      const admin = (value: string) => value.length >= 3 ? value.replace(/[省市区县]$/, '') : value;
+      if (admin(strActual) === admin(strExpected)) return true;
     }
 
     return false;

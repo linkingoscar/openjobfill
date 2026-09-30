@@ -1,3 +1,4 @@
+import { mappingSafetyReason } from './mappingSafety';
 import type { FillPlan, FillPlanItem, PipelineExecutionResult, RemainingTaskItem } from '../../types/pipeline';
 import type { FillLogItem } from '../../types/adapter';
 import { retryLadder } from './retryLadder';
@@ -52,6 +53,8 @@ export class PipelineExecutor {
       // 最终写入闸门再次读取实时 DOM 语义，防止分析之后字段被替换为
       // 密码、验证码、支付或提交相关控件时仍沿用旧计划。
       const safety = env.inspectSafety(field.element, label, field.contextText);
+      const mappingConflict = item.semanticKey ? mappingSafetyReason(field.element, item.semanticKey, label) : null;
+      if (mappingConflict) { safety.blocked = true; safety.reason = mappingConflict; }
       env.trace('field-gate', { fieldId: field.id, blocked: safety.blocked });
       if (safety.blocked) {
         skippedCount++;
@@ -153,6 +156,7 @@ export class PipelineExecutor {
             actualReadValue,
             item.targetValue,
             item.driverType,
+            item.semanticKey,
           );
 
           env.trace('read-back', { fieldId: field.id, strategy: strategy.name, equivalent: isEquivalent });

@@ -1,3 +1,4 @@
+import { mappingSafetyReason } from '../pipeline/mappingSafety';
 /**
  * AI 字段兜底
  *
@@ -101,6 +102,7 @@ export function describeUnmatchedField(el: HTMLElement, index: number): Unmatche
  * 即便模型把"紧急联系人"字段错配到本人信息，也会在这里被拦下。
  */
 function isSafeMapping(el: HTMLElement, resumeKey: string): boolean {
+  if (mappingSafetyReason(el, resumeKey)) return false;
   if (!isIdentityExcluded(el)) return true;
   // 元素属于他人（紧急联系人/家属等）时，禁止映射到本人敏感字段
   return !PERSONAL_SENSITIVE_PREFIXES.some((prefix) => resumeKey.startsWith(prefix));
@@ -313,6 +315,7 @@ export async function applyAIFallbackToPlan(
   const candidates = plan.items.filter(
     (item) =>
       item.action === 'NEEDS_USER' &&
+      !item.field.unresolvedDateGroup &&
       isFillableElement(item.field.element) &&
       hasFieldHint(item.field.element)
   );

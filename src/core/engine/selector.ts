@@ -1,6 +1,6 @@
-import { sleep, isElementVisible, getElementWindow, getAllOpenRoots, isInputElement, isSelectElement } from '../../utils/dom';
+import { sleep, isElementVisible, getElementWindow, getAllOpenRoots, findAssociatedLabelText, isInputElement, isSelectElement } from '../../utils/dom';
 import { setNativeValue, simulateClick } from './dispatcher';
-import { getFormalUniversityVariants, getFormalMajorVariants } from '../matcher/aliasDictionary';
+import { getSafeEntityVariants } from '../matcher/aliasDictionary';
 import { throwIfAborted } from '../pipeline/runContext';
 
 const OPTION_SELECTORS = [
@@ -126,7 +126,9 @@ async function trySelectCustomOptionOnce(
   signal?: AbortSignal,
 ): Promise<boolean> {
   throwIfAborted(signal);
-  const targetLower = targetText.toLowerCase().trim();
+  const targetLower = targetText.normalize('NFKC').toLowerCase().trim();
+  const entityField = /学校|院校|公司|企业|专业|school|university|college|company|employer|major/i.test([findAssociatedLabelText(triggerEl), triggerEl.getAttribute('name'), triggerEl.id].join(' '));
+  const locationField = /地区|城市|省份|籍贯|生源地|居住地|location|city|province/i.test([findAssociatedLabelText(triggerEl), triggerEl.getAttribute('name'), triggerEl.id].join(' '));
 
   // 1. 如果是原生 select 标签
   if (isSelectElement(triggerEl)) {
@@ -136,21 +138,21 @@ async function trySelectCustomOptionOnce(
     // 尝试 OptionResolver / LocationResolver
     let bestCanonicalText: string | null = null;
     const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
-    for (const d of domains) {
-      const resolved = optionResolver.resolveOptionValue(optTexts, d, targetText);
+    for (const d of entityField ? [] : domains) {
+      const resolved = optionResolver.resolveOptionValue(optTexts, d, targetText, true);
       if (resolved) {
         bestCanonicalText = resolved;
         break;
       }
     }
-    if (!bestCanonicalText) {
+    if (!bestCanonicalText && locationField && !entityField) {
       bestCanonicalText = locationResolver.matchLocationOption(optTexts, targetText);
     }
 
     const matched = options.find((opt) => {
-      const t = opt.text.trim().toLowerCase();
+      const t = opt.text.normalize('NFKC').trim().toLowerCase();
       if (bestCanonicalText && opt.text.trim() === bestCanonicalText) return true;
-      return fuzzy ? (t.includes(targetLower) || targetLower.includes(t)) : (t === targetLower);
+      return !!t && t === targetLower;
     });
     if (matched) {
       triggerEl.value = matched.value;
@@ -199,23 +201,17 @@ async function trySelectCustomOptionOnce(
     const candidateTexts = items.map((item) => (item.textContent || '').trim()).filter(Boolean);
     let canonicalMatchedText: string | null = null;
     const domains: CanonicalDomain[] = ['degree', 'academicDegree', 'gender', 'politicalStatus', 'maritalStatus', 'jobType', 'availability', 'languageLevel', 'jobStatus'];
-    for (const domain of domains) {
-      canonicalMatchedText = optionResolver.resolveOptionValue(candidateTexts, domain, targetText);
+    for (const domain of entityField ? [] : domains) {
+      canonicalMatchedText = optionResolver.resolveOptionValue(candidateTexts, domain, targetText, true);
       if (canonicalMatchedText) break;
     }
-    if (!canonicalMatchedText) canonicalMatchedText = locationResolver.matchLocationOption(candidateTexts, targetText);
+    if (!canonicalMatchedText && locationField && !entityField) canonicalMatchedText = locationResolver.matchLocationOption(candidateTexts, targetText);
 
     if (canonicalMatchedText) {
       const canonical = items.find((item) => (item.textContent || '').trim() === canonicalMatchedText);
       if (canonical) return canonical;
     }
-    const exact = items.find((item) => (item.textContent || '').trim().toLowerCase() === targetLower);
-    if (exact) return exact;
-    if (!fuzzy) return null;
-    return items.find((item) => {
-      const text = (item.textContent || '').trim().toLowerCase();
-      return !!text && (text.includes(targetLower) || targetLower.includes(text));
-    }) || null;
+    return items.find((item) => (item.textContent || '').normalize('NFKC').trim().toLowerCase() === targetLower) || null;
   };
 
   let bestMatch = findBestMatch(candidateElements);
@@ -269,7 +265,8 @@ export async function selectCustomOption(
   if (firstTry) return true;
 
   // 第二轮：如果是高校名称或专业名称，尝试同义词/正式全称变体
-  const uniVariants = getFormalUniversityVariants(targetText);
+  const identity = [findAssociatedLabelText(triggerEl), triggerEl.getAttribute('name'), triggerEl.id, triggerEl.getAttribute('placeholder')].join(' ');
+  const uniVariants = /学校|院校|school|university|college/i.test(identity) ? getSafeEntityVariants(targetText, 'school') : [targetText];
   for (const variant of uniVariants) {
     if (variant === targetText) continue;
     const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy, signal);
@@ -279,7 +276,7 @@ export async function selectCustomOption(
     }
   }
 
-  const majorVariants = getFormalMajorVariants(targetText);
+  const majorVariants = /专业|major/i.test(identity) ? getSafeEntityVariants(targetText, 'major') : [targetText];
   for (const variant of majorVariants) {
     if (variant === targetText) continue;
     const variantSuccess = await trySelectCustomOptionOnce(triggerEl, variant, fuzzy, signal);

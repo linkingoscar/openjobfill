@@ -347,6 +347,21 @@ describe('applyAIFallbackToPlan: pipeline 运行路径', () => {
     expect(plan.aiFeedback).toContain('剪贴板或手动绑定');
   });
 
+  it('AI cannot override label-only person identity or split-date manual work', async () => {
+    document.body.innerHTML = '<div class="form-item"><label>紧急联系人姓名</label><input id="field17"></div>';
+    const el = document.querySelector<HTMLElement>('input')!;
+    const plan = makeNeedsUserPlan([{ el, label: '紧急联系人姓名' }]);
+    stubAIResponse({ 0: 'basics.name' });
+    expect((await applyAIFallbackToPlan(plan, MOCK_RESUME)).appliedCount).toBe(0);
+    expect(plan.items[0].action).toBe('NEEDS_USER');
+
+    plan.items[0].field.unresolvedDateGroup = '就读时间 *';
+    const send = vi.mocked(chrome.runtime.sendMessage);
+    send.mockClear();
+    expect((await applyAIFallbackToPlan(plan, MOCK_RESUME)).appliedCount).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('AI 把紧急联系人映射到本人姓名时被安全拦截，保持 NEEDS_USER', async () => {
     document.body.innerHTML = `<div class="form-item"><label>紧急联系人姓名</label><input name="emergencyContactName" /></div>`;
     const el = document.querySelector<HTMLElement>('input')!;

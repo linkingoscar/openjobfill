@@ -202,3 +202,11 @@ export function getFormalMajorVariants(inputName: string): string[] {
 
   return Array.from(variants);
 }
+
+/** Write-time aliases must be exact, declared and single-valued. Never drop campus qualifiers. */
+export function getSafeEntityVariants(value: string, kind: 'school' | 'major'): string[] {
+  const clean = value.normalize('NFKC').trim();
+  const map = kind === 'school' ? UNIVERSITY_ALIAS_MAP : MAJOR_ALIAS_MAP;
+  const aliases = map[clean];
+  return aliases?.length === 1 ? [clean, aliases[0]] : [clean];
+}

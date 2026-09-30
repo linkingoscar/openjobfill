@@ -62,7 +62,7 @@ export const beisenEnhancer: PlatformEnhancer = {
     );
   },
   fieldMappings: {
-    'input[id*="Name"], input[id*="name"]': 'basics.name',
+    'input[id="name" i], input[id="candidateName" i], input[id="fullName" i], input[id="realName" i]': 'basics.name',
     'input[id*="Mobile"], input[id*="phone"]': 'basics.phone',
     'input[id*="Email"], input[id*="email"]': 'basics.email',
     'input[id*="IDCard"], input[id*="idcard"]': 'basics.idCardNumber',

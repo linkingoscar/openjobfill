@@ -65,6 +65,8 @@ export interface FieldDescriptor {
   options?: string[]; // 对于 select / radio group / combobox
   section?: FieldSectionInfo;
   contextText: string;
+  /** A split date group detected but not safe to fill part by part. */
+  unresolvedDateGroup?: string;
   /** Privacy-safe structural evidence used by safety, replay and future incremental scans. */
   fingerprint?: string;
   locator?: FieldLocatorEvidence;

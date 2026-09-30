@@ -444,8 +444,9 @@ export function isControlAdapterValueEquivalent(
   expected: unknown,
 ): boolean | undefined {
   if (match.adapter.family !== 'phone') return undefined;
+  if (![actual, expected].every(value => /^[+\d\s().-]+$/.test(String(value ?? '')))) return false;
   const actualDigits = String(actual ?? '').replace(/\D/g, '');
   const expectedDigits = String(expected ?? '').replace(/\D/g, '');
-  return !!actualDigits && !!expectedDigits
-    && (actualDigits.endsWith(expectedDigits) || expectedDigits.endsWith(actualDigits));
+  const normalize = (digits: string) => digits.length === 13 && digits.startsWith('86') ? digits.slice(2) : digits;
+  return !!expectedDigits && normalize(actualDigits) === normalize(expectedDigits);
 }

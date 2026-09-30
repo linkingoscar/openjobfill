@@ -1,3 +1,4 @@
+import { mappingSafetyReason } from './mappingSafety';
 import type { StandardResume, CustomQABankItem } from '../../types/resume';
 import type { FieldDescriptor, FillPlan, FillPlanItem, PlatformEnhancer, DriverType } from '../../types/pipeline';
 import { calculateSemanticSimilarity } from '../matcher/similarityEngine';
@@ -141,6 +142,14 @@ export class PlanGenerator {
         continue;
       }
 
+      if (field.unresolvedDateGroup) {
+        items.push({ id: `plan_${field.id}`, field, action: 'NEEDS_USER', confidence: 0,
+          reason: `${field.unresolvedDateGroup}：拆分年月控件需人工核对，未自动填写`,
+          driverType: this.resolveDriverType(field) });
+        needsUserCount++;
+        continue;
+      }
+
       // 2. 优先检查用户自定义网站规则 (User Rules)
       const resolvedCustomMatch = customRuleResolution.matches.get(field.id);
       const customMatch = resolvedCustomMatch?.mapping || null;
@@ -151,7 +160,7 @@ export class PlanGenerator {
           customResumeKey = customResumeKey.replace('.0.', `.${field.section.index}.`);
         }
         const val = getValueByPath(resume, customResumeKey);
-        if (hasUsableValue(val)) {
+        if (hasUsableValue(val) && !mappingSafetyReason(field.element, customResumeKey, field.label)) {
           items.push({
             id: `plan_${field.id}`,
             field,
@@ -179,7 +188,7 @@ export class PlanGenerator {
               targetKey = targetKey.replace('.0.', `.${field.section.index}.`);
             }
             const val = getValueByPath(resume, targetKey);
-            if (hasUsableValue(val)) {
+            if (hasUsableValue(val) && !mappingSafetyReason(field.element, targetKey, field.label)) {
               items.push({
                 id: `plan_${field.id}`,
                 field,
@@ -396,7 +405,7 @@ export class PlanGenerator {
       }
 
       // 排斥上下文检测
-      if (this.shouldExclude(targetResumeKey, field.contextText)) {
+      if (this.shouldExclude(targetResumeKey, field.contextText) || mappingSafetyReason(field.element, targetResumeKey, field.label)) {
         continue;
       }
 

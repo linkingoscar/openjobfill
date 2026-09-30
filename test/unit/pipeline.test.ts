@@ -275,7 +275,7 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
       expect(readVal).toBe('北京大学');
     });
 
-    it('isSemanticEquivalent 应支持包含、标点归一化与日期模糊等价', () => {
+    it('isSemanticEquivalent 支持明确行政区划、学历别名及完整日期等价', () => {
       expect(verifier.isSemanticEquivalent('北京市', '北京', 'input')).toBe(true);
       expect(verifier.isSemanticEquivalent('大学本科', '本科', 'select')).toBe(true);
       expect(verifier.isSemanticEquivalent('2023年09月', '2023-09', 'date')).toBe(true);

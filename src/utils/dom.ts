@@ -421,3 +421,22 @@ export function generateOptimalSelector(el: HTMLElement): string {
   }
   return el.tagName.toLowerCase();
 }
+
+/** Recognise a narrowly scoped composite date group without guessing its parts. */
+export function findSplitDateGroup(el: HTMLElement): { label: string; required: boolean } | null {
+  const fragment = (control: Element) => /^(年|月|日|yyyy|mm|dd)$/i.test(control.getAttribute('placeholder')?.trim() || '');
+  if (!isInputElement(el) || !fragment(el)) return null;
+  let parent = el.parentElement;
+  for (let depth = 0; parent && depth < 5; depth++, parent = parent.parentElement) {
+    if (parent.matches('form, body')) break;
+    const controls = Array.from(parent.querySelectorAll('input:not([type="hidden"]), select, textarea'));
+    if (controls.length > 6 || controls.some(control => !fragment(control))) break;
+    if (controls.length < 2) continue;
+    const labels = Array.from(parent.querySelectorAll('label, [class*="label"], [class*="title"], [class*="Label"], [class*="Title"]'))
+      .filter(label => !label.querySelector('input, select, textarea'))
+      .map(label => getPageText(label)).filter(Boolean);
+    const label = labels.find(text => /时间|日期|年月|date|duration|period/i.test(text));
+    if (label) return { label, required: hasRequiredMarker(label) || controls.some(control => control.hasAttribute('required') || control.getAttribute('aria-required') === 'true') };
+  }
+  return null;
+}

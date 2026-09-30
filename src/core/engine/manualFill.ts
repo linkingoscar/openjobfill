@@ -1,3 +1,4 @@
+import { mappingSafetyReason } from '../pipeline/mappingSafety';
 /**
  * 点选手动填充
  *
@@ -83,6 +84,9 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
   push('basics.githubUrl', 'GitHub', b.githubUrl);
   push('basics.linkedinUrl', 'LinkedIn', b.linkedinUrl);
   push('basics.postalCode', '邮政编码', b.postalCode);
+  push('basics.emergencyContactName', '紧急联系人姓名', b.emergencyContactName);
+  push('basics.emergencyContactPhone', '紧急联系人电话', b.emergencyContactPhone);
+  push('basics.emergencyContactRelation', '紧急联系人关系', b.emergencyContactRelation);
 
   resume.educations?.forEach((edu, i) => {
     const n = i + 1;
@@ -143,7 +147,8 @@ export function buildFillableFields(resume: StandardResume): ManualFillField[] {
 /**
  * 把值填入目标元素，并给一次成功高亮反馈
  */
-async function applyValueToElement(el: HTMLElement, value: string): Promise<boolean> {
+async function applyValueToElement(el: HTMLElement, value: string, resumeKey: string): Promise<boolean> {
+  if (mappingSafetyReason(el, resumeKey)) return false;
   const nearbyContext = el.closest('.el-form-item, .ant-form-item, .form-item, .form-group, fieldset, tr')?.textContent || '';
   const safety = inspectFieldSafety(el, '', nearbyContext);
   if (safety.blocked) {
@@ -357,7 +362,7 @@ export function startManualFill(resume: StandardResume, onFilled?: (result: Manu
         el,
         fields,
         async (field) => {
-          const success = await applyValueToElement(el, field.value);
+          const success = await applyValueToElement(el, field.value, field.resumeKey);
           if (success) {
             const selector = generateOptimalSelector(el);
             const mappingRemembered = await rememberManualFillMapping(window.location.href, field, el);

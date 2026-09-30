@@ -135,7 +135,7 @@ export class OptionResolver {
   /**
    * 将输入的原始文本归一化为目标领域的标准 Canonical 标识符
    */
-  toCanonical(domain: CanonicalDomain, rawValue: string): string | null {
+  toCanonical(domain: CanonicalDomain, rawValue: string, strict = false): string | null {
     if (!rawValue) return null;
     const clean = rawValue.toLowerCase().replace(/[\s_\-()（）【】\[\]/]/g, '');
     const domainMap = CANONICAL_MAPPINGS[domain];
@@ -150,6 +150,8 @@ export class OptionResolver {
         }
       }
     }
+
+    if (strict) return null;
 
     // 2. 其次进行包含匹配
     for (const [canonicalKey, keywords] of Object.entries(domainMap)) {
@@ -173,23 +175,27 @@ export class OptionResolver {
   resolveOptionValue(
     availableOptions: string[],
     domain: CanonicalDomain,
-    targetValue: string
+    targetValue: string,
+    strict = false
   ): string | null {
     if (!availableOptions || availableOptions.length === 0 || !targetValue) {
       return null;
     }
 
     // 1. 尝试完全匹配与去符号匹配
-    const cleanTarget = targetValue.toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+    const exactText = (value: string) => strict
+      ? value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
+      : value.toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+    const cleanTarget = exactText(targetValue);
     for (const opt of availableOptions) {
-      const cleanOpt = opt.toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
+      const cleanOpt = exactText(opt);
       if (cleanOpt === cleanTarget) {
         return opt;
       }
     }
 
     // 2. 基于 Canonical Enum 归一化匹配
-    const canonicalKey = this.toCanonical(domain, targetValue);
+    const canonicalKey = this.toCanonical(domain, targetValue, strict);
     if (canonicalKey) {
       const domainMap = CANONICAL_MAPPINGS[domain];
       const synonymKeywords = domainMap[canonicalKey] || [];
@@ -204,6 +210,8 @@ export class OptionResolver {
           }
         }
       }
+
+      if (strict) return null;
 
       // 2.2 其次进行包含匹配 (跳过如 "预备" 等具有排斥语义的选项)
       for (const opt of availableOptions) {
@@ -220,6 +228,8 @@ export class OptionResolver {
         }
       }
     }
+
+    if (strict) return null;
 
     // 3. 通用包含子串回退
     for (const opt of availableOptions) {

@@ -121,7 +121,7 @@ export class RetryLadder {
                   // 尝试 10 大标准域
                   const domain = this.detectDomainFromField(field);
                   if (domain) {
-                    const resolvedDomainOption = optionResolver.resolveOptionValue(field.options, domain, stringVal);
+                    const resolvedDomainOption = optionResolver.resolveOptionValue(field.options, domain, stringVal, true);
                     if (resolvedDomainOption) targetOptionText = resolvedDomainOption;
                   }
                 }
@@ -142,7 +142,7 @@ export class RetryLadder {
                 for (let i = 0; i < sel.options.length; i++) {
                   const optText = sel.options[i].text.toLowerCase();
                   const optVal = sel.options[i].value.toLowerCase();
-                  if (optText.includes(stringVal) || optVal === stringVal || stringVal.includes(optText)) {
+                  if ((optText.trim() && optText.trim() === stringVal.trim()) || (optVal && optVal === stringVal)) {
                     sel.selectedIndex = i;
                     sel.dispatchEvent(new EventClass('input', { bubbles: true }));
                     sel.dispatchEvent(new EventClass('change', { bubbles: true }));
