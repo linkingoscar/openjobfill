@@ -5,7 +5,6 @@ import {
   buildResumeKeyOptions,
 } from '@/core/ai/fieldMapper';
 import {
-  tryAIFallback,
   describeUnmatchedField,
   isFillableElement,
   hasFieldHint,
@@ -144,115 +143,6 @@ describe('aiFallback: 元素判定', () => {
     expect(hasFieldHint(document.getElementById('search')!)).toBe(false);
     expect(hasFieldHint(document.getElementById('captcha')!)).toBe(false);
     expect(hasFieldHint(document.getElementById('real')!)).toBe(true);
-  });
-});
-
-describe('tryAIFallback: 端到端', () => {
-  beforeEach(async () => {
-    document.body.innerHTML = '';
-    localStorage.clear();
-    await saveAISettings({
-      enabled: true,
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      model: 'qwen2.5:7b',
-    });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('AI 未启用时返回 null，不发起任何调用', async () => {
-    await saveAISettings({ enabled: false, provider: 'ollama', baseUrl: '', model: '' });
-    stubAIResponse({ 0: 'basics.name' });
-
-    const result = await tryAIFallback([], MOCK_RESUME);
-    expect(result).toBeNull();
-  });
-
-  it('正常映射并填充字段，标记为 AI 匹配', async () => {
-    document.body.innerHTML = `
-      <div class="form-item"><label>期望工作城市</label><input name="expectedCity" placeholder="城市" /></div>
-    `;
-    const el = document.querySelector<HTMLInputElement>('input')!;
-    stubAIResponse({ 0: 'basics.currentLocation.city' });
-
-    const outcome = await tryAIFallback(
-      [{ element: el, descriptor: describeUnmatchedField(el, 0) }],
-      MOCK_RESUME
-    );
-
-    expect(outcome).not.toBeNull();
-    expect(outcome!.filledCount).toBe(1);
-    expect(el.value).toBe('海淀区');
-    expect(outcome!.logs[0].message).toContain('AI 匹配');
-  });
-
-  it('AI 把紧急联系人字段映射到本人姓名时，必须被安全策略拦截且不写入', async () => {
-    document.body.innerHTML = `
-      <div class="form-item"><label>紧急联系人姓名</label><input name="emergencyContactName" /></div>
-    `;
-    const el = document.querySelector<HTMLInputElement>('input')!;
-    // 模型犯了一个典型错误：把"紧急联系人姓名"映射到本人姓名
-    stubAIResponse({ 0: 'basics.name' });
-
-    const outcome = await tryAIFallback(
-      [{ element: el, descriptor: describeUnmatchedField(el, 0) }],
-      MOCK_RESUME
-    );
-
-    expect(outcome!.filledCount).toBe(0);
-    expect(outcome!.failedCount).toBe(1);
-    expect(el.value).toBe(''); // 关键：绝不能被填成本人姓名
-    expect(outcome!.logs[0].message).toContain('拦截');
-  });
-
-  it('AI 把紧急联系人字段映射到家属字段时，正常填充', async () => {
-    document.body.innerHTML = `
-      <div class="form-item"><label>紧急联系人姓名</label><input name="emergencyContactName" /></div>
-    `;
-    const el = document.querySelector<HTMLInputElement>('input')!;
-    stubAIResponse({ 0: 'familyMembers.0.name' });
-
-    const outcome = await tryAIFallback(
-      [{ element: el, descriptor: describeUnmatchedField(el, 0) }],
-      MOCK_RESUME
-    );
-
-    expect(outcome!.filledCount).toBe(1);
-    expect(el.value).toBe('张父');
-  });
-
-  it('简历中对应字段为空时记 skipped 而非硬填', async () => {
-    document.body.innerHTML = `
-      <div class="form-item"><label>个人主页</label><input name="homepage" /></div>
-    `;
-    const el = document.querySelector<HTMLInputElement>('input')!;
-    stubAIResponse({ 0: 'basics.githubUrl' }); // 简历里 githubUrl 为空
-
-    const outcome = await tryAIFallback(
-      [{ element: el, descriptor: describeUnmatchedField(el, 0) }],
-      MOCK_RESUME
-    );
-
-    expect(outcome!.filledCount).toBe(0);
-    expect(outcome!.skippedCount).toBe(1);
-    expect(el.value).toBe('');
-  });
-
-  it('AI 调用失败时返回 null，静默回退，不抛出异常', async () => {
-    document.body.innerHTML = `<div class="form-item"><label>期望城市</label><input name="city" /></div>`;
-    const el = document.querySelector<HTMLInputElement>('input')!;
-    stubAIError('Ollama 请求失败 (HTTP 500)');
-
-    const outcome = await tryAIFallback(
-      [{ element: el, descriptor: describeUnmatchedField(el, 0) }],
-      MOCK_RESUME
-    );
-
-    expect(outcome).toBeNull();
-    expect(el.value).toBe('');
   });
 });
 

@@ -369,7 +369,9 @@ export class DateEngine {
       if (wasReadOnly) input.readOnly = true;
     }
 
-    simulateClick(el === input ? input : el);
+    // Clicking the actual input also bubbles to wrapper listeners; clicking only
+    // the wrapper never reaches input-owned handlers (common readonly pickers).
+    simulateClick(input);
     await sleep(100, signal);
     const selected = await this.selectVisibleCalendarCell(el, semantic, signal);
     if (!selected) return false;

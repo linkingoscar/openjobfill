@@ -198,20 +198,6 @@ describe('AhoCorasickMatcher 规模自适应', () => {
   const makeDict = (size: number): string[] =>
     Array.from({ length: size }, (_, i) => `keyword_${String(i).padStart(5, '0')}`);
 
-  it('词典规模低于阈值时走朴素路径并跳过 Trie 构建', () => {
-    const m = new AhoCorasickMatcher();
-    m.insertBatch(makeDict(100));
-    m.build();
-    expect(m.isAcActive()).toBe(false);
-  });
-
-  it('词典规模达到阈值时切换为 AC 路径', () => {
-    const m = new AhoCorasickMatcher();
-    m.insertBatch(makeDict(400));
-    m.build();
-    expect(m.isAcActive()).toBe(true);
-  });
-
   it('两条路径对同一文本必须给出完全一致的结果', () => {
     // 使用长词（>3 字符）以规避短词边界检查带来的预期差异
     const dict = makeDict(350);

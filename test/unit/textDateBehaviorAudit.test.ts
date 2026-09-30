@@ -1,3 +1,4 @@
+import { fillDatePicker } from '@/core/engine/datepicker';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setNativeValue, setRadioGroupValue, setNativeCheckboxChecked } from '@/core/engine/dispatcher';
 import { verifier } from '@/core/pipeline/verifier';
@@ -64,12 +65,13 @@ describe('control behavior against committed page state', () => {
   expect(dateEngine.parseSemanticDate('2024-06junk-18').valid).toBe(false);
   expect(dateEngine.parseSemanticDate('2024-06-18-extra').valid).toBe(false);
  });
- it('uses a readonly calendar selection rather than faking an uncommitted display value', async () => {
-  document.body.innerHTML='<div class="ant-picker"><input readonly placeholder="出生日期"></div><div class="ant-picker-dropdown" hidden><button type="button" data-date="2001-05-18">18</button></div>';
+ it.each(['manual', 'pipeline'])('%s date entry commits the readonly calendar value', async (entry) => {
+  document.body.innerHTML='<form><div class="form-item"><label>出生日期</label><div class="ant-picker"><input readonly placeholder="出生日期"></div></div></form><div class="ant-picker-dropdown" hidden><button type="button" data-date="2001-05-18">18</button></div>';
   const input=document.querySelector('input')!; const popup=document.querySelector<HTMLElement>('.ant-picker-dropdown')!;
   let committed=''; input.addEventListener('click',()=>popup.hidden=false);
   document.querySelector('button')!.addEventListener('click',()=>{committed='2001-05-18';input.value=committed;popup.hidden=true;});
-  expect(await dateEngine.injectSemanticDate(input,'2001-05-18')).toBe(true);
+  if (entry === 'manual') expect(await fillDatePicker(input,'2001-05-18')).toBe(true);
+  else { const resume=parseResumeFromText(''); resume.basics.birthDate='2001-05-18'; await pipelineExecutor.executePlan(planGenerator.generatePlan(pageAnalyzer.analyzePage(document),resume)); }
   expect(committed).toBe('2001-05-18');
  });
 
