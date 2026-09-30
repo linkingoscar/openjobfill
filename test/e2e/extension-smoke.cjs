@@ -24,7 +24,7 @@ function startStaticServer() {
         response.end(error.message);
         return;
       }
-      response.writeHead(200, { 'content-type': filePath.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/plain' });
+      response.writeHead(200, { 'content-type': filePath.endsWith('.html') ? 'text/html; charset=utf-8' : filePath.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/plain' });
       response.end(data);
     });
   });
@@ -324,6 +324,8 @@ async function main() {
     await repeatedHost.getByText('成功填入 40 项（已高亮）', { exact: true }).waitFor({ timeout: 15000 });
     await repeatedPage.screenshot({ path: path.join(artifactDir, 'repeated-experiences.png'), fullPage: true });
     await repeatedPage.close();
+    await require('./control-behavior.cjs')(context, reopenedOptions, url, artifactDir);
+    await require('./select-behavior.cjs')(context, reopenedOptions, url, artifactDir);
     console.log('extension smoke passed: shadow UI + persistence + MAIN-world + preview fill + replay + clipboard + unknown values + skills + backup preview/recovery + keyword feedback + automatic repeated experiences');
   } catch (error) {
     const optionsPage = context?.pages().find((page) => page.url().includes('/options.html'));

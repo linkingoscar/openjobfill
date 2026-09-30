@@ -473,10 +473,11 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
 
       const analyzed = await formFillerEngine.analyze(MOCK_RESUME);
       await new Promise((resolve) => setTimeout(resolve, 120));
+      const executionStarted = Date.now();
       const result = await formFillerEngine.executePlan(analyzed);
 
       expect(result.filledCount).toBe(1);
-      expect(result.durationMs).toBeLessThan(120);
+      expect(result.durationMs).toBeLessThanOrEqual(Date.now() - executionStarted + 20);
     });
 
     it('普通预览也不得提前展开、编辑或新增重复区块', async () => {

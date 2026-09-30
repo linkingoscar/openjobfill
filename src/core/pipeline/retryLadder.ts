@@ -72,7 +72,10 @@ export class RetryLadder {
               if (!isInputElement(el) && !isTextAreaElement(el)) return false;
               const win = getElementWindow(el) as any;
               const EventClass = win.Event || Event;
+              if (el.disabled || el.readOnly) return false;
               el.focus();
+              const BeforeInput = win.InputEvent || EventClass;
+              if (!el.dispatchEvent(new BeforeInput('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: String(val) }))) { el.blur(); return false; }
               el.value = String(val);
               el.dispatchEvent(new EventClass('input', { bubbles: true }));
               el.dispatchEvent(new EventClass('change', { bubbles: true }));
@@ -108,6 +111,10 @@ export class RetryLadder {
             name: 'Option/Location Resolver + Custom UI Selection',
             execute: async (field, val, signal) => {
               throwIfAborted(signal);
+              if (Array.isArray(val)) {
+                if (val.some(value => typeof value !== 'string')) return false;
+                return selectCustomOption(field.element, val, true, signal);
+              }
               const stringVal = String(val);
               let targetOptionText = stringVal;
 
@@ -134,12 +141,18 @@ export class RetryLadder {
             name: 'Native Select Option Value & Text Loop Fallback',
             execute: (field, val, signal) => {
               throwIfAborted(signal);
+              if (Array.isArray(val)) {
+                if (val.some(value => typeof value !== 'string')) return false;
+                return selectCustomOption(field.element, val, true, signal);
+              }
               if (isSelectElement(field.element)) {
                 const sel = field.element;
+                if (sel.disabled || sel.closest('fieldset[disabled]')) return false;
                 const stringVal = String(val).toLowerCase();
                 const win = getElementWindow(sel) as any;
                 const EventClass = win.Event || Event;
                 for (let i = 0; i < sel.options.length; i++) {
+                  if (sel.options[i].disabled || sel.options[i].hidden || sel.options[i].closest('optgroup[disabled]')) continue;
                   const optText = sel.options[i].text.toLowerCase();
                   const optVal = sel.options[i].value.toLowerCase();
                   if ((optText.trim() && optText.trim() === stringVal.trim()) || (optVal && optVal === stringVal)) {
@@ -193,6 +206,8 @@ export class RetryLadder {
             name: 'Native Prototype Date String Setter Fallback',
             execute: (field, val, signal) => {
               throwIfAborted(signal);
+              if (!dateEngine.parseSemanticDate(String(val)).valid) return false;
+              if (isInputElement(field.element) && field.element.readOnly) return false;
               return setNativeValue(field.element, String(val));
             },
           },

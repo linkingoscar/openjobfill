@@ -42,3 +42,12 @@ jobs:
 
       - name: Run Real Extension Smoke Flow
         run: xvfb-run -a pnpm test:e2e
+
+      - name: Preserve synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-control-screenshots
+          path: output/playwright/*.png
+          if-no-files-found: ignore
+          retention-days: 7

@@ -39,6 +39,13 @@ export function setNativeValue(
   const InputEventClass = win.InputEvent || (typeof InputEvent !== 'undefined' ? InputEvent : EventClass);
 
   const stringValue = String(value);
+  if (el.matches(':disabled, [aria-disabled="true"]')) return false;
+  el.focus();
+  const allowed = el.dispatchEvent(new InputEventClass('beforeinput', {
+    bubbles: true, cancelable: true, composed: true, inputType: 'insertText', data: stringValue,
+  }));
+  if (!allowed) { el.blur(); return false; }
+
 
   // 1. 针对富文本编辑器 (contenteditable) 的特殊处理
   if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
@@ -88,17 +95,6 @@ export function setNativeValue(
     (el as HTMLInputElement | HTMLTextAreaElement).value = stringValue;
   }
 
-  // 5. 连续派发完整的事件链 (beforeinput -> input -> change -> blur)
-  try {
-    el.dispatchEvent(new InputEventClass('beforeinput', {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      inputType: 'insertText',
-      data: stringValue,
-    }));
-  } catch (e) {}
-
   const inputEvent = new InputEventClass('input', {
     bubbles: true,
     cancelable: true,
@@ -127,25 +123,15 @@ export function setNativeRadioChecked(radioEl: HTMLInputElement, checked = true)
   if (!radioEl) return false;
 
   markElementAsAutofilled(radioEl);
-  const win = getElementWindow(radioEl) as any;
-  const EventClass = win.Event || (typeof Event !== 'undefined' ? Event : function(t: string) { return { type: t }; } as any);
-
+  if (radioEl.disabled || radioEl.getAttribute('aria-disabled') === 'true') return false;
+  if (radioEl.checked === checked) return true;
+  // Let the browser perform activation so controlled click handlers and cancellation work.
+  // An individual radio cannot be unchecked by a user click.
+  if (!checked) return false;
   radioEl.focus();
-
-  const prototype = win.HTMLInputElement?.prototype || (typeof HTMLInputElement !== 'undefined' ? HTMLInputElement.prototype : null);
-  const descriptor = prototype ? Object.getOwnPropertyDescriptor(prototype, 'checked') : null;
-  if (descriptor && descriptor.set) {
-    descriptor.set.call(radioEl, checked);
-  } else {
-    radioEl.checked = checked;
-  }
-
-  radioEl.dispatchEvent(new EventClass('input', { bubbles: true, cancelable: true }));
-  radioEl.dispatchEvent(new EventClass('change', { bubbles: true, cancelable: true }));
   radioEl.click();
   radioEl.blur();
-
-  return true;
+  return radioEl.checked === checked;
 }
 
 /**
@@ -160,17 +146,17 @@ export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolea
   const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || doc;
   
   const groupRadios = name
-    ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
+    ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`)).filter(radio => radio.form === (isInputElement(el) ? el.form : el.closest('form')))
     : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
 
   for (const radio of groupRadios) {
+    if (radio.disabled || radio.getAttribute('aria-disabled') === 'true') continue;
     const radioVal = (radio.value || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
     const radioLabel = (radio.parentElement?.textContent || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
 
     if (
       radioVal === stringVal ||
-      radioLabel === stringVal ||
-      (stringVal.length >= 1 && (radioVal.includes(stringVal) || radioLabel.includes(stringVal)))
+      radioLabel === stringVal
     ) {
       return setNativeRadioChecked(radio, true);
     }
@@ -180,9 +166,10 @@ export function setRadioGroupValue(el: HTMLElement, targetValue: string): boolea
   const customRadios = Array.from(customContainer.querySelectorAll<HTMLElement>('[role="radio"], [aria-pressed]'));
   if ((el.matches('[role="radio"], [aria-pressed]')) && !customRadios.includes(el)) customRadios.push(el);
   for (const radio of customRadios) {
+    if (radio.getAttribute('aria-disabled') === 'true') continue;
     const radioVal = (radio.getAttribute('data-value') || radio.getAttribute('value') || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
     const radioLabel = (radio.textContent || radio.getAttribute('aria-label') || '').toLowerCase().replace(/[\s:：*_\-()（）]/g, '');
-    if (radioVal === stringVal || radioLabel === stringVal || radioLabel.includes(stringVal)) {
+    if (radioVal === stringVal || radioLabel === stringVal) {
       simulateClick(radio);
       return true;
     }
@@ -229,19 +216,13 @@ export function setNativeCheckboxChecked(checkboxEl: HTMLInputElement, checkedOr
   }
 
   markElementAsAutofilled(checkboxEl);
-  const win = getElementWindow(checkboxEl) as any;
-  const EventClass = win.Event || (typeof Event !== 'undefined' ? Event : function(t: string) { return { type: t }; } as any);
-
+  if (checkboxEl.disabled || checkboxEl.getAttribute('aria-disabled') === 'true') return false;
   if (checkboxEl.checked !== targetChecked) {
     checkboxEl.focus();
     checkboxEl.click();
-    checkboxEl.checked = targetChecked;
-    checkboxEl.dispatchEvent(new EventClass('input', { bubbles: true, cancelable: true }));
-    checkboxEl.dispatchEvent(new EventClass('change', { bubbles: true, cancelable: true }));
     checkboxEl.blur();
   }
-
-  return true;
+  return checkboxEl.checked === targetChecked;
 }
 
 /**

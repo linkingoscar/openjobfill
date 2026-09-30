@@ -115,6 +115,7 @@ export async function replayRunSnapshot(session: FillSnapshotSession): Promise<D
     const plan: FillPlan = { items, totalFieldsCount: items.length, highConfidenceCount: items.filter((i) => i.action === 'FILL').length, needsUserCount: items.filter((i) => i.action === 'NEEDS_USER').length, skipCount: items.filter((i) => i.action === 'SKIP').length };
     const env: ExecutionEnvironment = {
       wait: async () => {}, decorate: () => {},
+      controlProblem: () => records[cursor]?.stage === 'read-back' ? (records[cursor].payload as any).controlProblem : undefined,
       inspectSafety: () => ({ blocked: !!peek('field-gate').blocked }),
       strategiesForField: () => peek('adapter-route').strategies.map((strategy: any) => ({
         ...strategy,

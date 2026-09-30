@@ -18,6 +18,7 @@ import { findRepeatableSections, REPEATABLE_SECTIONS } from '../engine/repeatabl
 import type { RepeatableSectionKey } from '../../types/siteProfile';
 
 const CONTROL_TRIGGER_SELECTORS = [
+  '.select2-container',
   '.el-select', '.el-select__wrapper', '.el-autocomplete', '.el-cascader', '.el-cascader__wrapper', '.el-date-editor',
   '.ant-select', '.ant-cascader', '.ant-cascader-picker', '.ant-picker', '.ant-calendar-picker',
   '.semi-select', '.semi-cascader', '.semi-datepicker', '.mtd-select', '.mtd-picker', '.mtd-month-picker',
@@ -211,13 +212,17 @@ export class PageAnalyzer {
       fieldCounter++;
 
       const type = this.detectFieldType(el, hints.controlSelectors);
-      const label = findAssociatedLabelText(el);
+      // Select2 v3 gives the visible widget s2id_<backing-select-id>; labels,
+      // names and required/disabled state remain on that offscreen select.
+      const select2Backing = el.matches('.select2-container[id^="s2id_"]')
+        ? el.ownerDocument.getElementById(el.id.slice(5)) as HTMLSelectElement | null : null;
+      const label = findAssociatedLabelText(select2Backing || el);
       const placeholder = el.getAttribute('placeholder') || '';
-      const name = el.getAttribute('name') || '';
+      const name = (select2Backing || el).getAttribute('name') || '';
       const ariaLabel = el.getAttribute('aria-label') || '';
       const dateGroup = findSplitDateGroup(el);
-      const required = this.detectRequired(el, label) || !!dateGroup?.required;
-      const disabled = (el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true';
+      const required = this.detectRequired(select2Backing || el, label) || !!dateGroup?.required;
+      const disabled = (select2Backing || el as HTMLInputElement).disabled || el.getAttribute('aria-disabled') === 'true';
       const readOnly = (el as HTMLInputElement).readOnly || el.getAttribute('readonly') !== null;
       const currentValue = this.readCurrentValue(el, type);
       const options = this.extractOptions(el, type);
@@ -397,6 +402,7 @@ export class PageAnalyzer {
   }
 
   private shouldSkipElement(el: HTMLElement): boolean {
+    if (el.classList.contains('select2-offscreen') || el.closest('.select2-drop')) return true;
     if (isInputElement(el)) {
       if (['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(el.type)) {
         return true;
@@ -448,7 +454,7 @@ export class PageAnalyzer {
     }
     if (
       /(^|\s)(el-select|ant-select|semi-select|mtd-select|layui-form-select|ivu-select|aui-select|atsx-select|ud-select|phoenix-select|sc-select|tp-select-box|tp-ethnic-picker|sd-dropdown|mokahr-search-dropdown|mokahr-simple-dropdown|zhipin-select|zhipin-dialog-trigger|bankcomm-select|pop-input)(\s|$)/.test(className) ||
-      el.getAttribute('role') === 'combobox'
+      el.getAttribute('role') === 'combobox' || el.classList.contains('select2-container')
     ) {
       return 'select';
     }
@@ -541,7 +547,7 @@ export class PageAnalyzer {
       const doc = el.ownerDocument || document;
       const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || doc;
       const groupRadios = name
-        ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
+        ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`)).filter(radio => radio.form === (isInputElement(el) ? el.form : el.closest('form')))
         : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
       if (groupRadios.length > 0) {
         return groupRadios

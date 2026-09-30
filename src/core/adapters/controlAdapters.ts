@@ -1,3 +1,4 @@
+import { readDateRangeValue } from '../../utils/dateRangeValue';
 import type { DriverType, FieldDescriptor } from '../../types/pipeline';
 import { isInputElement, isSelectElement, isTextAreaElement } from '../../utils/dom';
 import { setCustomCheckboxChecked, setNativeCheckboxChecked, setNativeValue, setRadioGroupValue } from '../engine/dispatcher';
@@ -146,7 +147,7 @@ const CONTROL_ADAPTERS: ControlAdapterProfile[] = [
   profile('MokahrSearchDropdown', 'search-select', '.mokahr-search-dropdown, [class*="moka"][class*="search"]', 960, { url: url.moka }),
   profile('MokahrDateDropdown', 'date', '.mokahr-date-dropdown, [class*="moka"][class*="date"]', 950, { url: url.moka }),
   profile('MokahrSimpleDropdown', 'select', '.mokahr-simple-dropdown, .moka-select, [class*="moka"][class*="select"]', 940, { url: url.moka }),
-  profile('SdDropdown', 'select', '.sd-dropdown, [class*="sd-dropdown"]', 730),
+  profile('SdDropdown', 'select', '.sd-dropdown, [class*="sd-dropdown"], .sd-Select, [class*="sd-Select-"]', 730),
   profile('LayUISelect', 'select', '.layui-form-select', 700),
   profile('IViewSelect', 'select', '.ivu-select', 700),
   profile('IViewCascader', 'cascader', '.ivu-cascader', 710),
@@ -342,6 +343,11 @@ export async function executeControlAdapter(
   const text = String(context.value ?? '');
   if (!text && context.value !== false && context.value !== 0) return false;
 
+  if (Array.isArray(context.value) && (adapter.family === 'select' || adapter.family === 'search-select' || adapter.family === 'dialog')) {
+    if (context.value.some(value => typeof value !== 'string')) return false;
+    return selectCustomOption(root, context.value as string[], true, context.signal);
+  }
+
   if ((adapter.world || 'ISOLATED') === 'MAIN') {
     const action = adapter.family === 'cascader'
       ? 'SELECT_PATH'
@@ -391,9 +397,11 @@ export async function executeControlAdapter(
 }
 
 function selectedText(root: HTMLElement): string {
-  const selected = root.querySelector<HTMLElement>([
-    '.ant-select-selection-item', '.el-select__selected-item', '.semi-select-selection-text',
+  const displayRoot = root.closest<HTMLElement>('[class*="sd-Select"], .sd-dropdown, .mokahr-search-dropdown, .ant-select, .el-select') || root;
+  const selected = displayRoot.querySelector<HTMLElement>([
+    '.ant-select-selection-item', '.el-select__selected-item', '.semi-select-selection-text', '.select2-chosen',
     '.ivu-select-selected-value', '.mtd-select-rendered', '[aria-selected="true"]',
+    '[class*="sd-Input-display-value"]',
     '[class*="selected-value"]', '[class*="selectedValue"]', '[class*="selection-item"]',
   ].join(','));
   if (selected?.textContent?.trim()) return selected.textContent.trim();
@@ -417,16 +425,15 @@ export function readBackControlAdapter(match: MatchedControlAdapter): unknown {
     const checked = root.querySelector<HTMLInputElement>('input[type="radio"]:checked');
     return checked?.value || checked?.parentElement?.textContent?.trim() || root.getAttribute('aria-checked') === 'true';
   }
-  if (family === 'date-range') {
-    const inputs = Array.from(root.querySelectorAll<HTMLInputElement>('input'));
-    return { startDate: inputs[0]?.value || '', endDate: inputs[1]?.value || '' };
-  }
+  if (family === 'date-range') return readDateRangeValue(root);
   if (family === 'phone') {
     return Array.from(root.querySelectorAll<HTMLInputElement>('input')).map((input) => input.value).join(' ')
       || (isInputElement(root) ? root.value : '');
   }
   if (family === 'select' || family === 'search-select' || family === 'cascader' || family === 'dialog') {
-    if (isSelectElement(root)) return root.options[root.selectedIndex]?.text.trim() || root.value;
+    if (isSelectElement(root)) return root.multiple
+      ? Array.from(root.selectedOptions, option => option.text.trim())
+      : root.options[root.selectedIndex]?.text.trim() || root.value;
     return selectedText(root);
   }
   if (family === 'date') {
@@ -443,6 +450,12 @@ export function isControlAdapterValueEquivalent(
   actual: unknown,
   expected: unknown,
 ): boolean | undefined {
+  if (['select', 'search-select', 'dialog'].includes(match.adapter.family) && (Array.isArray(actual) || Array.isArray(expected))) {
+    if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+    const normalize = (values: unknown[]) => values.map(value => String(value).normalize('NFKC').replace(/\s+/g, ' ').trim()).sort();
+    const a = normalize(actual); const e = normalize(expected);
+    return a.length === e.length && a.every((value, index) => value === e[index]);
+  }
   if (match.adapter.family !== 'phone') return undefined;
   if (![actual, expected].every(value => /^[+\d\s().-]+$/.test(String(value ?? '')))) return false;
   const actualDigits = String(actual ?? '').replace(/\D/g, '');

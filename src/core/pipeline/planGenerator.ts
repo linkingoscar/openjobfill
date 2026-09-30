@@ -103,7 +103,7 @@ export class PlanGenerator {
           const doc = el.ownerDocument || document;
           const container = el.closest('.radio-group, .el-radio-group, .ant-radio-group, .form-item, .form-group, fieldset') || el.parentElement || doc;
           const groupRadios = name
-            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`))
+            ? Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${CSS.escape(name)}"]`)).filter(radio => radio.form === el.form)
             : Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
           if (groupRadios.some((r) => r.checked)) {
             isAlreadyFilledByUser = true;

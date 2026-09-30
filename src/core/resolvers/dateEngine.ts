@@ -1,4 +1,4 @@
-import { setNativeValue, simulateClick } from '../engine/dispatcher';
+import { setNativeValue, simulateClick, setNativeCheckboxChecked, setNativeRadioChecked, setCustomCheckboxChecked } from '../engine/dispatcher';
 import { selectCustomOption } from '../engine/selector';
 import { getAllOpenRoots, isElementVisible, isInputElement, sleep } from '../../utils/dom';
 import { throwIfAborted } from '../pipeline/runContext';
@@ -217,6 +217,9 @@ export class DateEngine {
       return { year: Number(monthFirst[2]), month: Number(monthFirst[1]), isPresent: false, valid: true, raw: clean };
     }
 
+    if (!/^(?:\d{2}|\d{4})(?:[-年/.]\d{1,2}(?:[-月/.]\d{1,2}日?)?月?)?$/.test(clean)) {
+      return { year: 0, month: 0, raw: clean, valid: false };
+    }
     // 提取数字部分
     const digits = clean.replace(/[年月\./日]/g, '-').split('-').filter(Boolean).map((d) => parseInt(d, 10));
 
@@ -299,6 +302,11 @@ export class DateEngine {
     if (semantic.isPresent) {
       const presentControl = this.findPresentControl(el);
       if (!presentControl) return false;
+      if (isInputElement(presentControl)) {
+        if (presentControl.type === 'checkbox') return setNativeCheckboxChecked(presentControl, true);
+        if (presentControl.type === 'radio') return setNativeRadioChecked(presentControl, true);
+      }
+      if (presentControl.matches('[role="checkbox"], [role="radio"], [aria-pressed]')) return setCustomCheckboxChecked(presentControl, true);
       simulateClick(presentControl);
       await sleep(80, signal);
       if (isInputElement(presentControl)) return presentControl.checked;
@@ -352,10 +360,9 @@ export class DateEngine {
     const formattedText = this.formatDate(semantic, targetFormat);
     const wasReadOnly = input.readOnly;
     try {
-      if (input.readOnly) input.readOnly = false;
-      setNativeValue(input, formattedText);
+      if (!wasReadOnly) setNativeValue(input, formattedText);
       await sleep(60, signal);
-      if (input.value === formattedText || input.value.replace(/[^\d]/g, '').startsWith(formattedText.replace(/[^\d]/g, ''))) {
+      if (!wasReadOnly && input.value === formattedText) {
         return true;
       }
     } finally {
@@ -369,7 +376,7 @@ export class DateEngine {
     await sleep(80, signal);
     const digits = input.value.replace(/[^\d]/g, '');
     const expectedDigits = this.formatDate(semantic, semantic.day ? 'YYYY-MM-DD' : 'YYYY-MM').replace(/[^\d]/g, '');
-    return !!digits && (digits.startsWith(expectedDigits) || expectedDigits.startsWith(digits));
+    return !!digits && digits === expectedDigits;
   }
 }
 

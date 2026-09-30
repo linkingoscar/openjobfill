@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenJobFill 选择控件行为审查</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 24px auto; max-width: 960px; padding: 0 16px; color: #17304c; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; }
+    input, select, button, [role="combobox"] { font: inherit; padding: 10px; border: 1px solid #aab8c8; border-radius: 5px; }
+    [role="combobox"] { min-width: 240px; background: white; }
+    [role="listbox"], .ant-cascader-menus { margin: 16px 0; border: 1px solid #c8d2df; padding: 8px; background: #f8fafc; }
+    [role="option"], .ant-cascader-menu-item { padding: 8px 12px; cursor: pointer; }
+    [aria-disabled="true"] { color: #8792a0; cursor: not-allowed; }
+    [aria-selected="true"] { background: #d9ebff; }
+    .ant-cascader-menu { display: inline-block; min-width: 180px; vertical-align: top; }
+    #state { display: block; padding: 12px; background: #edf3f9; white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>选择控件行为审查</h1>
+  <p>本地合成控件，模拟异步搜索、隐藏候选、多级目录与多选。不会提交表单，也不会发出网络请求。</p>
+  <label for="case-picker">选择测试场景</label>
+  <select id="case-picker" data-openjobfill-ignore></select>
+  <main id="fixture"></main>
+  <div id="portals"></div>
+  <h2>控件实际提交状态</h2>
+  <output id="state"></output>
+  <script>
+    (() => {
+      const cases = {
+        'portal-scope': 'Portal 选项只属于 aria-controls 指定的控件',
+        'hidden-duplicate': '隐藏父容器中的重复选项',
+        'disabled-duplicate': '禁用候选与同名有效候选',
+        'async-search': '异步搜索：450ms 后替换旧候选',
+        'late-popup-association': '80ms 后才关联的 Portal，页面另有同名候选',
+        'idref-list': 'aria-controls 含多个合法 IDREF',
+        'native-disabled': '原生下拉禁用候选与禁用 optgroup',
+        'native-multiple': '原生多选，要求保存多个值',
+        'custom-multiple': '已选择选项重复填写应保持选中',
+        'cascader-scope': '两个同时显示的多级目录',
+        'cascader-empty': '目录中的空白加载占位项',
+        'cascader-exact': '精确专业名应优先于包含该名称的其他专业',
+        'cascader-async': '650ms 后才加载下一级目录',
+        'cascader-columns': '父子两级包含同名“其他”',
+        'cascader-disabled': '目录中的禁用节点',
+        'sd-selected-display': 'SD 输入框搜索值为空，提交值显示在旁边 span',
+        'legacy-select2': '旧 Select2：搜索框在 body Portal，高亮切分文本节点',
+      };
+      const stage = document.getElementById('fixture');
+      const portals = document.getElementById('portals');
+      const output = document.getElementById('state');
+      const picker = document.getElementById('case-picker');
+      const timers = new Set();
+      let state;
+      function later(fn, ms) {
+        const timer = setTimeout(() => { timers.delete(timer); fn(); }, ms);
+        timers.add(timer);
+        return timer;
+      }
+      function renderState() { output.textContent = JSON.stringify(state, null, 2); }
+      function record(value) { state.clicks.push(value); renderState(); }
+      function commit(value, displayValue) {
+        state.committed = value;
+        const valueNode = stage.querySelector('.ant-select-selection-item, .selected-value');
+        if (valueNode) valueNode.textContent = displayValue === undefined ? (Array.isArray(value) ? value.join(', ') : value) : displayValue;
+        renderState();
+      }
+      function element(tag, attrs, text) {
+        const el = document.createElement(tag);
+        Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
+        el.textContent = text || '';
+        return el;
+      }
+      function option(parent, text, key, attrs = {}, onClick) {
+        const item = element('div', { role: 'option', 'data-option-key': key, ...attrs }, text);
+        item.addEventListener('click', () => {
+          record(key);
+          if (item.getAttribute('aria-disabled') === 'true') return;
+          if (onClick) onClick(item); else commit(key, text);
+        });
+        parent.appendChild(item);
+        return item;
+      }
+      function popup(id = 'owned-popup', attrs = {}) {
+        const el = element('div', { id, role: 'listbox', ...attrs });
+        portals.appendChild(el);
+        return el;
+      }
+      function trigger(search = false, controls = 'owned-popup') {
+        stage.innerHTML = '<label for="audited-control">学校名称</label>';
+        const root = element(search ? 'input' : 'div', {
+          id: 'audited-control', name: 'school', role: 'combobox', 'aria-haspopup': 'listbox',
+          'aria-expanded': 'false', ...(controls ? { 'aria-controls': controls } : {}),
+          class: search ? 'ant-select-search__field' : 'ant-select',
+        });
+        if (!search) root.innerHTML = '<span class="ant-select-selection-item"></span>';
+        root.addEventListener('click', () => root.setAttribute('aria-expanded', 'true'));
+        stage.appendChild(root);
+        return root;
+      }
+      function cascader(controls = 'owned-cascader') {
+        stage.innerHTML = '<label for="audited-control">现居地区</label><div id="audited-control" class="ant-cascader" role="combobox" aria-haspopup="tree" aria-expanded="false"><span class="selected-value"></span></div>';
+        const root = stage.querySelector('#audited-control');
+        root.setAttribute('aria-controls', controls);
+        root.addEventListener('click', () => root.setAttribute('aria-expanded', 'true'));
+        return root;
+      }
+      function menu(id = 'owned-cascader') {
+        const el = element('div', { id, class: 'ant-cascader-menus' });
+        portals.appendChild(el);
+        return el;
+      }
+      function column(parent) {
+        const el = element('div', { class: 'ant-cascader-menu', role: 'menu' });
+        parent.appendChild(el);
+        return el;
+      }
+      function node(parent, text, key, handler, attrs = {}) {
+        return option(parent, text, key, { class: 'ant-cascader-menu-item', role: 'menuitem', ...attrs }, handler);
+      }
+      function mount(caseName) {
+        timers.forEach(clearTimeout); timers.clear();
+        stage.innerHTML = ''; portals.innerHTML = '';
+        state = { caseName, committed: '', clicks: [], queries: [], path: [] };
+        api.state = state;
+        picker.value = caseName;
+        if (caseName === 'portal-scope') {
+          trigger(); option(popup('unrelated-popup'), '测试大学', 'unrelated'); option(popup(), '测试大学', 'target');
+        } else if (caseName === 'hidden-duplicate') {
+          trigger(); const list = popup(); const hidden = element('div', { style: 'display: none' }); list.appendChild(hidden);
+          option(hidden, '测试大学', 'hidden'); option(list, '测试大学', 'target');
+        } else if (caseName === 'disabled-duplicate') {
+          trigger(); const list = popup(); option(list, '测试大学', 'disabled', { 'aria-disabled': 'true' }); option(list, '测试大学', 'target');
+        } else if (caseName === 'async-search') {
+          const root = trigger(true); const list = popup(); option(list, '上次搜索的学校', 'stale'); let pending;
+          root.addEventListener('input', () => {
+            state.queries.push(root.value); renderState(); clearTimeout(pending);
+            if (root.value !== '测试大学') return;
+            pending = later(() => {
+              list.replaceChildren(); option(list, '测试大学', 'target', {}, () => { root.value = '测试大学'; commit('target'); root.setAttribute('aria-expanded', 'false'); });
+            }, 450);
+          });
+        } else if (caseName === 'late-popup-association') {
+          const root = trigger(false, ''); option(popup('unrelated-popup'), '测试大学', 'unrelated');
+          root.addEventListener('click', () => later(() => { root.setAttribute('aria-controls', 'owned-popup'); if (!document.getElementById('owned-popup')) option(popup(), '测试大学', 'target'); }, 80));
+        } else if (caseName === 'idref-list') {
+          trigger(false, 'owned-popup auxiliary-popup'); option(popup(), '测试大学', 'target'); popup('auxiliary-popup');
+        } else if (caseName === 'native-disabled') {
+          stage.innerHTML = '<label for="audited-control">学历</label><select id="audited-control"><option value="">请选择</option><optgroup label="历史选项" disabled><option value="disabled-group">本科</option></optgroup><option value="disabled-option" disabled>本科</option><option value="target">本科</option></select>';
+          stage.querySelector('select').addEventListener('change', event => commit(event.target.value));
+        } else if (caseName === 'native-multiple') {
+          stage.innerHTML = '<label for="audited-control">技能</label><select id="audited-control" multiple><option value="js">JavaScript</option><option value="ts">TypeScript</option><option value="go">Go</option></select>';
+          stage.querySelector('select').addEventListener('change', event => commit(Array.from(event.target.selectedOptions, item => item.value)));
+        } else if (caseName === 'custom-multiple') {
+          const root = trigger(); root.setAttribute('aria-multiselectable', 'true');
+          const list = popup('owned-popup', { 'aria-multiselectable': 'true' });
+          commit(['target'], '测试大学');
+          option(list, '测试大学', 'target', { 'aria-selected': 'true' }, item => {
+            const selected = item.getAttribute('aria-selected') !== 'true';
+            item.setAttribute('aria-selected', String(selected)); commit(selected ? ['target'] : [], selected ? '测试大学' : '');
+          });
+        } else if (caseName === 'cascader-scope') {
+          cascader(); node(column(menu('unrelated-cascader')), '广东省', 'unrelated'); node(column(menu()), '广东省', 'target');
+        } else if (caseName === 'cascader-empty') {
+          cascader(); const list = column(menu()); node(list, '', 'loading', () => {}); node(list, '广东省', 'target');
+        } else if (caseName === 'cascader-exact') {
+          cascader(); const list = column(menu()); node(list, '软件工程（联合培养）', 'partial'); node(list, '软件工程', 'target');
+        } else if (caseName === 'cascader-async') {
+          cascader(); const menus = menu(); const first = column(menus);
+          node(first, '广东省', 'province', () => {
+            state.path = ['广东省']; renderState();
+            if (menus.children.length > 1) return;
+            later(() => node(column(menus), '深圳市', 'city', () => { state.path.push('深圳市'); commit(state.path.join('/')); }), 650);
+          }, { 'aria-haspopup': 'menu' });
+        } else if (caseName === 'cascader-columns') {
+          cascader(); const menus = menu(); const first = column(menus);
+          node(first, '其他', 'parent', () => {
+            state.path = ['其他']; renderState();
+            if (menus.children.length > 1) return;
+            node(column(menus), '其他', 'leaf', () => { state.path.push('其他'); commit(state.path.join('/')); });
+          }, { 'aria-haspopup': 'menu' });
+        } else if (caseName === 'cascader-disabled') {
+          cascader(); const list = column(menu()); node(list, '广东省', 'disabled', undefined, { 'aria-disabled': 'true' }); node(list, '广东省', 'target');
+        } else if (caseName === 'sd-selected-display') {
+          // Reduced from public Moka job-list filter DOM; not a captured application form.
+          stage.innerHTML = '<label for="audited-control">每页条数</label><div class="sd-Select-root-observed"><div class="sd-Input-root"><input id="audited-control" class="sd-Input-input-10L0t sd-Input-common-input-1XimE" value=""><span class="sd-Input-display-value-RwqDy">20 条/页</span></div></div>';
+          commit('20 条/页');
+        } else if (caseName === 'legacy-select2') {
+          // Reduced from the public Douban application form observed on 2026-09-30.
+          stage.innerHTML = '<div class="form-item"><label for="id_college">学校名称</label><div id="audited-control" class="select2-container"><a class="select2-choice" tabindex="-1"><span class="select2-chosen">请选择</span><span class="select2-arrow"><b></b></span></a><input class="select2-focusser select2-offscreen" type="text" id="s2id_autogen2" style="position:absolute;width:1px;height:1px;left:-10000px"></div><select name="college" id="id_college" class="select2-offscreen" tabindex="-1" style="position:absolute;width:1px;height:1px;left:-10000px"><option value="">请选择</option><option value="thu">清华大学</option></select></div>';
+          portals.innerHTML = '<div id="select2-drop" class="select2-drop select2-display-none select2-with-searchbox" style="display:none"><div class="select2-search"><input type="text" class="select2-input select2-focused"></div><ul class="select2-results"></ul></div>';
+          const dropdown = document.getElementById('select2-drop');
+          const search = dropdown.querySelector('.select2-input');
+          const results = dropdown.querySelector('.select2-results');
+          stage.querySelector('.select2-choice').addEventListener('click', () => { dropdown.style.display = 'block'; dropdown.classList.add('select2-drop-active'); });
+          search.addEventListener('input', () => {
+            state.queries.push(search.value); renderState();
+            later(() => {
+              results.innerHTML = search.value === '清华大学' ? '<li class="select2-results-dept-0 select2-result select2-result-selectable select2-highlighted"><div class="select2-result-label"><span class="select2-match">清华</span>大学</div></li>' : '';
+              results.querySelector('li')?.addEventListener('click', () => {
+                commit('target'); stage.querySelector('.select2-chosen').textContent = '清华大学'; stage.querySelector('select').value = 'thu'; search.value = ''; dropdown.style.display = 'none'; dropdown.classList.remove('select2-drop-active');
+              });
+            }, 120);
+          });
+        } else {
+          throw new Error('Unknown fixture case: ' + caseName);
+        }
+        renderState();
+        return state;
+      }
+      const api = { mount, state: null, cases };
+      window.selectBehaviorFixture = api;
+      Object.entries(cases).forEach(([name, label]) => picker.appendChild(element('option', { value: name }, label)));
+      picker.addEventListener('change', () => mount(picker.value));
+      const requested = new URLSearchParams(window.location.search).get('case');
+      mount(requested && requested in cases ? requested : 'async-search');
+    })();
+  </script>
+</body>
+</html>

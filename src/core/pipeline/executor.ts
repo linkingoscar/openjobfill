@@ -13,6 +13,7 @@ import { recordRunTrace, type RunTraceStage } from './runTrace';
 export interface ExecutionEnvironment {
   strategiesForField: typeof retryLadder.getStrategiesForField;
   inspectSafety: typeof inspectFieldSafety;
+  controlProblem: (element: HTMLElement) => string | undefined;
   wait: typeof sleep;
   decorate: typeof decorateElement;
   trace: (stage: RunTraceStage, payload: unknown) => void;
@@ -29,6 +30,10 @@ export class PipelineExecutor {
     const signal = options.signal;
     const env: ExecutionEnvironment = options.environment || {
       strategiesForField: retryLadder.getStrategiesForField.bind(retryLadder),
+      controlProblem: (element) => {
+        if (!element.isConnected) return '控件已重新渲染，请重新识别';
+        if (element.matches('[aria-invalid="true"], :invalid') || element.querySelector('[aria-invalid="true"], input:invalid, textarea:invalid, select:invalid')) return '页面校验未通过';
+      },
       inspectSafety: inspectFieldSafety, wait: sleep, decorate: decorateElement,
       trace: (stage, payload) => recordRunTrace(stage, payload, options.runId),
     };
@@ -144,8 +149,17 @@ export class PipelineExecutor {
           }
           
           // 等待 DOM / Vue / React 受控状态响应
-          await env.wait(50, signal);
+          await env.wait(200, signal);
           throwIfAborted(signal);
+
+          // A detached node can retain the requested value while the visible replacement
+          // is empty. Page validation also outranks a matching display string.
+          const controlProblem = env.controlProblem(field.element);
+          if (controlProblem) {
+            env.trace('read-back', { fieldId: field.id, strategy: strategy.name, equivalent: false, controlProblem });
+            attempts.push({ strategy: strategy.name, outcome: 'mismatch', message: controlProblem, ...attemptMeta });
+            break;
+          }
 
           // 读回验证 (Read-Back)
           actualReadValue = strategy.readBack

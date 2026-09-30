@@ -1,3 +1,4 @@
+import { readDateRangeValue } from '../../utils/dateRangeValue';
 import { getSafeEntityVariants } from '../matcher/aliasDictionary';
 import type { FieldDescriptor, DriverType } from '../../types/pipeline';
 import { optionResolver, type CanonicalDomain } from '../resolvers/optionResolver';
@@ -55,13 +56,18 @@ export class Verifier {
 
     if (driverType === 'select' || driverType === 'cascader') {
       if (isSelectElement(el)) {
+        if (el.multiple) return Array.from(el.selectedOptions, option => option.text.trim());
         const selected = el.options[el.selectedIndex];
         return selected ? selected.text.trim() : el.value;
       }
-      if (isInputElement(el)) return el.value;
+      if (isInputElement(el)) {
+        const display = el.closest('[class*="sd-Select"], .sd-dropdown, .mokahr-search-dropdown, .ant-select, .el-select')
+          ?.querySelector('[class*="sd-Input-display-value"], .ant-select-selection-item, .el-select__selected-item');
+        return display?.textContent?.trim() || el.value;
+      }
       // 自定义下拉框：提取当前展示的文本
       const selectedItem = el.querySelector(
-        '.el-select__selected-item, .ant-select-selection-item, .semi-select-selection-text, [class*="selected"], [class*="value"]'
+        '.el-select__selected-item, .ant-select-selection-item, .semi-select-selection-text, .select2-chosen, [class*="selected"], [class*="value"]'
       );
       if (selectedItem && selectedItem.textContent) {
         return selectedItem.textContent.trim();
@@ -80,21 +86,7 @@ export class Verifier {
       return el.textContent?.trim() || '';
     }
 
-    if (driverType === 'date-range') {
-      const inputs = Array.from(el.querySelectorAll<HTMLInputElement>('input'));
-      const presentControl = Array.from(el.querySelectorAll<HTMLElement>(
-        'label, button, [role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"], [aria-pressed]'
-      )).find((candidate) => {
-        const text = candidate.textContent || candidate.getAttribute('aria-label') || '';
-        if (!/至今|目前|现在|present|current/i.test(text)) return false;
-        if (isInputElement(candidate)) return candidate.checked;
-        return candidate.getAttribute('aria-checked') === 'true' || candidate.getAttribute('aria-pressed') === 'true';
-      });
-      return {
-        startDate: inputs[0]?.value || '',
-        endDate: inputs[1]?.value || (presentControl ? '至今' : ''),
-      };
-    }
+    if (driverType === 'date-range') return readDateRangeValue(el);
 
     if (driverType === 'contenteditable') {
       return el.innerText || el.textContent || '';
@@ -107,8 +99,14 @@ export class Verifier {
    * 校验读回的值与期望值是否具备“语义等价性” (Domain-Aware Equivalence)
    */
   isSemanticEquivalent(actual: any, expected: any, driverType: DriverType, semanticKey?: string): boolean {
-    if (actual === expected) return true;
+    if (actual === expected && driverType !== 'date' && driverType !== 'date-range') return true;
     if (actual == null || expected == null) return false;
+    if (driverType === 'select' && (Array.isArray(actual) || Array.isArray(expected))) {
+      if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+      const normalize = (values: unknown[]) => values.map(value => String(value).normalize('NFKC').replace(/\s+/g, ' ').trim()).sort();
+      const a = normalize(actual); const e = normalize(expected);
+      return a.length === e.length && a.every((value, index) => value === e[index]);
+    }
     const normalizedText = (value: unknown) => String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
     if (/phone/i.test(semanticKey || '')) {
       const phone = (value: unknown) => {
@@ -123,8 +121,14 @@ export class Verifier {
     if (/idCardNumber|passport/i.test(semanticKey || '')) return normalizedText(actual).toUpperCase() === normalizedText(expected).toUpperCase();
 
     if (driverType === 'date') {
+      if (actual === '' && expected === '') return true;
+      const present = (value: unknown) => /^(至今|目前|现在|present|current)$/i.test(normalizedText(value));
+      if (present(actual) || present(expected)) return present(actual) && present(expected);
+
       const parts = (value: unknown): number[] | null => {
-        const text = String(value).trim().replace(/[年月日/.]/g, '-').replace(/-$/, '');
+        let text = String(value).trim().replace(/[年月日/.]/g, '-').replace(/-$/, '');
+        const monthFirst = text.match(/^(\d{1,2})-(\d{4})$/);
+        if (monthFirst) text = `${monthFirst[2]}-${monthFirst[1]}`;
         if (!/^\d{4}(?:-\d{1,2}){0,2}$/.test(text)) return null;
         const result = text.split('-').map(Number);
         if (result[0] < 1900 || result[0] > 2200) return null;

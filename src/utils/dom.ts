@@ -182,9 +182,14 @@ export function isFieldRequired(el: HTMLElement, labelText = ''): boolean {
 export function isElementVisible(el: HTMLElement): boolean {
   if (!el || !el.isConnected) return false;
   const win = getElementWindow(el);
-  const style = win.getComputedStyle ? win.getComputedStyle(el) : (typeof window !== 'undefined' ? window.getComputedStyle(el) : null);
-  if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
-    return false;
+  // Hidden popup ancestors (including shadow hosts) still give their children a
+  // normal computed display value. Check the chain before the zero-layout test.
+  for (let current: HTMLElement | null = el; current;) {
+    if (current.hidden || current.hasAttribute('inert') || current.getAttribute('aria-hidden') === 'true') return false;
+    const style = win.getComputedStyle ? win.getComputedStyle(current) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0')) return false;
+    const root = current.getRootNode();
+    current = current.parentElement || ('host' in root ? (root as ShadowRoot).host as HTMLElement : null);
   }
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) {
