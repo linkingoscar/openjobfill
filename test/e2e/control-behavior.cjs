@@ -7,20 +7,20 @@ module.exports = async function verifyControlBehavior(context, options, url, art
   resume.updatedAt=Date.now(); await chrome.storage.local.set({[key]:resume});
  });
  for(const mode of ['vue','cancel','rerender','invalid','radio','checkbox','calendar','debounced','cancel-main']) {
-  await options.evaluate(() => chrome.storage.local.remove('openjobfill_replay_snapshots'));
+  const startedAt = await options.evaluate(() => Date.now());
   const page=await context.newPage(); await page.setViewportSize({width:1366,height:1000});
   await page.goto(`${url}/test/fixtures/text-date-behavior.html?case=${mode}`);
   const host=page.locator('#openjobfill-extension-host');
   await host.locator('button[aria-label^="一键自动填写当前页面"]').click();
   const confirm=host.getByRole('button',{name:/^确认填写/});await confirm.waitFor({timeout:15000});await confirm.click();
-  await options.waitForFunction(async () => {
+  await options.waitForFunction(async (startedAt) => {
     const sessions=(await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[];
-    return sessions.some(session=>session.records.some(record=>record.stage==='fill'));
-  }, undefined, {timeout:20000});
-  const results=await options.evaluate(async()=>{
+    return sessions.some(session=>session.createdAt>=startedAt && session.pageUrl.includes('/text-date-behavior.html') && session.summary && session.records.some(record=>record.stage==='execution-result'));
+  }, startedAt, {timeout:20000});
+  const results=await options.evaluate(async(startedAt)=>{
     const sessions=(await chrome.storage.local.get('openjobfill_replay_snapshots')).openjobfill_replay_snapshots||[];
-    return sessions.flatMap(session=>session.records.filter(record=>record.stage==='execution-result').map(record=>record.payload));
-  });
+    return sessions.filter(session=>session.createdAt>=startedAt && session.pageUrl.includes('/text-date-behavior.html')).flatMap(session=>session.records.filter(record=>record.stage==='execution-result').map(record=>record.payload));
+  },startedAt);
   await page.screenshot({path:path.join(artifactDir,`controls-${mode}.png`),fullPage:true});
   if(mode==='vue') {
    const model=JSON.parse(await page.locator('#model').textContent());
