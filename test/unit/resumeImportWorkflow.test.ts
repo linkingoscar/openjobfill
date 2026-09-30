@@ -5,6 +5,7 @@ import { getAISettings } from '@/core/storage/aiSettingsStorage';
 import { importResumeDocument, importResumeImage } from '@/core/importers/resumeImportService';
 import { useResumeImport } from '@/components/composables/useResumeImport';
 import { importResumeText } from '@/core/importers/jsonResumeImporter';
+import { resumeStorage } from '@/core/storage/resumeStorage';
 
 vi.mock('@/core/parser/textExtractor', () => ({ extractTextFromFile: vi.fn(), renderPdfPagesForVision: vi.fn() }));
 vi.mock('@/core/storage/aiSettingsStorage', () => ({ getAISettings: vi.fn() }));
@@ -12,13 +13,14 @@ vi.mock('@/core/storage/aiSettingsStorage', () => ({ getAISettings: vi.fn() }));
 const file = new File(['resume'], 'resume.pdf', { type: 'application/pdf' });
 const sendMessage = vi.fn();
 beforeEach(() => {
+  localStorage.clear();
   vi.resetAllMocks();
   vi.stubGlobal('chrome', { runtime: { sendMessage } });
   vi.mocked(extractTextFromFile).mockResolvedValue('张三\n13800138000\nlocal@example.com');
   vi.mocked(renderPdfPagesForVision).mockResolvedValue(['data:image/png;base64,YQ==']);
   vi.mocked(getAISettings).mockResolvedValue({ enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'local' });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('resume import workflow boundaries', () => {
   it('requires explicit consent for both external-processing paths', async () => {
@@ -39,6 +41,8 @@ describe('resume import workflow boundaries', () => {
   });
 
   it('merges AI structure with local missing fields without automatically saving it', async () => {
+    const save = vi.spyOn(resumeStorage, 'saveResume');
+    const importJson = vi.spyOn(resumeStorage, 'importResumeFromJson');
     const ai = importResumeText('李四', 'AI');
     ai.basics.phone = '';
     sendMessage.mockResolvedValue({ success: true, resume: ai });
@@ -50,9 +54,12 @@ describe('resume import workflow boundaries', () => {
     expect(result.localResume?.basics.name).toBe('张三');
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'AI_PARSE_RESUME_DOCUMENT',
-      payload: expect.objectContaining({ confirmedExternalProcessing: true, imageDataUrls: ['data:image/png;base64,YQ=='] }),
+      payload: expect.objectContaining({ confirmedExternalProcessing: true, imageDataUrls: ['data:image/png;base64,YQ=='], documentText: '张三\n13800138000\nlocal@example.com', fileName: 'resume.pdf' }),
     }));
     expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(importJson).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
   });
 
   it('does not start an AI request after import has been discarded during extraction', async () => {

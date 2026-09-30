@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildFillableFields, rememberManualFillMapping } from '@/core/engine/manualFill';
+import { EMPTY_RESUME } from '@/core/storage/defaultData';
 import { ruleStorage } from '@/core/storage/ruleStorage';
 import { beforeEach } from 'vitest';
 import type { StandardResume } from '@/types/resume';
@@ -82,18 +83,7 @@ describe('manualFill.buildFillableFields', () => {
   });
 
   it('空简历返回空清单，调用方应提示并中止', () => {
-    const empty: StandardResume = {
-      ...RESUME,
-      basics: { ...RESUME.basics, name: '', phone: '', email: '' },
-      educations: [],
-      experiences: [],
-      qaBank: [],
-    };
-    // 清空基础可填项后，仍可能残留 birthDate 等；这里验证不会抛错且只含有值项
-    const fields = buildFillableFields(empty);
-    for (const f of fields) {
-      expect(f.value).not.toBe('');
-    }
+    expect(buildFillableFields(structuredClone(EMPTY_RESUME))).toEqual([]);
   });
 
   it('用户明确点选目标和值后，记住当前站点映射供下次自动填写', async () => {

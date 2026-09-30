@@ -52,7 +52,13 @@ describe('声明式站点画像与兼容性目录', () => {
       expect(analyzer.getLastDiagnostics().formRoots.some((root) => root.selected && root.profileHint), fixture.id).toBe(true);
 
       const plan = new PlanGenerator().generatePlan(fields, DEMO_RESUME, enhancer);
-      expect(plan.items.some((item) => item.semanticKey), fixture.id).toBe(true);
+      const expectedKey = fixture.id === 'site-campushr-alibaba' ? 'educations.0.schoolName'
+        : fixture.id === 'site-aidc-jobs-alibaba' ? 'basics.email'
+        : fixture.id === 'site-careers-aliyun' ? 'basics.phone'
+        : fixture.id === 'site-jobs-bytedance' ? 'basics.currentLocation.city' : 'basics.name';
+      const item = plan.items.find(item => item.field === fixtureField);
+      expect(item?.semanticKey, fixture.id).toBe(expectedKey);
+      expect(item?.action, fixture.id).toBe('FILL');
     }
   });
 

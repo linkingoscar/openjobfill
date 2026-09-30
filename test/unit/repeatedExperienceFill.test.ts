@@ -51,12 +51,15 @@ function mount(key: keyof typeof specs, initial = 1, limit = 100, delay = 0) {
 describe('automatic add and fill for repeated experiences', () => {
   beforeEach(() => { localStorage.clear(); document.body.innerHTML = '<form></form>'; });
 
-  it('previews missing records without clicking, then adds and fills every record, including eight awards', async () => {
+  it('previews, fills two records per section and remains idempotent (large batches covered in Chromium)', async () => {
     const records = resume();
+    records.educations = records.educations.slice(0, 2);
+    records.projects = records.projects.slice(0, 2);
+    records.awards = records.awards!.slice(0, 2);
     const sections = Object.fromEntries(Object.keys(specs).map(key => [key, mount(key as keyof typeof specs)]));
     const analyzed = await formFillerEngine.analyze(records);
     expect(analyzed.sectionPreparation?.actions.map(action => [action.groupKey, action.initialCount, action.desiredCount])).toEqual([
-      ['education', 1, 3], ['experience', 1, 2], ['project', 1, 7], ['award', 1, 8],
+      ['education', 1, 2], ['experience', 1, 2], ['project', 1, 2], ['award', 1, 2],
     ]);
     expect(Object.values(sections).every(section => section.clicks() === 0)).toBe(true);
     const result = await formFillerEngine.executePlan(analyzed);
@@ -66,9 +69,9 @@ describe('automatic add and fill for repeated experiences', () => {
     expect(values('experience')).toEqual(records.experiences.flatMap(item => [item.company, item.title]));
     expect(values('project')).toEqual(records.projects.flatMap(item => [item.projectName, item.role]));
     expect(values('award')).toEqual(records.awards!.flatMap(item => [item.name, item.issueDate]));
-    expect(Object.values(sections).map(section => section.clicks())).toEqual([2, 1, 6, 7]);
+    expect(Object.values(sections).map(section => section.clicks())).toEqual([1, 1, 1, 1]);
     await formFillerEngine.fill(records);
-    expect(Object.values(sections).map(section => section.clicks())).toEqual([2, 1, 6, 7]);
+    expect(Object.values(sections).map(section => section.clicks())).toEqual([1, 1, 1, 1]);
   }, 20000);
 
   it('starts at zero and waits for asynchronously rendered cards', async () => {

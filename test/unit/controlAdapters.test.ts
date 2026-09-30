@@ -45,8 +45,7 @@ describe('Adapter 注册与运行契约（非真实网站验收）', () => {
 
   it('应完整、唯一登记生产兼容矩阵中的 58 个 Adapter', () => {
     const catalog = getControlAdapterCatalog();
-    expect(catalog).toHaveLength(58);
-    expect(new Set(catalog.map((adapter) => adapter.id)).size).toBe(58);
+    expect(new Set(catalog.map((adapter) => adapter.id)).size).toBe(catalog.length);
     expect(catalog.map((adapter) => adapter.id)).toEqual([...CONTROL_ADAPTER_IDS]);
     expect(catalog.filter((adapter) => adapter.world === 'MAIN').map((adapter) => adapter.id)).toEqual([
       'PhoenixInput',
@@ -67,9 +66,10 @@ describe('Adapter 注册与运行契约（非真实网站验收）', () => {
     const context = { field, driverType: 'select' as const, pageUrl: 'https://app.mokahr.com/application/1' };
 
     expect(getMatchingControlAdapters(context)[0]?.adapter.id).toBe('MokahrSearchDropdown');
+    (field.element.querySelector('input') as HTMLInputElement).value = 'Sensitive Candidate School';
     const trace = getControlAdapterMatchTrace(context);
     expect(trace.find((adapter) => adapter.id === 'MokahrSearchDropdown')?.matched).toBe(true);
-    expect(JSON.stringify(trace)).not.toContain('北京大学');
+    expect(JSON.stringify(trace)).not.toContain('Sensitive Candidate School');
   });
 
   it('51Job 组合电话应拆分区号和本地号码，并通过专属回读验证', async () => {
@@ -253,8 +253,10 @@ describe('Adapter 注册与运行契约（非真实网站验收）', () => {
       </form>
       <div class="pop-panel"><table><tbody><tr><td>群众</td></tr></tbody></table><button>确定</button></div>`;
     const trigger = document.querySelector<HTMLElement>('.bankcomm-select')!;
-    document.querySelector<HTMLElement>('.pop-panel td')!.addEventListener('click', () => {
-      trigger.querySelector('.selected-value')!.textContent = '群众';
+    let pending = '';
+    document.querySelector<HTMLElement>('.pop-panel td')!.addEventListener('click', () => { pending = '群众'; });
+    document.querySelector<HTMLElement>('.pop-panel button')!.addEventListener('click', () => {
+      trigger.querySelector('.selected-value')!.textContent = pending;
     });
     const withPoliticalStatus: StandardResume = {
       ...resume,

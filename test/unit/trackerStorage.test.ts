@@ -5,7 +5,7 @@ import { createApplicationId } from '@/core/tracker/trackerSchema';
 
 describe('投递看板数据契约', () => {
   beforeEach(() => localStorage.clear());
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   it('首次打开为空，不再写入虚构公司和岗位', async () => {
     expect(await trackerStorage.getApplications()).toEqual([]);
@@ -20,6 +20,7 @@ describe('投递看板数据契约', () => {
     const [record] = await trackerStorage.getApplications();
     expect(record).toMatchObject({ schemaVersion: 2, clientRequestId: 'legacy-1', syncState: 'local' });
     expect(record.jobUrl).toBe('https://jobs.example.com/1');
+    expect(JSON.parse(localStorage.getItem('openjobfill_job_applications')!)).toEqual([record]);
   });
 
   it('拒绝把非 HTTP(S) 地址保存为可点击岗位链接', async () => {
@@ -57,7 +58,7 @@ describe('投递看板数据契约', () => {
     expect(await trackerStorage.getApplications()).toHaveLength(2);
   });
 
-  it('扩展页面经 background 访问 Tracker，并保留显式清空字段的用户来源', async () => {
+  it('扩展页面经 background 读取 Tracker，并传递显式清空的来源和锁定字段', async () => {
     const application = {
       id: 'app-1', clientRequestId: 'request-1', companyName: '示例公司', jobTitle: '工程师',
       appliedDate: '2026-09-02', status: 'applied' as const, jobUrl: 'https://jobs.example.com/1',
@@ -68,14 +69,14 @@ describe('投递看板数据契约', () => {
       runtime: {
         id: 'extension-id',
         sendMessage(message: unknown, callback: (response: unknown) => void) {
-          sent.push(message);
+          sent.push(JSON.parse(JSON.stringify(message)));
           callback({ success: true, applications: [application] });
         },
       },
       storage: { local: {} },
     });
 
-    expect(await trackerStorage.getApplications()).toHaveLength(1);
+    expect(await trackerStorage.getApplications()).toEqual([expect.objectContaining({ id: 'app-1', notes: '待清空' })]);
     await trackerStorage.saveApplication({
       ...application,
       notes: undefined,
@@ -85,8 +86,11 @@ describe('投递看板数据契约', () => {
     });
     expect(sent).toEqual([
       { type: 'TRACKER_STORAGE_GET' },
-      expect.objectContaining({ type: 'TRACKER_STORAGE_SAVE' }),
+      expect.objectContaining({ type: 'TRACKER_STORAGE_SAVE', payload: {
+        application: expect.objectContaining({ id: 'app-1', source: 'user_confirmed', fieldSources: { notes: 'user' }, lockedFields: ['notes'] }),
+      } }),
     ]);
+    expect((sent[1] as { payload: { application: unknown } }).payload.application).not.toHaveProperty('notes');
   });
 
   it('用户显式清空的字段保持为空，后续页面抽取不能覆盖', async () => {
@@ -118,10 +122,15 @@ describe('投递看板数据契约', () => {
   });
 
   it('申请成功草稿可恢复，并在 TTL 到期后自动清除', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-02T00:00:00Z'));
     const job = { companyName: '示例公司', jobTitle: '工程师', jobUrl: 'https://jobs.example.com/1' };
     const draft = await applicationDraftStorage.create(job, 10_000);
-    expect((await applicationDraftStorage.get(job.jobUrl))?.clientRequestId).toBe(draft.clientRequestId);
-    await applicationDraftStorage.create(job, -1);
+    vi.advanceTimersByTime(9_999);
+    expect(await applicationDraftStorage.get(job.jobUrl)).toEqual(draft);
+    expect(localStorage.length).toBe(1);
+    vi.advanceTimersByTime(1);
     expect(await applicationDraftStorage.get(job.jobUrl)).toBeNull();
+    expect(localStorage.length).toBe(0);
   });
 });

@@ -125,23 +125,18 @@ describe('ResumeStorage 首装初始化', () => {
     expect(restored.basics.name).toBe('持久化用户');
   });
 
-  it('跨页面交错更新应由 background 串行化并保留双方字段', async () => {
+  it('broker 传递字段补丁和清空标记，逐次更新保留其他字段', async () => {
     const storage = installChromeStorageMock();
     await resumeStorage.getAllResumes();
-    let queued = Promise.resolve();
     (globalThis as any).chrome.runtime.sendMessage = vi.fn((message: any, callback: (response: any) => void) => {
-      queued = queued.then(async () => {
-        if (message.type === 'RESUME_STORAGE_UPDATE_FIELDS') {
-          await resumeStorage.updateResumeFieldsDirect(message.payload.id, message.payload.updates);
-        }
-      });
-      queued.then(() => callback({ success: true }), (error) => callback({ success: false, error: error.message }));
+      expect(message.type).toBe('RESUME_STORAGE_UPDATE_FIELDS');
+      const wireMessage = JSON.parse(JSON.stringify(message));
+      resumeStorage.updateResumeFieldsDirect(wireMessage.payload.id, wireMessage.payload.updates)
+        .then(() => callback({ success: true }), (error) => callback({ success: false, error: error.message }));
     });
 
-    await Promise.all([
-      resumeStorage.updateResumeFields('resume-default', { 'basics.name': '管理页用户' }),
-      resumeStorage.updateResumeFields('resume-default', { 'basics.email': 'content@example.com' }),
-    ]);
+    await resumeStorage.updateResumeFields('resume-default', { 'basics.name': '管理页用户' });
+    await resumeStorage.updateResumeFields('resume-default', { 'basics.email': 'content@example.com' });
 
     const [resume] = await resumeStorage.getAllResumes();
     expect(resume.basics.name).toBe('管理页用户');

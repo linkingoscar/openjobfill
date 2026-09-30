@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   FILL_HISTORY_STORAGE_KEY,
-  MAX_FILL_HISTORY_RECORDS,
   fillHistoryStorage,
 } from '@/core/storage/fillHistoryStorage';
 import type { FillResult } from '@/types/adapter';
@@ -45,16 +44,18 @@ describe('FillHistoryStorage', () => {
 
     expect(record.pageUrl).toBe('https://jobs.example.com/apply/:id');
     expect(record.pageTitle).toContain('[邮箱]');
-    expect(record.fields[0]).not.toHaveProperty('value');
-    expect(record.fields[1].message).not.toContain('candidate@example.com');
-    expect(record.fields[1].message).not.toContain('13800138000');
-    expect(record.fields[1].message).not.toContain('张三');
-    expect(record.remainingTasks[0].reason).not.toContain('110101200105182345');
-    expect(record.remainingTasks[0].reason).not.toContain('张三');
+    expect(record.fields).toEqual([
+      { field: 'basics.phone', label: '手机号', status: 'success', message: undefined },
+      { field: 'basics.email', label: '电子邮箱', status: 'failed', message: '读回验证失败' },
+    ]);
+    expect(record.remainingTasks[0].reason).toBe('写入验证未通过');
+    for (const secret of ['candidate@example.com', '13800138000', '张三', '110101200105182345', 'id=private', '#step2']) {
+      expect(JSON.stringify(record)).not.toContain(secret);
+    }
   });
 
   it('最新记录置顶且最多保留 30 次', async () => {
-    for (let index = 0; index < MAX_FILL_HISTORY_RECORDS + 3; index++) {
+    for (let index = 0; index < 33; index++) {
       const record = fillHistoryStorage.createRecord(createResult(index), {
         pageTitle: `页面 ${index}`,
         pageUrl: `https://jobs.example.com/apply/${index}`,
@@ -63,9 +64,7 @@ describe('FillHistoryStorage', () => {
     }
 
     const records = await fillHistoryStorage.getRecords();
-    expect(records).toHaveLength(MAX_FILL_HISTORY_RECORDS);
-    expect(records[0].pageTitle).toBe(`页面 ${MAX_FILL_HISTORY_RECORDS + 2}`);
-    expect(records.at(-1)?.pageTitle).toBe('页面 3');
+    expect(records.map((record) => record.pageTitle)).toEqual(Array.from({ length: 30 }, (_, index) => `页面 ${32 - index}`));
   });
 
   it('可以导出和清空历史记录', async () => {
@@ -77,7 +76,7 @@ describe('FillHistoryStorage', () => {
 
     const exported = JSON.parse(await fillHistoryStorage.exportJSON());
     expect(exported.product).toBe('OpenJobFill');
-    expect(exported.records).toHaveLength(1);
+    expect(exported.records).toEqual([JSON.parse(JSON.stringify(record))]);
 
     await fillHistoryStorage.clear();
     expect(await fillHistoryStorage.getRecords()).toEqual([]);
@@ -96,6 +95,8 @@ describe('FillHistoryStorage', () => {
     expect(record.pageUrl).toBe('https://jobs.example.com/apply/:id');
     expect(record.operationError).not.toContain('candidate@example.com');
     expect(record.operationError).not.toContain('实际值: 张三');
+    expect(record.operationError).toBe('解析 [邮箱] 和[内容已隐藏]失败，实际值已隐藏');
+    expect(JSON.stringify(record)).not.toContain('张三');
     expect(record.failedCount).toBe(1);
   });
 });

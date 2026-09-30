@@ -15,7 +15,7 @@ describe('AhoCorasickMatcher (AC 自动机多模式匹配引擎)', () => {
     const text = '熟练掌握 Vue、TypeScript 与 React 前端框架开发，了解 Node.js 与 Python 后端技术。';
     const matches = matcher.search(text);
 
-    expect(matches.length).toBeGreaterThanOrEqual(4);
+    expect(matches.map(match => match.keyword)).toEqual(['Vue', 'React', 'TypeScript', 'Node.js', 'Python']);
     const keywords = matches.map((m) => m.keyword);
     expect(keywords).toContain('Vue');
     expect(keywords).toContain('TypeScript');
@@ -47,6 +47,7 @@ describe('AhoCorasickMatcher (AC 自动机多模式匹配引擎)', () => {
     const matchedKeywords1 = matches1.map((m) => m.keyword);
     expect(matchedKeywords1).not.toContain('Go');
     expect(matchedKeywords1).not.toContain('C');
+    expect(matchedKeywords1).not.toContain('R');
 
     // 独立的短词应该被成功命中
     const textWithStandalone = 'Proficient in Go, C and R programming languages.';

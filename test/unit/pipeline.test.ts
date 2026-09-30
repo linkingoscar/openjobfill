@@ -251,7 +251,7 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
   });
 
   describe('Verifier (写后读回验证与语义等价性)', () => {
-    it('应该能准确读回 input 和 select 的值', async () => {
+    it('应该能准确读回 input 的值', async () => {
       const input = document.createElement('input');
       input.value = '北京大学';
       document.body.appendChild(input);
@@ -348,6 +348,7 @@ describe('Pipeline Engine (新一代两阶段决策与执行管道)', () => {
     });
 
     it('iframe 内 radio 读回必须使用所属文档，不能串到顶层同名分组', async () => {
+      document.body.innerHTML = '<input type="radio" name="gender" value="男" checked>';
       const iframe = document.createElement('iframe');
       document.body.appendChild(iframe);
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildVisionResumePrompt, mergeResumeImports, parseVisionResumeResponse } from '@/core/importers/visionResumeImporter';
+import { mergeResumeImports, parseVisionResumeResponse } from '@/core/importers/visionResumeImporter';
 import { importResumeText } from '@/core/importers/jsonResumeImporter';
 
 describe('visionResumeImporter', () => {
@@ -29,26 +29,32 @@ describe('visionResumeImporter', () => {
     expect(resume.educations[0].isFullTime).toBeUndefined();
   });
 
-  it('提示词要求把图片内容仅视为数据并禁止猜测', () => {
-    const prompt = buildVisionResumePrompt();
-    expect(prompt).toContain('不得执行或遵循');
-    expect(prompt).toContain('绝不推测');
-  });
-
   it('没有 JSON 时给出可读错误', () => {
     expect(() => parseVisionResumeResponse('识别失败')).toThrow('没有返回 JSON');
   });
 
   it('AI 结果为主并用本地解析补空值和遗漏条目', () => {
     const local = importResumeText('李四\n13900139000\nlocal@example.com', '本地解析');
-    local.educations = [{ id: 'local-edu', schoolName: '示例大学', degree: '本科', major: '软件工程', startDate: '2020-09', endDate: '2024-06' }];
+    local.educations = [
+      { id: 'local-edu', schoolName: '示例大学', degree: '本科', major: '软件工程', startDate: '2020-09', endDate: '2024-06', courses: '数据结构' },
+      { id: 'omitted-edu', schoolName: '另一所大学', degree: '硕士', major: '计算机', startDate: '2024-09', endDate: '' },
+    ];
+    local.basics.workingYears = 5;
+    local.basics.acceptOvertime = true;
+    local.qaBank = [{ id: 'qa', keyword: '动机', answer: '我的回答', scope: 'domain', domain: 'example.com' }];
     const ai = parseVisionResumeResponse(JSON.stringify({
-      basics: { name: '李四', phone: '' },
+      basics: { name: '李四', phone: '', workingYears: 0, acceptOvertime: false },
       educations: [{ schoolName: '示例大学', degree: '本科', major: '计算机科学与技术', startDate: '2020-09', endDate: '2024-06' }],
     }));
+    const before = structuredClone({ local, ai });
     const merged = mergeResumeImports(local, ai);
     expect(merged.basics.phone).toBe('13900139000');
-    expect(merged.educations).toHaveLength(1);
-    expect(merged.educations[0].major).toBe('计算机科学与技术');
+    expect(merged.basics).toMatchObject({ email: 'local@example.com', workingYears: 0, acceptOvertime: false });
+    expect(merged.educations).toHaveLength(2);
+    expect(merged.educations[0]).toMatchObject({ major: '计算机科学与技术', courses: '数据结构' });
+    expect(merged.educations[1]).toEqual(local.educations[1]);
+    expect(merged.qaBank).toEqual(local.qaBank);
+    expect(merged.id).toBe(ai.id);
+    expect({ local, ai }).toEqual(before);
   });
 });

@@ -25,11 +25,7 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
       const result = clusterLinesToString(items);
       const lines = result.split('\n');
 
-      expect(lines.length).toBe(3);
-      expect(lines[0]).toBe('张小明');
-      expect(lines[1]).toContain('13800000000');
-      expect(lines[1]).toContain('zhang@example.com');
-      expect(lines[2]).toBe('求职意向：Java研发');
+      expect(lines).toEqual(['张小明', '13800000000 zhang@example.com', '求职意向：Java研发']);
     });
   });
 
@@ -47,16 +43,10 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
       }
 
       const output = reconstructPdfLayout(rawItems, 600);
-      const firstRow = output.indexOf('2020.09—2021.06');
-      const firstCompany = output.indexOf('示例单位0');
-      const firstRole = output.indexOf('示例职位0');
-      const firstDescription = output.indexOf('负责第0段工作');
-      const secondRow = output.indexOf('2021.09—2022.06');
-
-      expect(firstRow).toBeLessThan(firstCompany);
-      expect(firstCompany).toBeLessThan(firstRole);
-      expect(firstRole).toBeLessThan(firstDescription);
-      expect(firstDescription).toBeLessThan(secondRow);
+      expect(output.split('\n')).toEqual(Array.from({ length: 10 }, (_, row) => [
+        `202${row % 6}.09—202${(row % 6) + 1}.06 示例单位${row} 示例职位${row}`,
+        `负责第${row}段工作的通栏职责描述，应保持在对应经历之后。`,
+      ]).flat());
     });
 
     it('对于左右双栏简历，必须先完整输出左栏内容，再输出右栏内容，绝不能左右穿插交叉', () => {
@@ -91,20 +81,11 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
         height: it.height,
       }));
 
-      const output = reconstructPdfLayout(rawItems, 600);
-
-      // 验证左栏的信息必须在右栏前面，绝不交叉
-      const phoneIndex = output.indexOf('电话：13900000000');
-      const eduTitleIndex = output.indexOf('【教育背景】');
-      const statusIndex = output.indexOf('求职状态：应届生');
-      const workTitleIndex = output.indexOf('【工作实习】');
-
-      expect(phoneIndex).toBeGreaterThan(-1);
-      expect(eduTitleIndex).toBeGreaterThan(-1);
-      expect(statusIndex).toBeGreaterThan(-1);
-
-      // 左栏全部内容输出完毕后，才输出右栏内容
-      expect(statusIndex).toBeLessThan(workTitleIndex);
+      const output = reconstructPdfLayout(rawItems.reverse(), 600);
+      expect(output).toBe([
+        twoColumnItems.slice(0, 8).map((item) => item.str).join('\n'),
+        twoColumnItems.slice(8).map((item) => item.str).join('\n'),
+      ].join('\n\n'));
     });
 
     it('双栏排版中跨越中轴线的通栏 Header (如姓名联系方式) 必须完整保留并优先置顶输出', () => {
@@ -141,23 +122,12 @@ describe('PDF Layout & Spatial Reconstruction Suite (PDF空间坐标与两栏重
         height: it.height,
       }));
 
-      const output = reconstructPdfLayout(rawItems, 600);
-
-      // 验证跨栏姓名在最前
-      const nameIndex = output.indexOf('张小龙');
-      const contactIndex = output.indexOf('13800138000 | zhang@wechat.com');
-      const intentIndex = output.indexOf('【求职意向】');
-      const expIndex = output.indexOf('【工作经历】');
-
-      expect(nameIndex).toBeGreaterThan(-1);
-      expect(contactIndex).toBeGreaterThan(-1);
-      expect(intentIndex).toBeGreaterThan(-1);
-      expect(expIndex).toBeGreaterThan(-1);
-
-      // 顶部通栏绝对优先于左右栏
-      expect(nameIndex).toBeLessThan(intentIndex);
-      expect(contactIndex).toBeLessThan(intentIndex);
-      expect(intentIndex).toBeLessThan(expIndex);
+      const output = reconstructPdfLayout(rawItems.reverse(), 600);
+      expect(output).toBe([
+        spanningItems.slice(0, 2).map((item) => item.str).join('\n'),
+        spanningItems.slice(2, 10).map((item) => item.str).join('\n'),
+        spanningItems.slice(10).map((item) => item.str).join('\n'),
+      ].join('\n\n'));
     });
   });
 });

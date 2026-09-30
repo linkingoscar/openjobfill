@@ -31,14 +31,14 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
       籍贯：山东青岛 | 现居地：北京海淀 | 求职意向：前端高级开发工程师
 
       【教育背景】
-      2020.09 - 2023.06 北京航空航天大学 计算机科学与技术 硕士 GPA: 3.85/4.0
       2016.09 - 2020.06 山东大学 软件工程 本科 GPA: 3.7/4.0
+      2020.09 - 2023.06 北京航空航天大学 计算机科学与技术 硕士 GPA: 3.85/4.0
 
       【工作经历】
-      2023.07 - 至今 字节跳动科技有限公司 前端研发工程师
-      负责抖音前端性能优化架构设计与业务落地。
       2022.06 - 2023.01 阿里巴巴集团 前端实习生
       参与淘天营销活动中台开发。
+      2023.07 - 至今 字节跳动科技有限公司 前端研发工程师
+      负责抖音前端性能优化架构设计与业务落地。
 
       【项目经历】
       2023.09 - 2024.03 跨端高性能富文本编辑器研发
@@ -86,7 +86,7 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
     expect(resume.projects[0].projectName).toBe('跨端高性能富文本编辑器研发');
 
     // 5. 技能与自我评价
-    expect(resume.skills.length).toBeGreaterThanOrEqual(5);
+    expect(resume.skills.map((skill) => skill.name)).toEqual(['Vue3', 'React', 'TypeScript', 'Node.js', 'WebAssembly', 'Webpack', 'Vite']);
     expect(resume.basics.selfEvaluation).toContain('扎实的计算机基础');
   });
 
@@ -132,7 +132,7 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
     const cpp = resume.skills.find(s => s.name === 'C++');
 
     expect(java?.level).toBe('精通');
-    expect(python?.level).toBeUndefined(); // 必须为 undefined/未声明，严禁盲猜默认“熟练”
+    expect(python).toMatchObject({ name: 'Python', level: undefined });
     expect(cpp?.level).toBe('熟练');
   });
 
@@ -144,7 +144,9 @@ describe('ResumeParser (简历语料库解析与时序智能推导引擎)', () =
       2024.03 - 2024.07 某独角兽 前端实习
     `;
     const resume = parseResumeFromText(text);
-    expect(resume.basics.jobStatus || '').toBe(''); // 绝不被推断为 '在职-考虑机会'
+    expect(resume.experiences).toHaveLength(2);
+    expect(resume.experiences.map((experience) => experience.jobType)).toEqual(['实习', '实习']);
+    expect(resume.basics.jobStatus).toBe(''); // 绝不被推断为 '在职-考虑机会'
   });
 
   it('证件类型 idCardType 纯净性：未提取到身份证号时必须保持空字符串，提取到时赋值为身份证', () => {

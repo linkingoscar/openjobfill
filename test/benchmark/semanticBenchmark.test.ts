@@ -60,73 +60,12 @@ const GOLD_STANDARD_BENCHMARK_DATASET: BenchmarkTestCase[] = [
   { label: 'Project Name / Title', expectedResumeKey: 'projects.0.projectName', category: 'project' },
 ];
 
-const BENCHMARK_SAMPLE_COUNT = GOLD_STANDARD_BENCHMARK_DATASET.length;
-
-describe(`Semantic Similarity Gold Benchmark (${BENCHMARK_SAMPLE_COUNT} 个脱敏标签回归集)`, () => {
-  it(`应在 ${BENCHMARK_SAMPLE_COUNT} 个回归样本上达到 >= 95% 的综合召回率与 F1-Score`, () => {
-    let truePositives = 0;
-    let falsePositives = 0;
-    let falseNegatives = 0;
-
-    const failedCases: { label: string; expected: string; actualBestKey: string; score: number }[] = [];
-
-    for (const testCase of GOLD_STANDARD_BENCHMARK_DATASET) {
-      // 遍历所有可能的简历字段字典，寻找置信度最高的目标 Key
-      let highestScore = 0;
-      let predictedKey = '';
-
-      for (const item of RESUME_DICTIONARY) {
-        const score = calculateSemanticSimilarity(testCase.label, item.resumeKey);
-        if (score > highestScore) {
-          highestScore = score;
-          predictedKey = item.resumeKey;
-        }
-      }
-
-      // 置信度阈值 >= 0.45 视为有效识别
-      if (highestScore >= 0.45) {
-        if (predictedKey === testCase.expectedResumeKey) {
-          truePositives++;
-        } else {
-          falsePositives++;
-          failedCases.push({
-            label: testCase.label,
-            expected: testCase.expectedResumeKey,
-            actualBestKey: predictedKey,
-            score: highestScore,
-          });
-        }
-      } else {
-        falseNegatives++;
-        failedCases.push({
-          label: testCase.label,
-          expected: testCase.expectedResumeKey,
-          actualBestKey: 'NONE (Below Threshold)',
-          score: highestScore,
-        });
-      }
+describe('Semantic label regression corpus (not a population accuracy estimate)', () => {
+  it('preserves the correct top-ranked key for every one of the 38 named labels', () => {
+    for (const sample of GOLD_STANDARD_BENCHMARK_DATASET) {
+      const ranked = RESUME_DICTIONARY.map(item => ({ key: item.resumeKey, score: calculateSemanticSimilarity(sample.label, item.resumeKey) })).sort((a, b) => b.score - a.score);
+      expect(ranked[0].key, sample.label).toBe(sample.expectedResumeKey);
+      expect(ranked[0].score, sample.label).toBeGreaterThanOrEqual(0.45);
     }
-
-    const precision = truePositives / (truePositives + falsePositives || 1);
-    const recall = truePositives / (truePositives + falseNegatives || 1);
-    const f1Score = (2 * precision * recall) / (precision + recall || 1);
-
-    console.log(`\n========================================`);
-    console.log(`📊 OpenJobFill 语义相似度基准评测报告`);
-    console.log(`----------------------------------------`);
-    console.log(`总测试样本数 : ${GOLD_STANDARD_BENCHMARK_DATASET.length}`);
-    console.log(`正确命中 (TP): ${truePositives}`);
-    console.log(`误判命中 (FP): ${falsePositives}`);
-    console.log(`漏识别数 (FN): ${falseNegatives}`);
-    console.log(`准确率 (Precision): ${(precision * 100).toFixed(2)}%`);
-    console.log(`召回率 (Recall)   : ${(recall * 100).toFixed(2)}%`);
-    console.log(`F1-Score         : ${(f1Score * 100).toFixed(2)}%`);
-    console.log(`========================================\n`);
-
-    if (failedCases.length > 0) {
-      console.warn('⚠️ 未完美命中的样本明细:', JSON.stringify(failedCases, null, 2));
-    }
-
-    expect(f1Score).toBeGreaterThanOrEqual(0.95);
   });
 });

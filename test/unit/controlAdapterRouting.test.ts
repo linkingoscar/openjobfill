@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMatchingControlAdapters, type ControlAdapterId } from '@/core/adapters/controlAdapters';
+import { CONTROL_ADAPTER_IDS, getMatchingControlAdapters, type ControlAdapterId } from '@/core/adapters/controlAdapters';
 import { pageAnalyzer } from '@/core/pipeline/pageAnalyzer';
 import type { DriverType, FieldDescriptor, FieldType } from '@/types/pipeline';
 
@@ -93,7 +93,7 @@ function createField(element: HTMLElement, driver: DriverType, label = '测试�
 
 describe('复杂控件 Adapter 路由契约', () => {
   it('每个登记 Adapter 都应能被自身结构和站点证据实际路由', () => {
-    expect(fixtures).toHaveLength(58);
+    expect(new Set(fixtures.map(fixture => fixture.id))).toEqual(new Set(CONTROL_ADAPTER_IDS));
     for (const fixture of fixtures) {
       document.body.innerHTML = fixture.markup;
       const element = document.querySelector<HTMLElement>('[data-fixture]');

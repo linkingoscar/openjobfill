@@ -9,6 +9,7 @@ module.exports = async function verifyControlBehavior(context, options, url, art
  });
  for(const mode of ['vue','cancel','rerender','invalid','radio','checkbox','calendar','debounced','cancel-main','editor']) {
   console.log(`control scenario: ${mode}`);
+  await options.evaluate(() => chrome.storage.local.remove('openjobfill_replay_snapshots'));
   const startedAt = await options.evaluate(() => Date.now());
   const page=await context.newPage(); await page.setViewportSize({width:1366,height:1000});
   await page.goto(`${url}/apply/text-date-behavior.html?case=${mode}`);
@@ -29,6 +30,7 @@ module.exports = async function verifyControlBehavior(context, options, url, art
    assert.ok(results.length>0,`${mode} must complete execution`);
    assert.ok(results.every(result=>result.filledCount===0 && result.verifiedCount===0),`${mode} must not claim a verified fill: ${JSON.stringify(results)}`);
   }
+  if(['vue','editor','calendar','radio'].includes(mode))assert.ok(results.some(result=>result.verifiedCount>0), `${mode} must report committed verification`);
   console.log(`control passed: ${mode}`);
   await page.close();
  }

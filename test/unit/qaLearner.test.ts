@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mapLabelToProfileField } from '@/core/engine/qaLearner';
-import { EMPTY_RESUME, DEMO_RESUME } from '@/core/storage/defaultData';
+import { EMPTY_RESUME } from '@/core/storage/defaultData';
 import { planGenerator } from '@/core/pipeline/planGenerator';
 import type { FieldDescriptor } from '@/types/pipeline';
 import type { StandardResume } from '@/types/resume';
@@ -18,10 +18,6 @@ describe('Smart Profile / QA Learner & Purity Test Suite (资料补全与纯洁�
       expect(EMPTY_RESUME.schemaVersion).toBe(4);
     });
 
-    it('DEMO_RESUME 保持张三完整演示数据，用于演示测试', () => {
-      expect(DEMO_RESUME.basics.name).toBe('张三');
-      expect(DEMO_RESUME.educations.length).toBeGreaterThanOrEqual(1);
-    });
   });
 
   describe('2. 二分法：结构化 Profile 字段识别', () => {

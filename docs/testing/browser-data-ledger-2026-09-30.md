@@ -1,0 +1,178 @@
+# 浏览器流程与内层参数清单
+
+33 个有独立目的的浏览器检查（20 个组件场景、12 个既有 smoke 检查组、1 个新增真实并发场景）。这些是脚本中的检查组，不伪装成 Vitest 测试数量。
+
+- browser-control-vue（rewrite）：实际 Vue v-model 的 name/email/phone/gender/date/checkbox/textarea 全部精确值与 verifiedCount。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-cancel（retain）：beforeinput 被取消，值空且 filled/verified 均0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-rerender（retain）：输入引起节点替换，新节点值空且成功数0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-invalid（retain）：blur 设置 aria-invalid 后成功数0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-radio（rewrite）：同名选项精确选男，verifiedCount>0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-checkbox（retain）：click preventDefault 后 checked=false，成功数0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-calendar（rewrite）：readonly calendar 的实际提交值及 verifiedCount。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-debounced（retain）：120ms 延迟拒绝后值空且成功数0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-cancel-main（retain）：实际 MAIN 注入尊重取消，值空且成功数0。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-control-editor（rewrite）：实际编辑器提交模型值和 verifiedCount。限制：真实 Chromium 生产扩展；本地合成页面。除 Vue 外非真实框架实现。
+- browser-select-portal-scope（retain）：只点击归属门户的同名候选；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-hidden-duplicate（retain）：跳过隐藏祖先下的重复项；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-disabled-duplicate（retain）：跳过禁用重复项；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-async-search（retain）：等待450ms异步搜索候选；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-late-popup-association（retain）：等待动态关联弹层；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-idref-list（retain）：支持多个 aria-controls ID；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-legacy-select2（retain）：Select2 v3 搜索高亮候选真实提交；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-native-disabled（retain）：跳过 disabled optgroup 和 option；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-cascader-async（retain）：等待650ms子级，提交完整路径；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-select-cascader-columns（retain）：同名父子项依列选择；页面 committed 状态/实际值与生产 verifiedCount 均检查。限制：真实 Chromium 生产扩展；本地事件驱动的简化组件，不是厂商网站验收。
+- browser-smoke-style-isolation（retain）：宿主页64px根字体下悬浮球48px与host16px。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-import-consent（retain）：未确认外发时入口禁用，确认后才启用；未选择图/模型不能发起视觉。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-persistent-edit（retain）：管理页修改姓名后 reload、重启浏览器仍保留。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-preview-and-main-world（retain）：预览确认后真实填写，记录指定 PhoenixInput MAIN outcome成功。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-responsive-step-ui（retain）：hash步骤检测通知和窄屏抽屉宽度。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-offline-replay（retain）：回放成功且网页输入值不变。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-clipboard-shadow-focus（retain）：扩展内搜索仍保留页面目标，不覆盖扩展搜索框。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-unknown-and-zero（retain）：未知与0区分，清空0后storage属性删除。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-skills-editor（retain）：新增熟练度保存reload再删除，检查storage。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-backup-recovery（retain）：导出/预览/取消不写入，确认覆盖及恢复前数据真实storage。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-job-feedback（retain）：无关键词页面显示无法评估。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-repeated-40-fields（retain）：四类20条40字段全部精确值、16次添加、预览无添加和成功40项。限制：本地生产扩展链路；不验证远端模型、外部招聘服务或任意浏览器版本。
+- browser-smoke-production-broker-concurrency（add）：两个实际扩展页面向真实 background 同时发送四个不同字段更新，验证四值均持久化且姓名保持。限制：一次 Chromium 并发调度回归，非所有并发时序的证明；CI结果见总报告
+
+## 未单独计入 Vitest 数量的 138 条表驱动输入
+
+- control-route-or-scan / MeituanMtdSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MeituanMtdMonthPicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AntSelectSearchInput：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / HotjobLinkedAntSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AntSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / HotjobMajorModal：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / GuoPinAntCascader：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AntCascader：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AntDateRangePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AntDatePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhaopinCampusElementSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / GreeyunElementSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ElementSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AUISelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ElementAutocomplete：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51ThreeLayerSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhaopinCampusRegionCascader：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ElementCascader：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhaopinCampusDateInput：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ElementDatePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / PhoenixInput：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / HcSuperSelector：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / PhoenixSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AtsxSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / AtsxDatePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / UdSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / TpLinkSelectBox：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / TpLinkEthnicPicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / TpLinkDatePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / SdInput：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrRegionDropdown：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrSearchDropdown：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrDateDropdown：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrSimpleDropdown：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / SdDropdown：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / LayUISelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / IViewSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / IViewCascader：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhipinSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhipinDatePicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ZhipinDialog：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / LagouCalendarPicker：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / LagouEditor：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ShixisengCity：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / CheckboxInput：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / RadioGroup：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / DateRangeCalendar：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / ThundersoftFeishuMonthRange：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrSingleMonth：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / MokahrMonthRange：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51LinkedSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51PhoneField：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51ComboboxSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / NativeSelect：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51SetdayDate：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Job51Input：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / BankCommPopPanel：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / My97Date：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / TP-Link 民族：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 直聘 Dialog：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 拉勾日历：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 飞书年月区间：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Moka 单年月：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / Moka 年月区间：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 51Job 联动：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 51Job Setday：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- control-route-or-scan / 交通银行弹层：该结构匹配指定 adapter 或扫描得到指定 driver。限制：路由/扫描契约，未执行填写
+- site-profile / site-join-qq：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-careers-tencent：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-talent-alibaba：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-campushr-alibaba：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-aidc-jobs-alibaba：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-careers-aliyun：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-jobs-bytedance：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-campus-jd：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-campus-163：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-zhaopin-meituan：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-campus-didi：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-jobs-bilibili：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-xiaomi-mioffice：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-career-papegames：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-campus-kuaishou：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-talent-baidu：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-job-xiaohongshu：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-career-huawei：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-jobs-mihoyo：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-career-sicarrier：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-picc-zhiye：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-careers-pdd：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-careers-midea：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-xiaoyuan-zhaopin：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-job-fandow：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-xyz-51job：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- site-profile / site-c-iguopin：准确profile/控件type/semanticKey/FILL，排除login decoy。限制：结构fixture，无实时站点填写
+- semantic-corpus / 真实姓名 *：最高分key精确为basics.name且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 应聘者中文姓名：最高分key精确为basics.name且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Applicant Name：最高分key精确为basics.name且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Full Name：最高分key精确为basics.name且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 手机号码 (用于接收面试通知)：最高分key精确为basics.phone且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 常用联系电话：最高分key精确为basics.phone且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Mobile Phone：最高分key精确为basics.phone且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 常用电子邮箱 (请勿填写QQ邮箱)：最高分key精确为basics.email且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / E-mail Address：最高分key精确为basics.email且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 居民身份证号码 (18位)：最高分key精确为basics.idCardNumber且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 证件号码 (大陆居民身份证)：最高分key精确为basics.idCardNumber且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 出生年月日 (YYYY-MM-DD)：最高分key精确为basics.birthDate且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 生理性别：最高分key精确为basics.gender且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 政治面貌 (中共党员/共青团员/群众)：最高分key精确为basics.politicalStatus且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 民族类别：最高分key精确为basics.ethnicity且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 生源地所在省市：最高分key精确为basics.nativePlace.city且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 户籍所在地 (非现住址)：最高分key精确为basics.hukouLocation.city且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 目前常住城市：最高分key精确为basics.currentLocation.city且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 税前期望月薪 (元/月)：最高分key精确为basics.expectedSalaryMin且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 意向应聘岗位：最高分key精确为basics.expectedRole且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 自我评价与核心优势自述：最高分key精确为basics.selfEvaluation且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 最高学历就读大学全称：最高分key精确为educations.0.schoolName且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 本科就读学校 (全称)：最高分key精确为educations.0.schoolName且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / University / College：最高分key精确为educations.0.schoolName且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 所学专业名称：最高分key精确为educations.0.major且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 主修学科专业：最高分key精确为educations.0.major且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Academic Major：最高分key精确为educations.0.major且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 学历层次 (本科/硕士/博士)：最高分key精确为educations.0.degree且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 最高学历学位：最高分key精确为educations.0.degree且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 平均学分绩点 (GPA/成绩排名)：最高分key精确为educations.0.gpa且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Grade Point Average (GPA)：最高分key精确为educations.0.gpa且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 前雇主/实习单位名称：最高分key精确为experiences.0.company且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 最近就职企业全称：最高分key精确为experiences.0.company且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Company / Employer Name：最高分key精确为experiences.0.company且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 担任职位/岗位名称：最高分key精确为experiences.0.title且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Job Title / Position：最高分key精确为experiences.0.title且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / 主要核心项目名称：最高分key精确为projects.0.projectName且score>=0.45。限制：开发回归语料，无总体准确率推断
+- semantic-corpus / Project Name / Title：最高分key精确为projects.0.projectName且score>=0.45。限制：开发回归语料，无总体准确率推断
+- negative-context / 紧急联系人姓名 (严禁填入本人姓名)：生产planner不生成basics.name的FILL。限制：六个指定结构，不代表总体误填率
+- negative-context / 紧急联系人联系电话 (严禁填入本人手机号)：生产planner不生成basics.phone的FILL。限制：六个指定结构，不代表总体误填率
+- negative-context / 推荐人 / 证明人姓名 (严禁填入本人姓名)：生产planner不生成basics.name的FILL。限制：六个指定结构，不代表总体误填率
+- negative-context / 证明人电子邮箱 (严禁填入本人邮箱)：生产planner不生成basics.email的FILL。限制：六个指定结构，不代表总体误填率
+- negative-context / 父亲 / 母亲姓名 (严禁填入本人姓名)：生产planner不生成basics.name的FILL。限制：六个指定结构，不代表总体误填率
+- negative-context / 家属联系方式 (严禁填入本人手机号)：生产planner不生成basics.phone的FILL。限制：六个指定结构，不代表总体误填率

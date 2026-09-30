@@ -22,7 +22,18 @@ function redactText(value: unknown): string {
 }
 
 function sanitizeDiagnosticMessage(value: unknown): string {
-  return redactText(value)
+  const raw = String(value ?? '');
+  // A value named in a verification error may also occur in its surrounding text.
+  // Remove those exact repeats before discarding the labeled value itself.
+  const labeledValues = [...raw.matchAll(/(?:期望值|目标值|实际值|实际渲染)\s*[:：]\s*([^，,；;。\n)）]+)/gi)]
+    .map((match) => match[1].trim().replace(/^["“']|["”']$/g, ''))
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  let sanitized = raw;
+  for (const labeledValue of labeledValues) {
+    sanitized = sanitized.split(labeledValue).join('[内容已隐藏]');
+  }
+  return redactText(sanitized)
     .replace(/读回验证失败\s*[（(][\s\S]*?[）)]/gi, '读回验证失败')
     .replace(/写入验证未通过\s*[（(][\s\S]*?[）)]/gi, '写入验证未通过')
     .replace(/(期望值|目标值|实际值|实际渲染)\s*[:：]\s*[^，,；;。]*/gi, '$1已隐藏')

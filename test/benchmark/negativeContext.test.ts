@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { matchElementToResumeField } from '@/core/matcher/heuristic';
+import { pageAnalyzer } from '@/core/pipeline/pageAnalyzer';
+import { planGenerator } from '@/core/pipeline/planGenerator';
+import { DEMO_RESUME } from '@/core/storage/defaultData';
 
 describe('Negative Context Anti-Collision (负样本上下文消歧对抗评测)', () => {
   beforeEach(() => {
@@ -69,32 +71,13 @@ describe('Negative Context Anti-Collision (负样本上下文消歧对抗评测)
     },
   ];
 
-  it('在所有排斥上下文与负样本场景中，误填率 (False Positive Rate) 应严格为 0%', () => {
-    let totalNegativeTests = ADVERSARIAL_NEGATIVE_CASES.length;
-    let falsePositiveCount = 0;
-
+  it('current planner blocks every prohibited candidate mapping in the six negative fixtures', () => {
     for (const testCase of ADVERSARIAL_NEGATIVE_CASES) {
-      const container = document.createElement('div');
-      container.innerHTML = testCase.html;
-      document.body.appendChild(container);
-
-      const input = container.querySelector('input') as HTMLInputElement;
-      expect(input).not.toBeNull();
-
-      const match = matchElementToResumeField(input);
-
-      if (match && match.resumeKey === testCase.prohibitedKey) {
-        falsePositiveCount++;
-        console.error(`🚨 [对抗测试失败] ${testCase.desc} 被错误识别为 ${match.resumeKey}`);
-      }
-
-      document.body.removeChild(container);
+      document.body.innerHTML = testCase.html;
+      const fields = pageAnalyzer.analyzePage(document);
+      expect(fields, testCase.desc).toHaveLength(1);
+      const plan = planGenerator.generatePlan(fields, DEMO_RESUME);
+      expect(plan.items.some(item => item.action === 'FILL' && item.semanticKey === testCase.prohibitedKey), testCase.desc).toBe(false);
     }
-
-    const falsePositiveRate = falsePositiveCount / totalNegativeTests;
-    console.log(`\n🛡️ 负样本上下文拦截测试结果: 误填率 ${(falsePositiveRate * 100).toFixed(2)}% (预期 0%)`);
-
-    expect(falsePositiveCount).toBe(0);
-    expect(falsePositiveRate).toBe(0);
   });
 });

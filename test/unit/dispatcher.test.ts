@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   setNativeValue,
   setNativeRadioChecked,
@@ -29,9 +29,7 @@ describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => 
 
     expect(success).toBe(true);
     expect(input.value).toBe('张三');
-    expect(inputEvents).toContain('input');
-    expect(inputEvents).toContain('change');
-    expect(inputEvents).toContain('blur');
+    expect(inputEvents).toEqual(['focus', 'beforeinput', 'input', 'change', 'blur']);
   });
 
   it('应该能穿透设置 HTMLTextAreaElement 的值', () => {
@@ -44,7 +42,7 @@ describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => 
     expect(textarea.value).toBe('这是详细的项目经验描述。');
   });
 
-  it('针对 React 的 _valueTracker 应该能正确重置以触发 React 受控状态更新', () => {
+  it('valueTracker shim receives reset (unit compatibility contract, not React integration)', () => {
     const input = document.createElement('input');
     let trackerValue = 'initial';
 
@@ -114,6 +112,7 @@ describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => 
   });
 
   it('markElementAsAutofilled 与 isAutofillTouched 应具备跨 frame DOM 属性标记与短时生命周期', () => {
+    vi.useFakeTimers();
     const input = document.createElement('input');
     document.body.appendChild(input);
 
@@ -124,5 +123,9 @@ describe('Dispatcher (受控组件穿透与原生原型链劫持引擎)', () => 
     // 刚被插件自动填充时，必须被标记为 touched，且带有 DOM attribute 跨 realm 标识
     expect(isAutofillTouched(input)).toBe(true);
     expect(input.getAttribute('data-openjobfill-autofill')).toBe('1');
+    vi.advanceTimersByTime(1001);
+    expect(isAutofillTouched(input)).toBe(false);
+    expect(input.hasAttribute('data-openjobfill-autofill')).toBe(false);
+    vi.useRealTimers();
   });
 });

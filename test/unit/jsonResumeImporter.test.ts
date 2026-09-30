@@ -11,8 +11,14 @@ describe('JSON Resume importer', () => {
         location: { city: 'Shanghai', region: 'Shanghai', countryCode: 'CN' },
         profiles: [{ network: 'GitHub', url: 'https://github.com/alex' }],
       },
-      education: [{ institution: 'Example University', studyType: 'Master', area: 'Computer Science', startDate: '2021-09-01', endDate: '2024-06-30' }],
-      work: [{ name: 'Example Inc.', position: 'Developer', startDate: '2024-07', highlights: ['Built a platform'] }],
+      education: [
+        { institution: 'Example University', studyType: 'Master', area: 'Computer Science', startDate: '2021-09-01', endDate: '2024-06-30' },
+        { institution: 'Other University', studyType: 'Bachelor', area: 'Software Engineering', startDate: '2017-09', endDate: '2021-06' },
+      ],
+      work: [
+        { name: 'Example Inc.', position: 'Developer', startDate: '2024-07', highlights: ['Built a platform'] },
+        { name: 'Earlier Inc.', position: 'Intern', startDate: '2023-07', endDate: '2023-09', summary: 'Built tests' },
+      ],
       projects: [{ name: 'Open Project', roles: ['Maintainer'], keywords: ['Vue', 'TypeScript'] }],
       skills: [{ name: 'Frontend', level: 'Advanced', keywords: ['Vue', 'TypeScript'] }],
     }, 'fallback');
@@ -20,8 +26,15 @@ describe('JSON Resume importer', () => {
     expect(resume.basics.name).toBe('Alex Chen');
     expect(resume.basics.expectedRole).toBe('Frontend Engineer');
     expect(resume.basics.githubUrl).toBe('https://github.com/alex');
+    expect(resume.basics.currentLocation).toMatchObject({ province: 'Shanghai', city: 'Shanghai' });
+    expect(resume.basics.country).toBe('CN');
+    expect(resume.educations).toHaveLength(2);
     expect(resume.educations[0]).toMatchObject({ degree: '硕士', startDate: '2021-09', endDate: '2024-06' });
     expect(resume.experiences[0]).toMatchObject({ company: 'Example Inc.', title: 'Developer', endDate: '至今' });
+    expect(resume.educations[1]).toMatchObject({ schoolName: 'Other University', degree: '本科', startDate: '2017-09', endDate: '2021-06' });
+    expect(resume.experiences).toHaveLength(2);
+    expect(resume.experiences[0]).toMatchObject({ description: 'Built a platform', isCurrent: true });
+    expect(resume.experiences[1]).toMatchObject({ company: 'Earlier Inc.', title: 'Intern', description: 'Built tests', endDate: '2023-09', isCurrent: false });
     expect(resume.projects[0].techStack).toBe('Vue、TypeScript');
     expect(resume.skills.map((item) => item.name)).toEqual(['Vue', 'TypeScript']);
   });

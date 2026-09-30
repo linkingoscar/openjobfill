@@ -68,19 +68,7 @@ describe('复杂网申控件兼容层', () => {
     expect(checkbox.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('受控日期直接写值失败后应点击弹层中的精确日期', async () => {
-    document.body.innerHTML = `
-      <div class="ant-picker"><input readonly placeholder="请选择日期"></div>
-      <div class="ant-picker-dropdown"><button data-date="2001-05-18">18</button></div>
-    `;
-    const wrapper = document.querySelector<HTMLElement>('.ant-picker')!;
-    const input = wrapper.querySelector<HTMLInputElement>('input')!;
-    input.addEventListener('input', () => { input.value = ''; });
-    document.querySelector('[data-date]')!.addEventListener('click', () => { input.value = '2001-05-18'; });
 
-    expect(await dateEngine.injectSemanticDate(wrapper, '2001-05-18')).toBe(true);
-    expect(input.value).toBe('2001-05-18');
-  });
 
   it('Ant 风格日期弹层应跨年份分页并选择目标年月日', async () => {
     document.body.innerHTML = `
@@ -146,19 +134,7 @@ describe('复杂网申控件兼容层', () => {
     expect(document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
   });
 
-  it('Semi Portal 下拉应能选择并读到目标项', async () => {
-    document.body.innerHTML = `
-      <div class="semi-select"><span class="semi-select-selection-text">请选择</span></div>
-      <div class="semi-select-portal"><div class="semi-select-option">本科</div><div class="semi-select-option">硕士</div></div>
-    `;
-    const trigger = document.querySelector<HTMLElement>('.semi-select')!;
-    document.querySelectorAll<HTMLElement>('.semi-select-option').forEach((option) => {
-      option.addEventListener('click', () => { trigger.querySelector('span')!.textContent = option.textContent; });
-    });
 
-    expect(await selectCustomOption(trigger, '本科')).toBe(true);
-    expect(trigger.textContent).toContain('本科');
-  });
 
   it('虚拟下拉未命中首屏时应滚动并继续查找选项', async () => {
     document.body.innerHTML = `

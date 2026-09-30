@@ -6,6 +6,11 @@ import { trackerStorage } from '@/core/storage/trackerStorage';
 import { getCustomDomains, saveCustomDomains } from '@/core/whitelist';
 import { EMPTY_RESUME } from '@/core/storage/defaultData';
 
+const snapshotLocalStorage = () => Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+  const key = localStorage.key(index)!;
+  return [key, localStorage.getItem(key)];
+}));
+
 describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => {
   beforeEach(async () => {
     localStorage.clear();
@@ -32,10 +37,11 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
     const incoming = JSON.parse(original);
     incoming.data.resumes = [{ ...EMPTY_RESUME, id: 'replacement' }];
     incoming.data.customDomains = ['replacement.example.com'];
+    const beforePreview = snapshotLocalStorage();
     const summary = backupManager.previewBackup(JSON.stringify(incoming));
     expect(summary).toMatchObject({ resumes: 1, domains: 1, isFullBackup: true });
     expect(summary.exportedAt).toBe(incoming.exportedAt);
-    expect(await getCustomDomains()).toEqual(['original.example.com']);
+    expect(snapshotLocalStorage()).toEqual(beforePreview);
     await backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite');
     expect((await resumeStorage.getAllResumes()).map((r) => r.id)).toEqual(['replacement']);
     expect(await backupManager.getRecoveryPointSummary()).toMatchObject({ domains: 1 });
@@ -95,11 +101,14 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
 
     expect(backup.app).toBe('OpenJobFill');
     expect(backup.version).toBe(1);
-    expect(backup.exportedAt).toBeDefined();
-    expect(backup.data.resumes.length).toBeGreaterThanOrEqual(1);
-    expect(backup.data.customRules.length).toBeGreaterThanOrEqual(1);
-    expect(backup.data.customDomains).toContain('job.custom-enterprise.com');
-    expect(backup.data.jobApplications.length).toBeGreaterThanOrEqual(1);
+    expect(Number.isFinite(Date.parse(backup.exportedAt))).toBe(true);
+    expect(backup.data.resumes).toEqual([
+      expect.objectContaining({ id: 'resume-default' }),
+      expect.objectContaining({ id: 'test-resume-1', title: '测试研发简历', basics: expect.objectContaining({ name: '王小华', email: 'wang@example.com' }) }),
+    ]);
+    expect(backup.data.customRules).toContainEqual(expect.objectContaining({ id: 'rule-1', domainPattern: 'custom.job.com', fields: [expect.objectContaining({ selector: '#user-phone', resumeKey: 'basics.phone' })] }));
+    expect(backup.data.customDomains).toEqual(['job.custom-enterprise.com']);
+    expect(backup.data.jobApplications).toEqual([expect.objectContaining({ id: 'app-1', companyName: '某知名外企', jobTitle: '全栈架构师', jobUrl: 'https://example.com/' })]);
   });
 
   it('importFullBackup 能够完整还原各模块数据并兼容旧版纯数组格式', async () => {
@@ -163,6 +172,15 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
 
     const apps = await trackerStorage.getAllApplications();
     expect(apps.some(a => a.id === 'restored-app-1')).toBe(true);
+
+    // Legacy arrays replace only resumes, even in overwrite mode.
+    const legacy = [{ ...EMPTY_RESUME, id: 'legacy-array', title: '旧版数组简历' }];
+    expect(await backupManager.importFullBackup(JSON.stringify(legacy), 'overwrite'))
+      .toEqual({ resumes: 1, rules: 0, domains: 0, applications: 0 });
+    expect((await resumeStorage.getAllResumes()).map((resume) => resume.id)).toEqual(['legacy-array']);
+    expect(await ruleStorage.getCustomRules()).toEqual(rules);
+    expect(await getCustomDomains()).toEqual(domains);
+    expect(await trackerStorage.getAllApplications()).toEqual(apps);
   });
 
   it('importFullBackup 支持 mode: overwrite 完全覆盖恢复当前数据', async () => {
@@ -177,6 +195,7 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
       },
     });
     await saveCustomDomains(['old-domain.com']);
+    await trackerStorage.saveApplication({ id: 'old-app', companyName: '旧公司', jobTitle: '旧岗位', appliedDate: '2026-08-28', status: 'applied', jobUrl: '' });
     await ruleStorage.saveCustomRule({
       id: 'old-rule-1',
       domainPattern: 'old.com',
@@ -228,9 +247,10 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
     const rules = await ruleStorage.getCustomRules();
     expect(rules.some(r => r.id === 'new-rule-1')).toBe(true);
     expect(rules.some(r => r.id === 'old-rule-1')).toBe(false); // 旧规则被清空
+    expect(await trackerStorage.getAllApplications()).toEqual([]);
   });
 
-  it('遇到任一模块格式错误时应在写入前拒绝，避免部分导入', async () => {
+  it('规则模块格式错误时应在写入前拒绝，避免部分导入', async () => {
     await resumeStorage.saveResume({
       ...EMPTY_RESUME,
       id: 'safe-resume',
@@ -284,6 +304,11 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
       basics: { ...EMPTY_RESUME.basics, name: '恢复前用户' },
     });
     await saveCustomDomains(['before.example.com']);
+    await resumeStorage.setActiveResumeId('before-resume');
+    await ruleStorage.saveCustomRule({ id: 'before-rule', domainPattern: 'before.example.com', selector: '#email', resumeKey: 'basics.email' });
+    await trackerStorage.saveApplication({ id: 'before-app', companyName: '原公司', jobTitle: '原岗位', appliedDate: '2026-08-28', status: 'applied', jobUrl: '' });
+    const beforeRules = await ruleStorage.getCustomRules();
+    const beforeApplications = await trackerStorage.getAllApplications();
 
     const incoming = {
       app: 'OpenJobFill',
@@ -309,14 +334,17 @@ describe('BackupManager Suite (全量本地数据备份与恢复测试)', () => 
       })
       .mockImplementation(originalSaveApplications);
 
-    await expect(backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite'))
-      .rejects.toThrow('已回滚原数据');
+    try {
+      await expect(backupManager.importFullBackup(JSON.stringify(incoming), 'overwrite'))
+        .rejects.toThrow('已回滚原数据');
 
-    const resumes = await resumeStorage.getAllResumes();
-    expect(resumes.some((resume) => resume.id === 'before-resume')).toBe(true);
-    expect(resumes.some((resume) => resume.id === 'after-resume')).toBe(false);
-    expect(await getCustomDomains()).toEqual(['before.example.com']);
-    expect(saveApplicationsSpy).toHaveBeenCalledTimes(2);
-    saveApplicationsSpy.mockRestore();
+      const resumes = await resumeStorage.getAllResumes();
+      expect(resumes.some((resume) => resume.id === 'before-resume')).toBe(true);
+      expect(resumes.some((resume) => resume.id === 'after-resume')).toBe(false);
+      expect((await resumeStorage.getActiveResume()).id).toBe('before-resume');
+      expect(await getCustomDomains()).toEqual(['before.example.com']);
+      expect(await ruleStorage.getCustomRules()).toEqual(beforeRules);
+      expect(await trackerStorage.getAllApplications()).toEqual(beforeApplications);
+    } finally { saveApplicationsSpy.mockRestore(); }
   });
 });

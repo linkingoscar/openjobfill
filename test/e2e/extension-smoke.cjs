@@ -151,6 +151,27 @@ async function main() {
       { timeout: 10000 },
     );
     assert.equal(await options.locator('#basics-name').inputValue(), 'Smoke Persistence Candidate');
+    // Exercise the real service-worker broker from two independent extension pages.
+    // No queue is implemented by the test: concurrent messages reach production handlers.
+    const secondOptions = await openOptions(context, extensionId);
+    const patch = (target, updates) => target.evaluate(async updates => {
+      const response = await chrome.runtime.sendMessage({ type: 'RESUME_STORAGE_UPDATE_FIELDS', payload: { id: 'resume-default', updates } });
+      if (!response?.success) throw new Error(response?.error || 'Patch failed');
+    }, updates);
+    await Promise.all([
+      patch(options, { 'basics.email': 'concurrency@example.com' }),
+      patch(secondOptions, { 'basics.expectedRole': 'Synthetic Engineer' }),
+      patch(options, { 'basics.firstName': 'Synthetic' }),
+      patch(secondOptions, { 'basics.lastName': 'Candidate' }),
+    ]);
+    const concurrentResume = await options.evaluate(async () => (await chrome.storage.local.get('openjobfill_resume_resume-default'))['openjobfill_resume_resume-default']);
+    assert.equal(concurrentResume.basics.name, 'Smoke Persistence Candidate');
+    assert.equal(concurrentResume.basics.email, 'concurrency@example.com');
+    assert.equal(concurrentResume.basics.expectedRole, 'Synthetic Engineer');
+    assert.equal(concurrentResume.basics.firstName, 'Synthetic');
+    assert.equal(concurrentResume.basics.lastName, 'Candidate');
+    await secondOptions.close();
+    console.log('broker concurrency passed: two real pages preserved four simultaneous patches');
     await options.close();
     // chrome.storage.local 的回调已完成，但 Chromium 将扩展存储刷到持久化
     // profile 文件存在短暂异步窗口；给磁盘落盘留出时间再模拟浏览器退出。
